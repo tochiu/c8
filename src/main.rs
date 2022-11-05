@@ -4,11 +4,11 @@ mod disp;
 mod input;
 mod interp;
 
-use device_query::DeviceEvents;
 use disp::{Display, Terminal};
 use input::{Key, Keyboard};
 use interp::{Interpreter, InterpreterInput, InterpreterKind, InterpreterRequest};
 
+use device_query::DeviceEvents;
 use crossterm::event::{
     poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers,
 };
@@ -117,7 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let program_name = args.first().ok_or("expected program name")?;
     let program_path = format!("roms/{}.ch8", program_name);
 
-    // virtual machine struct shared across threads
+    // thread-safe virtual machine
     let vm = Arc::new(Mutex::new(CHIP8VM {
         active: true,
         interp: Interpreter::from_program(program_path, program_kind)?,
@@ -157,16 +157,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         return Ok(());
                     }
 
-                    // get time elapsed since the timers were last updated
-                    // and use that to update them
-
+                    // update timer using time elapsed since last update
                     let elapsed = timer_instant.elapsed().as_secs_f64();
                     timer_instant = Instant::now();
 
                     // TODO: maybe support sound (right now the sound timer does nothing external)
 
-                    // update timers and clamp between the bounds of a byte 
-                    // because that is the expected range of the interpreter
+                    // update timers and clamp between the bounds of a byte because that is the data type
                     vm.sound_timer = (vm.sound_timer - elapsed * TIMER_FREQUENCY as f64).clamp(u8::MIN as f64, u8::MAX as f64);
                     vm.delay_timer = (vm.delay_timer - elapsed * TIMER_FREQUENCY as f64).clamp(u8::MIN as f64, u8::MAX as f64);
 
@@ -223,7 +220,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if vm.active {
                         if let Some(buf) = vm.display.extract_new_frame() {
                             // receiving a display buffer means we must draw
-                            // drawing is expensive and should be ran concurrently with the rest of the vm so lets drop here
+                            // drawing is expensive and should run in parallel with the rest of the vm so lets drop here
                             drop(vm);
                             terminal.draw(&buf)?;
                         }
@@ -241,7 +238,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        // terminal event handler thread (updating keyboard state is handled before the interp step)
+        // terminal event handler thread
 
         let vm = Arc::clone(&vm);
 
@@ -249,7 +246,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let device_state = device_query::DeviceState::new();
 
-            let _guard0 = { // listen for key down events
+            let _guard_key_down = { // listen for key down events
                 let vm = Arc::clone(&vm);
                 device_state.on_key_down(move |key| {
                     if let Ok(key) = Key::try_from(*key) {
@@ -258,7 +255,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
             };
 
-            let _guard1 = { // listen for key up events
+            let _guard_key_up = { // listen for key up events
                 let vm = Arc::clone(&vm);
                 device_state.on_key_up(move |key| {
                     if let Ok(key) = Key::try_from(*key) {
@@ -279,7 +276,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     && (key_event.code == CrosstermKey::Char('c')
                                         || key_event.code == CrosstermKey::Char('C'))
                             {
-                                // game is over
+                                // exit virtual machine
                                 vm.lock().unwrap().exit();
                                 return Ok(());
                             } else {
@@ -295,7 +292,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
     }
 
-    // wait for all threads to complete
+    // wait for all threads
     for handler in handles {
         handler.join().unwrap()?;
     }
@@ -308,16 +305,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
  * and compensate for it in the next sleep call so the starting time of logic 
  * running between each sleep will be spaced apart by the desired interval
  * 
- * Because sleeping will not sleep for precisely the amount requested and logic between each sleep will elapse for a nonzero duration
- * we cut the duration overslept and the execution time of the logic from the original sleep duration to try and synchronize
+ * Because sleep fundamentally cannot execute for exactly the amount requested and logic between each sleep will elapse for a nonzero duration
+ * we cut the duration overslept and the execution time of the logic from the original sleep duration to try and resynchronize
  * 
  * Deviations from the target interval that require more than one interval to compensate for will not be compensated for but instead forgotten
  * For example if we execute for 0.8 seconds but are supposed to execute within 0.2 second intervals at a time then 
- * we will not try to compensate for the extra 0.6 seconds across multiple intervals and instead refuse sleep for the next interval
- * and forgetting the remaining time to cut out
+ * we will not try to compensate for the extra 0.6 seconds across multiple intervals and instead refuse to sleep in the next interval (0.2 - 0.6 <= 0)
+ * and forget the remaining time to cut out
  * 
- * This behavior exists because recovering time deviations bigger than the target interval will lead to subsequent intervals being much 
+ * This behavior exists because recovering from time deviations bigger than the target interval will lead to subsequent intervals being much 
  * smaller than our target interval when what we are optimizing for is minimal absolute deviation
+ * 
+ * I don't really think this construct is necessary but I thought I might need it 
+ * Anyway having this gives me peace of mind and also I already wrote it and could probably use it somewhere else later
  */
 pub struct Interval {
     // interval name
@@ -327,7 +327,7 @@ pub struct Interval {
     interval: Duration, 
 
     // max_quantum is the maximum duration we can go without sleeping before being forced to sleep
-    // compensation can lead to no sleeping if oversleeping and/or executing logic between sleeps are longer than the desired interval
+    // compensation can lead to no sleeping if oversleeping and/or executing logic between sleeps is longer than the desired interval
     // allowing this to occur unchecked can lead to deadlock since other threads could potentially be starved of execution time
     max_quantum: Duration,
 

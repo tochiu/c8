@@ -1,4 +1,5 @@
 use crate::disp::{DisplayBuffer, DISPLAY_HEIGHT, DISPLAY_WIDTH};
+
 use std::{fmt::Display, fs::read, io, path::Path};
 
 const PROGRAM_STARTING_ADDRESS: u16 = 0x200;
@@ -28,6 +29,7 @@ const FONT: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
 
+// Takes a 16 bit number (instruction size) and decomposes it into its parts
 #[derive(Clone, Copy, Debug)]
 struct InstructionParameters {
     bits: u16,
@@ -100,6 +102,8 @@ enum Instruction {
 }
 
 impl Instruction {
+
+    // InstructionParameters -> Instruction otherwise panic!
     fn decode(params: InstructionParameters) -> Self {
         let (op, x, y, n, nn, nnn) = (
             params.op, params.x, params.y, params.n, params.nn, params.nnn,
@@ -169,15 +173,17 @@ pub enum InterpreterKind {
     // SUPERCHIP,
 }
 
+// State the interpreter pulls from IO is stored here
 #[derive(Debug, Default)]
 pub struct InterpreterInput {
     pub delay_timer: u8,
 
-    pub pressed_keys: u16,
+    pub down_keys: u16,
     pub just_pressed_key: Option<u8>,
     pub just_released_key: Option<u8>,
 }
 
+// Response body so IO know how to proceed
 #[derive(Debug)]
 pub struct InterpreterOutput {
     pub display: DisplayBuffer,
@@ -186,6 +192,7 @@ pub struct InterpreterOutput {
     pub request: Option<InterpreterRequest>,
 }
 
+// Interpreter IO Request
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterpreterRequest {
     Display,
@@ -226,6 +233,7 @@ impl Default for Interpreter {
 }
 
 impl Interpreter {
+    // create interpreter from program path and program kind
     pub fn from_program<P: AsRef<Path>>(path: P, kind: InterpreterKind) -> io::Result<Interpreter> {
         let mut interp = Interpreter {
             kind,
@@ -235,6 +243,7 @@ impl Interpreter {
         Ok(interp)
     }
 
+    // load program into interpreter (this was not written considering a program could already have been loaded in mind)
     pub fn load_program<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
         let program = read(path)?;
         self.memory[PROGRAM_STARTING_ADDRESS as usize
@@ -244,6 +253,7 @@ impl Interpreter {
         Ok(())
     }
 
+    // interpret the next instruction
     pub fn step(&mut self, input: &InterpreterInput) -> &InterpreterOutput {
         // clear output request
         self.output.request = None;
@@ -313,13 +323,13 @@ impl Interpreter {
             }
 
             Instruction::SkipIfKeyDown(vx) => {
-                if input.pressed_keys >> self.registers[vx as usize] & 1 == 1 {
+                if input.down_keys >> self.registers[vx as usize] & 1 == 1 {
                     self.pc += 2
                 }
             }
 
             Instruction::SkipIfKeyNotDown(vx) => {
-                if input.pressed_keys >> self.registers[vx as usize] & 1 == 0 {
+                if input.down_keys >> self.registers[vx as usize] & 1 == 0 {
                     self.pc += 2
                 }
             }
@@ -364,10 +374,9 @@ impl Interpreter {
                 };
 
                 self.registers[vx as usize] = value;
-                self.registers[VFLAG] = !overflowed as u8;
+                self.registers[VFLAG] = !overflowed as u8; // vf is 0 on overflow instead of 1 like add
             }
 
-            // ambiguous!
             Instruction::Shift(vx, vy, right) => {
                 let bits = match self.kind {
                     InterpreterKind::COSMACVIP => self.registers[vy as usize],
@@ -453,7 +462,7 @@ impl Interpreter {
                             // y-coord of row index in display buffer
                             (pos_y + row_i) as usize, 
 
-                            // 8-bit data of row expanded to 64 bits by padding (64 - 8) zeros to the right and then shifting everything to the right by pos_x amount
+                            // 8-bit row data expanded to 64 bits by padding (64 - 8) zeros to the right and then shifting everything to the right by pos_x amount
                             (self.memory[self.index as usize + row_i as usize] as u64)
                                 << (u64::BITS - u8::BITS)
                                 >> pos_x,
@@ -462,7 +471,7 @@ impl Interpreter {
                 {
                     let display_row = self.output.display[y];
                     if display_row & sprite_row != 0 {
-                        // if any 2 bits were both a 1 then we need to set register VF (VFLAG) to 1
+                        // if any 2 bits are both 1 then we need to set register VF (VFLAG) to 1
                         self.registers[VFLAG] = 1;
                     }
 
