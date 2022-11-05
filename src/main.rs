@@ -224,6 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(buf) = vm.display.extract_new_frame() {
                             // receiving a display buffer means we must draw
                             // drawing is expensive and should be ran concurrently with the rest of the vm so lets drop here
+                            drop(vm);
                             terminal.draw(&buf)?;
                         }
                     } else {
