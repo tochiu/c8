@@ -1,6 +1,10 @@
-pub use crossterm::event::KeyEventKind;
+pub use crossterm::event::{KeyEventKind as CrosstermKeyEventKind, KeyEvent as CrosstermKeyEvent};
+pub use device_query::DeviceState as KeyboardBackend;
 
-use device_query::{DeviceQuery, DeviceState, Keycode as DeviceKey};
+use device_query::{Keycode as DeviceKey};//, DeviceQuery};
+use crossterm::event::KeyCode as CrosstermKey;
+
+use crate::interp::InterpreterInput;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum Key {
@@ -23,7 +27,7 @@ pub enum Key {
 }
 
 impl Key {
-    fn to_code(&self) -> u8 {
+    fn to_code(self) -> u8 {
         match self {
             Key::One => 0x1,
             Key::Two => 0x2,
@@ -70,12 +74,43 @@ impl TryFrom<DeviceKey> for Key {
     }
 }
 
+impl TryFrom<CrosstermKey> for Key {
+    type Error = &'static str;
+    fn try_from(key: CrosstermKey) -> Result<Self, Self::Error> {
+        match key {
+            CrosstermKey::Char(c) => {
+                match c {
+                    '1' => Ok(Key::One),
+                    '2' => Ok(Key::Two),
+                    '3' => Ok(Key::Three),
+                    '4' => Ok(Key::Four),
+                    'Q' | 'q' => Ok(Key::Q),
+                    'W' | 'w' => Ok(Key::W),
+                    'E' | 'e' => Ok(Key::E),
+                    'R' | 'r' => Ok(Key::R),
+                    'A' | 'a' => Ok(Key::A),
+                    'S' | 's' => Ok(Key::S),
+                    'D' | 'd' => Ok(Key::D),
+                    'F' | 'f' => Ok(Key::F),
+                    'Z' | 'z' => Ok(Key::Z),
+                    'X' | 'x' => Ok(Key::X),
+                    'C' | 'c' => Ok(Key::C),
+                    'V' | 'v' => Ok(Key::V),
+                    _ => Err("not a valid char")
+                }
+            }
+            _ => Err("not a valid key")
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Keyboard {
-    state: DeviceState,
     focused: bool,
     focused_pressed_keys: u16,
-    focus_persisting: bool,
+    //focus_persisting: bool,
+    key_down_change: Option<u8>,
+    key_up_change: Option<u8>
 }
 
 impl Keyboard {
@@ -87,48 +122,106 @@ impl Keyboard {
     pub fn handle_unfocus(&mut self) {
         self.focused = false;
         self.focused_pressed_keys = 0;
-        self.focus_persisting = false;
+        //self.focus_persisting = false;
+        self.key_down_change = None;
+        self.key_up_change = None;
+
         log::debug!("clearing pressed keys because of focus lost");
     }
 
-    pub fn handle_poke(&mut self) {
-        // called when we want to force a focus and allow input changes to count as persisting
+    pub fn handle_crossterm_poke(&mut self, event: CrosstermKeyEvent) {
         if !self.focused {
             self.focused = true;
-            self.focus_persisting = true;
-            log::debug!("focus gained from poke");
-        }
-    }
+            log::debug!("focus gained from terminal key event");
 
-    pub fn update(&mut self) -> (u16, Option<(u8, bool)>) {
-        if self.focused {
-            let pressed_keys = self
-                .state
-                .get_keys()
-                .into_iter()
-                .filter_map(|device_key| <DeviceKey as TryInto<Key>>::try_into(device_key).ok())
-                .fold(0, |pressed_keys, key| pressed_keys | 1 << key.to_code());
-
-            let pressed_keys_diff = pressed_keys ^ self.focused_pressed_keys;
-            self.focused_pressed_keys = pressed_keys;
-
-            if pressed_keys_diff != 0 && self.focus_persisting {
-                let key_code = pressed_keys_diff.trailing_zeros() as u8;
-                let is_pressed = pressed_keys >> key_code & 1 == 1;
-                log::debug!("focused key change detected: bitmap {:#018b}", pressed_keys);
-                log::debug!(
-                    "sending {} key code {:X?}",
-                    if is_pressed { "pressed" } else { "released" },
-                    key_code
-                );
-
-                return (pressed_keys, Some((key_code, is_pressed)));
+            if let Ok(key) = Key::try_from(event.code) {
+                // release event only works on kitty terminals (which we dont setup for) but lets just be sure
+                if event.kind == CrosstermKeyEventKind::Release {
+                    self.handle_key_up(key);
+                } else {
+                    self.handle_key_down(key);
+                }
             }
-
-            self.focus_persisting = true;
-            (pressed_keys, None)
-        } else {
-            (0, None)
         }
     }
+
+    pub fn handle_key_down(&mut self, key: Key) {
+        if !self.focused {
+            return;
+        }
+
+        if self.focused_pressed_keys >> key.to_code() & 1 == 0 {
+            self.key_down_change = Some(key.to_code());
+            self.focused_pressed_keys |= 1 << key.to_code();
+
+            log::debug!("focused key change detected: bitmap {:#018b}", self.focused_pressed_keys);
+            log::debug!("changed key -> pressed key {:?} code {:X?}", key, key.to_code());
+        }
+    }
+
+    pub fn handle_key_up(&mut self, key: Key) {
+        if !self.focused {
+            return;
+        }
+
+        if self.focused_pressed_keys >> key.to_code() & 1 == 1 {
+            self.key_up_change = Some(key.to_code());
+            self.focused_pressed_keys &= !(1 << key.to_code());
+
+            log::debug!("focused key change detected: bitmap {:#018b}", self.focused_pressed_keys);
+            log::debug!("changed key -> released key {:?} code {:X?}", key, key.to_code());
+        }
+    }
+
+    pub fn flush(&mut self, input: &mut InterpreterInput) {
+        input.pressed_keys = self.focused_pressed_keys;
+        input.just_pressed_key = self.key_down_change;
+        input.just_released_key = self.key_up_change;
+
+        self.key_down_change = None;
+        self.key_up_change = None;
+    }
+
+    // pub fn update(&mut self, backend: &KeyboardBackend) {
+    //     if self.focused {
+    //         let pressed_keys = backend
+    //             .get_keys()
+    //             .into_iter()
+    //             .filter_map(|device_key| <DeviceKey as TryInto<Key>>::try_into(device_key).ok())
+    //             .fold(0, |pressed_keys, key| pressed_keys | 1 << key.to_code());
+
+    //         let pressed_keys_diff = pressed_keys ^ self.focused_pressed_keys;
+    //         self.focused_pressed_keys = pressed_keys;
+
+    //         // if pressed_keys_diff != 0 && self.focus_persisting {
+                
+
+    //         //     //return (pressed_keys, Some((key_code, is_pressed)));
+    //         // }
+
+    //         if self.focus_persisting {
+    //             if pressed_keys_diff != 0 {
+    //                 let key_code = pressed_keys_diff.trailing_zeros() as u8;
+    //                 let is_pressed = pressed_keys >> key_code & 1 == 1;
+                    
+    //                 if is_pressed {
+    //                     self.key_down_change = Some(key_code);
+    //                 } else {
+    //                     self.key_up_change = Some(key_code);
+    //                 }
+
+    //                 log::debug!("focused key change detected: bitmap {:#018b}", pressed_keys);
+    //                 log::debug!(
+    //                     "updating {} key code to {:X?}",
+    //                     if is_pressed { "pressed" } else { "released" },
+    //                     key_code
+    //                 );
+    //             }
+    //         } else {
+    //             self.focus_persisting = true;
+    //         }
+
+    //         self.focus_persisting = true;
+    //     }
+    // }
 }
