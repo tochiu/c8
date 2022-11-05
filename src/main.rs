@@ -1,23 +1,25 @@
 extern crate log;
 
-mod interp;
 mod disp;
 mod input;
+mod interp;
 
 use device_query::DeviceEvents;
-//use device_query::DeviceEvents;
-use interp::{Interpreter, InterpreterInput, InterpreterRequest, InterpreterKind};
 use disp::{Display, Terminal};
-use input::{Keyboard, Key}; // KeyboardBackend
+use input::{Key, Keyboard};
+use interp::{Interpreter, InterpreterInput, InterpreterKind, InterpreterRequest};
 
-use crossterm::event::{poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers};
+use crossterm::event::{
+    poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers,
+};
 use log::LevelFilter;
 
 use std::{
+    io,
     ops::DerefMut,
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
-    time::{Duration, Instant}, io
+    time::{Duration, Instant},
 };
 
 const INSTRUCTION_FREQUENCY: u32 = 2000;
@@ -25,11 +27,19 @@ const TIMER_FREQUENCY: u32 = 60;
 
 #[derive(Default)]
 struct CHIP8VM {
-    interp: Interpreter,
-    interp_input: InterpreterInput,
-    display: Display,
+
     active: bool,
+
+    interp: Interpreter,
+    interp_input: InterpreterInput, 
+
+    // Virtualized IO
+
+    display: Display,
     keyboard: Keyboard,
+
+    // these precise external timers will be mapped
+    // to a byte range when executing interpreter instructions
     sound_timer: f64,
     delay_timer: f64,
 }
@@ -45,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
 
+    // parse arguments for a log level
     let logger_enabled = if let Some(i) = args.iter().position(|arg| arg == "--log") {
         let mut level_parsed = true;
         let level = match args
@@ -52,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .nth(i + 1)
             .map(|s| s.to_ascii_lowercase())
             .as_ref()
-            .map(String::as_str) 
+            .map(String::as_str)
         {
             Some("trace") => LevelFilter::Trace,
             Some("debug") => LevelFilter::Debug,
@@ -70,6 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args.remove(i + 1);
         }
 
+        // initialize logger
         tui_logger::init_logger(level).unwrap();
         tui_logger::set_default_level(level);
 
@@ -79,17 +91,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         false
     };
 
-    let program_kind: InterpreterKind = if let Some(i) = args.iter().position(|arg| arg == "--kind") {
+    // parse arguments for a CHIP48 or COSMACVIP interpreter flag
+    let program_kind: InterpreterKind = if let Some(i) = args.iter().position(|arg| arg == "--kind")
+    {
         let kind = match args
             .iter()
             .nth(i + 1)
             .map(|s| s.to_ascii_lowercase())
             .as_ref()
-            .map(String::as_str) 
+            .map(String::as_str)
         {
             Some("cosmacvip") => InterpreterKind::COSMACVIP,
             Some("chip48") => InterpreterKind::CHIP48,
-            _ => Err("--kind must be followed by COSMACVIP or CHIP48")?
+            _ => Err("--kind must be followed by COSMACVIP or CHIP48")?,
         };
 
         args.remove(i + 1);
@@ -103,70 +117,84 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let program_name = args.first().ok_or("expected program name")?;
     let program_path = format!("roms/{}.ch8", program_name);
 
-    // vm
-    let vm = Arc::new(Mutex::new(CHIP8VM { 
-        active: true, 
-        interp: Interpreter::from_program(program_path, program_kind)?, 
+    // virtual machine struct shared across threads
+    let vm = Arc::new(Mutex::new(CHIP8VM {
+        active: true,
+        interp: Interpreter::from_program(program_path, program_kind)?,
         ..Default::default()
     }));
-    let mut terminal = Terminal::setup(format!(" CHIP8 Virtual Machine ({}) ", program_name), logger_enabled)?;
+
+    // terminal struct for drawing the display
+    let mut terminal = Terminal::setup(
+        format!(" CHIP8 Virtual Machine ({}) ", program_name),
+        logger_enabled,
+    )?;
+
     let mut handles: Vec<JoinHandle<Result<(), std::io::Error>>> = vec![];
 
-    { // update vm components coupled to interp + interp step + interp output handler thread
+    {
+        // this thread updates state the interpreter relies on, 
+        // calls the next instruction with said state, 
+        // and handles the output of said instruction
 
         let vm = Arc::clone(&vm);
         handles.push(thread::spawn(move || -> Result<(), io::Error> {
             let mut timer_instant = Instant::now();
-            //let keyboard_backend: KeyboardBackend = Default::default();
 
-            let mut interval = Interval::new("interp", Duration::from_secs_f64(1.0/INSTRUCTION_FREQUENCY as f64), Duration::from_millis(8));
+            let mut interval = Interval::new(
+                "interp",
+                Duration::from_secs_f64(1.0 / INSTRUCTION_FREQUENCY as f64),
+                Duration::from_millis(8),
+            );
+
             loop {
                 {
-                    //println!("interp trying to get INTERP lock");
+                    
                     let mut vm_guard = vm.lock().unwrap();
                     let vm = vm_guard.deref_mut();
-                    //println!("interp got lock");
 
                     if !vm.active {
                         return Ok(());
                     }
 
-                    // keyboard update
-                    //vm.keyboard.update(&keyboard_backend);
+                    // get time elapsed since the timers were last updated
+                    // and use that to update them
 
-                    // timer update
                     let elapsed = timer_instant.elapsed().as_secs_f64();
                     timer_instant = Instant::now();
 
                     // TODO: maybe support sound (right now the sound timer does nothing external)
 
-                    vm.sound_timer = (vm.sound_timer - elapsed*TIMER_FREQUENCY as f64).max(0.0);
-                    vm.delay_timer = (vm.delay_timer - elapsed*TIMER_FREQUENCY as f64).max(0.0);
+                    // update timers and clamp between the bounds of a byte 
+                    // because that is the expected range of the interpreter
+                    vm.sound_timer = (vm.sound_timer - elapsed * TIMER_FREQUENCY as f64).clamp(u8::MIN as f64, u8::MAX as f64);
+                    vm.delay_timer = (vm.delay_timer - elapsed * TIMER_FREQUENCY as f64).clamp(u8::MIN as f64, u8::MAX as f64);
 
-                    // interp input
+                    // update interpreter input
+
                     let input = &mut vm.interp_input;
 
-                    vm.keyboard.flush(input);
-                    input.delay_timer = vm.delay_timer.ceil() as u8;
+                    vm.keyboard.flush(input);  // the keyboard will write its state to the input
+                    input.delay_timer = vm.delay_timer.ceil() as u8; // delay timer is ceiled to the nearest 8-bit number
 
-                    // execute next interp instruction
+                    // interpret next instruction
                     let output = vm.interp.step(input);
 
-                    // interp output
+                    // handle the any external request by the executed instruction
                     if let Some(request) = output.request {
                         match request {
                             InterpreterRequest::Display => vm.display.update(&output.display),
                             InterpreterRequest::SetDelayTimer(time) => vm.delay_timer = time as f64,
-                            InterpreterRequest::SetSoundTimer(time) => vm.sound_timer = time as f64
+                            InterpreterRequest::SetSoundTimer(time) => vm.sound_timer = time as f64,
                         }
                     }
 
-                    // for refreshing terminal to show new log
+                    // if logging is enabled then we continuously refresh the terminal to keep log output up-to-date
                     if logger_enabled {
                         vm.display.refresh();
                     }
 
-                    // clear ephemeral inputs
+                    // clear ephemeral interpreter input
                     vm.interp_input.just_pressed_key = None;
                     vm.interp_input.just_released_key = None;
                 }
@@ -174,40 +202,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 interval.sleep();
             }
         }));
-
-        // handles.push(spawn_interval(
-        //     "interp", 
-        //     Duration::from_secs_f64(1.0 / INSTRUCTION_FREQUENCY as f64), 
-        //     Duration::from_millis(8),
-        //     (Instant::now(), KeyboardBackend::default()),
-        //     move |(timer_instant, keyboard_backend)| {
-                
-        //     }
-        // ))
     }
 
-    { // terminal render thread
+    {
+        // terminal render thread
 
         let vm = Arc::clone(&vm);
         handles.push(thread::spawn(move || -> Result<(), io::Error> {
-            let mut interval = Interval::new("render", Duration::from_millis(16), Duration::from_millis(16));
+
+            let mut interval = Interval::new(
+                "render",
+                Duration::from_millis(16),
+                Duration::from_millis(16),
+            );
+
             loop {
                 {
-                    //println!("render trying to get RENDER for render");
                     let mut vm = vm.lock().unwrap();
-                    //println!("got lock");
-
-                    //vm.display.refresh(); // force trigger (test)
 
                     if vm.active {
                         if let Some(buf) = vm.display.extract_new_frame() {
-                            drop(vm); // drawing should run concurrently with the vm
+                            // receiving a display buffer means we must draw
+                            // drawing is expensive and should be ran concurrently with the rest of the vm so lets drop here
                             terminal.draw(&buf)?;
                         }
                     } else {
+                        // inactive vm means stop what we are doing
                         drop(vm);
                         terminal.exit()?;
-                        return Ok(())
+                        return Ok(());
                     };
                 }
 
@@ -216,26 +239,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }));
     }
 
-    { // terminal event handler thread (updating keyboard state is handled before the interp step)
+    {
+        // terminal event handler thread (updating keyboard state is handled before the interp step)
 
         let vm = Arc::clone(&vm);
 
-        // // keyboard
-        //    let (pressed_keys, maybe_key_change) = vm.keyboard.update(&keyboard_backend);
         handles.push(thread::spawn(move || -> Result<(), io::Error> {
 
             let device_state = device_query::DeviceState::new();
 
-            let _guard0 = {
+            let _guard0 = { // listen for key down events
                 let vm = Arc::clone(&vm);
-                device_state.on_key_down(move |key| { 
+                device_state.on_key_down(move |key| {
                     if let Ok(key) = Key::try_from(*key) {
                         vm.lock().unwrap().keyboard.handle_key_down(key);
                     }
                 })
             };
-            
-            let _guard1 = {
+
+            let _guard1 = { // listen for key up events
                 let vm = Arc::clone(&vm);
                 device_state.on_key_up(move |key| {
                     if let Ok(key) = Key::try_from(*key) {
@@ -244,38 +266,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
             };
 
-            loop {
+            loop { // poll for important events specific to the terminal that device_qeury could not comprehend
                 if poll(Duration::from_millis(100))? {
                     match read()? {
                         Event::Resize(_, _) => vm.lock().unwrap().display.refresh(),
                         Event::FocusGained => vm.lock().unwrap().keyboard.handle_focus(),
                         Event::FocusLost => vm.lock().unwrap().keyboard.handle_unfocus(),
-                        Event::Key(key_event) => {
-                            //println!("{:?}", key_event);
-                            if 
-                                key_event.code == CrosstermKey::Esc || 
-                                key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL) && (
-                                    key_event.code == CrosstermKey::Char('c') || 
-                                    key_event.code == CrosstermKey::Char('C')
-                                )
+                        Event::Key(key_event) => { // Esc or Crtl+C interrupt handler
+                            if key_event.code == CrosstermKey::Esc
+                                || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL)
+                                    && (key_event.code == CrosstermKey::Char('c')
+                                        || key_event.code == CrosstermKey::Char('C'))
                             {
-                                //println!("attempting to grab INPUT");
+                                // game is over
                                 vm.lock().unwrap().exit();
                                 return Ok(());
                             } else {
-                                // //log::debug!("{:?}", key_event);
                                 // kinda expecting a crossterm key event to mean terminal is in focus
                                 // pretty sure device state executing first sinks a key input
                                 vm.lock().unwrap().keyboard.handle_crossterm_poke(key_event);
                             }
-                        },
-                        _ => ()
+                        }
+                        _ => (),
                     }
                 }
             }
         }))
     }
 
+    // wait for all threads to complete
     for handler in handles {
         handler.join().unwrap()?;
     }
@@ -283,91 +302,96 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/*
+ * Intervals keep state about the time elapsed since the previous sleep call
+ * and compensate for it in the next sleep call so the starting time of logic 
+ * running between each sleep will be spaced apart by the desired interval
+ * 
+ * Because sleeping will not sleep for precisely the amount requested and logic between each sleep will elapse for a nonzero duration
+ * we cut the duration overslept and the execution time of the logic from the original sleep duration to try and synchronize
+ * 
+ * Deviations from the target interval that require more than one interval to compensate for will not be compensated for but instead forgotten
+ * For example if we execute for 0.8 seconds but are supposed to execute within 0.2 second intervals at a time then 
+ * we will not try to compensate for the extra 0.6 seconds across multiple intervals and instead refuse sleep for the next interval
+ * and forgetting the remaining time to cut out
+ * 
+ * This behavior exists because recovering time deviations bigger than the target interval will lead to subsequent intervals being much 
+ * smaller than our target interval when what we are optimizing for is minimal absolute deviation
+ */
 pub struct Interval {
+    // interval name
     name: &'static str,
+
+    // desired duration of interval
     interval: Duration, 
+
+    // max_quantum is the maximum duration we can go without sleeping before being forced to sleep
+    // compensation can lead to no sleeping if oversleeping and/or executing logic between sleeps are longer than the desired interval
+    // allowing this to occur unchecked can lead to deadlock since other threads could potentially be starved of execution time
     max_quantum: Duration,
+
+    // instant last sleep was complete
     task_start: Instant,
+
+    // how much we overslept by
     oversleep_duration: Duration,
-    quantum_duration: Duration
+
+    // how long weve gone since an actual sleep
+    quantum_duration: Duration,
 }
 
 impl Interval {
     fn new(name: &'static str, interval: Duration, max_quantum: Duration) -> Self {
         Interval {
             name,
-            interval, 
+            interval,
             max_quantum,
             task_start: Instant::now(),
-            oversleep_duration: Duration::ZERO, 
-            quantum_duration: Duration::ZERO
+            oversleep_duration: Duration::ZERO,
+            quantum_duration: Duration::ZERO,
         }
     }
 
     fn sleep(&mut self) {
-        let task_duration = self.task_start.elapsed();
-        let mut sleep_duration = self.interval
+        let task_duration = self.task_start.elapsed(); // time since the end of our last sleep
+
+        // update our quantum duration
+        self.quantum_duration += task_duration;
+
+        // we kept track of how much we overslept last time so this and our task duration combined is our overshoot
+        // we must subtract from the original to stay on schedule
+        let mut sleep_duration = self 
+            .interval
             .saturating_sub(task_duration)
             .saturating_sub(self.oversleep_duration);
-
-        self.quantum_duration += task_duration;
+        
+        // if our compensation leads to no sleeping and we havent exceeded our max quantum then we dont sleep
         if sleep_duration.is_zero() && self.quantum_duration < self.max_quantum {
             self.oversleep_duration = Duration::ZERO;
         } else {
+            // otherwise if were not sleeping but we are past our max quantum we must sleep (right now its hardcoded to a constant 1ms)
             if sleep_duration.is_zero() && self.quantum_duration >= self.max_quantum {
                 sleep_duration = Duration::from_millis(1);
             }
 
             let now = Instant::now();
-            
-            // NOTE:
-            // sleeping on windows is ungodly innacurate (~15 ms accuracy) 
-            // but this also increases CPU utilization from nonexistent to around 10% on my machine
-            //if self.name != "render" {
-                //println!("did {} task for {} us, now sleeping for {} us", self.name, task_duration.as_micros(), sleep_duration.as_micros());
-            //}
-            
-            spin_sleep::sleep(sleep_duration);
-            
+
+            spin_sleep::sleep(sleep_duration); // sleep
+
+            // store how much we overslept by and reset our quantum duration since we slept for a nonzero duration
             self.oversleep_duration = now.elapsed().saturating_sub(sleep_duration);
             self.quantum_duration = Duration::ZERO;
         }
-        
+
         log::trace!(
-            "name: {}, task: {} us, sleep: {} us, oversleep: {} us", 
+            "name: {}, task: {} us, sleep: {} us, oversleep: {} us",
             self.name,
-            task_duration.as_micros(), 
-            sleep_duration.as_micros(), 
+            task_duration.as_micros(),
+            sleep_duration.as_micros(),
             self.oversleep_duration.as_micros()
         );
-
+        
+        // update task start to now since sleep is done
         self.task_start = Instant::now();
     }
 }
-
-// fn spawn_interval<F, T, E, S>(name: &'static str, interval: Duration, max_quantum: Duration, mut state: S, mut f: F) -> JoinHandle<Result<T, E>> 
-//     where
-//         F: FnMut(&mut S) -> Result<IntervalState<T>, E> + Sync,
-//         F: Send + 'static,
-//         T: Send + 'static,
-//         E: Send + 'static,
-//         S: Send
-// {
-//     thread::spawn(move || {
-//         let mut oversleep_duration = Duration::ZERO;
-//         let mut quantum_duration = Duration::ZERO;
-
-//         loop {
-//             let task_start = Instant::now();
-//             match f(&mut state) {
-//                 Ok(state) => match state {
-//                     IntervalState::Continue => {
-                        
-//                     },
-//                     IntervalState::Done(result) => return Ok(result)
-//                 },
-//                 Err(e) => return Err(e)
-//             }
-//         }
-//     })
-// }
