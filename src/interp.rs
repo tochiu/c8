@@ -54,7 +54,6 @@ impl InstructionParameters {
 }
 
 impl Display for InstructionParameters {
-    // perhaps n need be formatted as hex
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -457,7 +456,7 @@ impl Interpreter {
                             // 8-bit data of row expanded to 64 bits by padding (64 - 8) zeros to the right and then shifting everything to the right by pos_x amount
                             (self.memory[self.index as usize + row_i as usize] as u64)
                                 << (u64::BITS - u8::BITS)
-                                >> pos_x, 
+                                >> pos_x,
                         )
                     })
                 {

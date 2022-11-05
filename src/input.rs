@@ -1,8 +1,8 @@
 pub use crossterm::event::{KeyEventKind as CrosstermKeyEventKind, KeyEvent as CrosstermKeyEvent};
 pub use device_query::DeviceState as KeyboardBackend;
 
-use device_query::{Keycode as DeviceKey};//, DeviceQuery};
 use crossterm::event::KeyCode as CrosstermKey;
+use device_query::Keycode as DeviceKey;
 
 use crate::interp::InterpreterInput;
 
@@ -108,7 +108,6 @@ impl TryFrom<CrosstermKey> for Key {
 pub struct Keyboard {
     focused: bool,
     focused_pressed_keys: u16,
-    //focus_persisting: bool,
     key_down_change: Option<u8>,
     key_up_change: Option<u8>
 }
@@ -122,7 +121,6 @@ impl Keyboard {
     pub fn handle_unfocus(&mut self) {
         self.focused = false;
         self.focused_pressed_keys = 0;
-        //self.focus_persisting = false;
         self.key_down_change = None;
         self.key_up_change = None;
 
@@ -181,47 +179,4 @@ impl Keyboard {
         self.key_down_change = None;
         self.key_up_change = None;
     }
-
-    // pub fn update(&mut self, backend: &KeyboardBackend) {
-    //     if self.focused {
-    //         let pressed_keys = backend
-    //             .get_keys()
-    //             .into_iter()
-    //             .filter_map(|device_key| <DeviceKey as TryInto<Key>>::try_into(device_key).ok())
-    //             .fold(0, |pressed_keys, key| pressed_keys | 1 << key.to_code());
-
-    //         let pressed_keys_diff = pressed_keys ^ self.focused_pressed_keys;
-    //         self.focused_pressed_keys = pressed_keys;
-
-    //         // if pressed_keys_diff != 0 && self.focus_persisting {
-                
-
-    //         //     //return (pressed_keys, Some((key_code, is_pressed)));
-    //         // }
-
-    //         if self.focus_persisting {
-    //             if pressed_keys_diff != 0 {
-    //                 let key_code = pressed_keys_diff.trailing_zeros() as u8;
-    //                 let is_pressed = pressed_keys >> key_code & 1 == 1;
-                    
-    //                 if is_pressed {
-    //                     self.key_down_change = Some(key_code);
-    //                 } else {
-    //                     self.key_up_change = Some(key_code);
-    //                 }
-
-    //                 log::debug!("focused key change detected: bitmap {:#018b}", pressed_keys);
-    //                 log::debug!(
-    //                     "updating {} key code to {:X?}",
-    //                     if is_pressed { "pressed" } else { "released" },
-    //                     key_code
-    //                 );
-    //             }
-    //         } else {
-    //             self.focus_persisting = true;
-    //         }
-
-    //         self.focus_persisting = true;
-    //     }
-    // }
 }
