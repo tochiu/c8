@@ -384,13 +384,13 @@ impl Interval {
             self.quantum_duration = Duration::ZERO;
         }
 
-        log::trace!(
-            "name: {}, task: {} us, sleep: {} us, oversleep: {} us",
-            self.name,
-            task_duration.as_micros(),
-            sleep_duration.as_micros(),
-            self.oversleep_duration.as_micros()
-        );
+        // log::trace!(
+        //     "name: {}, task: {} us, sleep: {} us, oversleep: {} us",
+        //     self.name,
+        //     task_duration.as_micros(),
+        //     sleep_duration.as_micros(),
+        //     self.oversleep_duration.as_micros()
+        // );
         
         // update task start to now since sleep is done
         self.task_start = Instant::now();
