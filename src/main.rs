@@ -3,16 +3,19 @@ extern crate log;
 mod disp;
 mod input;
 mod interp;
+mod prog;
+mod analysis;
 
 use disp::{Display, Terminal};
 use input::{Key, Keyboard};
-use interp::{Interpreter, InterpreterInput, InterpreterKind, InterpreterRequest};
+use interp::{Interpreter, InterpreterInput, InterpreterRequest};
 
 use device_query::DeviceEvents;
 use crossterm::event::{
     poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers,
 };
 use log::LevelFilter;
+use prog::{Program, ProgramKind};
 
 use std::{
     io,
@@ -21,6 +24,8 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
+
+use crate::analysis::Analysis;
 
 const INSTRUCTION_FREQUENCY: u32 = 2000;
 const TIMER_FREQUENCY: u32 = 60;
@@ -56,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
 
     // parse arguments for a log level
-    let logger_enabled = if let Some(i) = args.iter().position(|arg| arg == "--log") {
+    let logger_level = if let Some(i) = args.iter().position(|arg| arg == "--log") {
         let mut level_parsed = true;
         let level = match args
             .iter()
@@ -81,18 +86,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args.remove(i + 1);
         }
 
-        // initialize logger
-        tui_logger::init_logger(level).unwrap();
-        tui_logger::set_default_level(level);
-
         args.remove(i);
-        true
+        level
     } else {
-        false
+        LevelFilter::Off
     };
 
     // parse arguments for a CHIP48 or COSMACVIP interpreter flag
-    let program_kind: InterpreterKind = if let Some(i) = args.iter().position(|arg| arg == "--kind")
+    let program_kind: ProgramKind = if let Some(i) = args.iter().position(|arg| arg == "--kind")
     {
         let kind = match args
             .iter()
@@ -101,9 +102,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .as_ref()
             .map(String::as_str)
         {
-            Some("cosmacvip") => InterpreterKind::COSMACVIP,
-            Some("chip48") => InterpreterKind::CHIP48,
-            _ => Err("--kind must be followed by COSMACVIP or CHIP48")?,
+            Some("cosmacvip") => ProgramKind::COSMACVIP,
+            Some("chip48") => ProgramKind::CHIP48,
+            Some("common") => ProgramKind::COMMON,
+            _ => Err("--kind must be followed by COSMACVIP, CHIP48, or COMMON")?,
         };
 
         args.remove(i + 1);
@@ -114,20 +116,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Default::default()
     };
 
+    // parse arguments for dissassembly
+    let disassemble: bool = if let Some(i) = args.iter().position(|arg| arg == "--disass") {
+        args.remove(i);
+        true
+    } else {
+        false
+    };
+
     let program_name = args.first().ok_or("expected program name")?;
-    let program_path = format!("roms/{}.ch8", program_name);
+    let program = Program::read(format!("roms/{}.ch8", program_name), program_kind)?;
+
+    // dissassemble if requested
+    if disassemble {
+        print!("{}", Analysis::from(program));
+        return Ok(());
+    }
+
+    // initialize logger
+    if logger_level != LevelFilter::Off {
+        tui_logger::init_logger(logger_level).unwrap();
+        tui_logger::set_default_level(logger_level);
+    }
 
     // thread-safe virtual machine
     let vm = Arc::new(Mutex::new(CHIP8VM {
         active: true,
-        interp: Interpreter::from_program(program_path, program_kind)?,
+        interp: Interpreter::from(program),
         ..Default::default()
     }));
 
     // terminal struct for drawing the display
     let mut terminal = Terminal::setup(
         format!(" CHIP8 Virtual Machine ({}) ", program_name),
-        logger_enabled,
+        logger_level != LevelFilter::Off,
     )?;
 
     let mut handles: Vec<JoinHandle<Result<(), std::io::Error>>> = vec![];
@@ -187,7 +209,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     // if logging is enabled then we continuously refresh the terminal to keep log output up-to-date
-                    if logger_enabled {
+                    if logger_level != LevelFilter::Off {
                         vm.display.refresh();
                     }
 
@@ -361,7 +383,7 @@ impl Interval {
 
         // we kept track of how much we overslept last time so this and our task duration combined is our overshoot
         // we must subtract from the original to stay on schedule
-        let mut sleep_duration = self 
+        let mut sleep_duration = self
             .interval
             .saturating_sub(task_duration)
             .saturating_sub(self.oversleep_duration);

@@ -1,12 +1,9 @@
 use crate::disp::{DisplayBuffer, DISPLAY_HEIGHT, DISPLAY_WIDTH};
+use crate::prog::{Program, ProgramKind, PROGRAM_STARTING_ADDRESS, PROGRAM_MEMORY_SIZE};
 
-use std::{fmt::Display, fs::read, io, path::Path};
+use std::fmt::Display;
 
-const PROGRAM_STARTING_ADDRESS: u16 = 0x200;
-
-const VFLAG: usize = 15;
-
-const MEMORY_SIZE: usize = 4096;
+pub const VFLAG: usize = 15;
 
 const FONT_STARTING_ADDRESS: u16 = 0x50; // store font in memory from 0x50 to 0x9F inclusive
 const FONT_CHAR_DATA_SIZE: u8 = 5;
@@ -31,18 +28,18 @@ const FONT: [u8; 80] = [
 
 // Takes a 16 bit number (instruction size) and decomposes it into its parts
 #[derive(Clone, Copy, Debug)]
-struct InstructionParameters {
-    bits: u16,
-    op: u8,
-    x: u8,
-    y: u8,
-    n: u8,
-    nn: u8,
-    nnn: u16,
+pub struct InstructionParameters {
+    pub bits: u16,
+    pub op: u8,
+    pub x: u8,
+    pub y: u8,
+    pub n: u8,
+    pub nn: u8,
+    pub nnn: u16,
 }
 
-impl InstructionParameters {
-    fn new(bits: u16) -> Self {
+impl From<u16> for InstructionParameters {
+    fn from(bits: u16) -> Self {
         InstructionParameters {
             bits,
             op:  ((bits & 0xF000) >> 4 * 3) as u8,
@@ -55,18 +52,24 @@ impl InstructionParameters {
     }
 }
 
+impl From<[u8; 2]> for InstructionParameters {
+    fn from(bytes: [u8; 2]) -> Self {
+        InstructionParameters::from((bytes[0] as u16) << 8 | bytes[1] as u16)
+    }
+}
+
 impl Display for InstructionParameters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{:X?} (op = {:X?}, x = {:?}, y = {:?}, n = {:?}, nn = {:?}, nnn = {:?})",
+            "{:#06X} (op = {:#X?}, x = {:?}, y = {:?}, n = {:?}, nn = {:?}, nnn = {:?})",
             self.bits, self.op, self.x, self.y, self.n, self.nn, self.nnn
         )
     }
 }
 
-#[derive(Debug)]
-enum Instruction {
+#[derive(Debug, Clone, Copy)]
+pub enum Instruction {
     ClearScreen,
     Jump(u16),
     JumpWithOffset(u16, u8),
@@ -101,76 +104,66 @@ enum Instruction {
     Display(u8, u8, u8),
 }
 
-impl Instruction {
-
-    // InstructionParameters -> Instruction otherwise panic!
-    fn decode(params: InstructionParameters) -> Self {
+impl TryFrom<InstructionParameters> for Instruction {
+    type Error = String;
+    fn try_from(params: InstructionParameters) -> Result<Self, Self::Error> {
         let (op, x, y, n, nn, nnn) = (
             params.op, params.x, params.y, params.n, params.nn, params.nnn,
         );
 
         match op {
             0x0 => match nnn {
-                0x0E0 => Self::ClearScreen,
-                0x0EE => Self::SubroutineReturn,
-                _ => panic!("unable to decode instruction {}", params),
+                0x0E0 => Ok(Self::ClearScreen),
+                0x0EE => Ok(Self::SubroutineReturn),
+                _ => Err(format!("unable to decode instruction {}", params)),
             },
-            0x1 => Self::Jump(nnn),
-            0x2 => Self::CallSubroutine(nnn),
-            0x3 => Self::SkipIfEqualsConstant(x, nn),
-            0x4 => Self::SkipIfNotEqualsConstant(x, nn),
-            0x5 => Self::SkipIfEquals(x, y),
-            0x6 => Self::SetConstant(x, nn),
-            0x7 => Self::AddConstant(x, nn),
+            0x1 => Ok(Self::Jump(nnn)),
+            0x2 => Ok(Self::CallSubroutine(nnn)),
+            0x3 => Ok(Self::SkipIfEqualsConstant(x, nn)),
+            0x4 => Ok(Self::SkipIfNotEqualsConstant(x, nn)),
+            0x5 => Ok(Self::SkipIfEquals(x, y)),
+            0x6 => Ok(Self::SetConstant(x, nn)),
+            0x7 => Ok(Self::AddConstant(x, nn)),
             0x8 => match n {
-                0x0 => Self::Set(x, y),
-                0x1 => Self::Or(x, y),
-                0x2 => Self::And(x, y),
-                0x3 => Self::Xor(x, y),
-                0x4 => Self::Add(x, y),
-                0x5 => Self::Sub(x, y, true),
-                0x6 => Self::Shift(x, y, true),
-                0x7 => Self::Sub(x, y, false),
-                0xE => Self::Shift(x, y, false),
-                _ => panic!("unable to decode instruction {}", params),
+                0x0 => Ok(Self::Set(x, y)),
+                0x1 => Ok(Self::Or(x, y)),
+                0x2 => Ok(Self::And(x, y)),
+                0x3 => Ok(Self::Xor(x, y)),
+                0x4 => Ok(Self::Add(x, y)),
+                0x5 => Ok(Self::Sub(x, y, true)),
+                0x6 => Ok(Self::Shift(x, y, true)),
+                0x7 => Ok(Self::Sub(x, y, false)),
+                0xE => Ok(Self::Shift(x, y, false)),
+                _ => Err(format!("unable to decode instruction {}", params)),
             },
             0x9 => match n {
-                0x0 => Self::SkipIfNotEquals(x, y),
-                _ => panic!("unable to decode instruction {}", params),
+                0x0 => Ok(Self::SkipIfNotEquals(x, y)),
+                _ => Err(format!("unable to decode instruction {}", params)),
             },
-            0xA => Self::SetIndex(nnn),
-            0xB => Self::JumpWithOffset(nnn, x),
-            0xC => Self::GenerateRandom(x, nn),
-            0xD => Self::Display(x, y, n),
+            0xA => Ok(Self::SetIndex(nnn)),
+            0xB => Ok(Self::JumpWithOffset(nnn, x)),
+            0xC => Ok(Self::GenerateRandom(x, nn)),
+            0xD => Ok(Self::Display(x, y, n)),
             0xE => match nn {
-                0x9E => Self::SkipIfKeyDown(x),
-                0xA1 => Self::SkipIfKeyNotDown(x),
-                _ => panic!("unable to decode instruction {}", params),
+                0x9E => Ok(Self::SkipIfKeyDown(x)),
+                0xA1 => Ok(Self::SkipIfKeyNotDown(x)),
+                _ => Err(format!("unable to decode instruction {}", params)),
             },
             0xF => match nn {
-                0x07 => Self::GetDelayTimer(x),
-                0x15 => Self::SetDelayTimer(x),
-                0x18 => Self::SetSoundTimer(x),
-                0x1E => Self::AddToIndex(x),
-                0x0A => Self::GetKey(x),
-                0x29 => Self::SetIndexToHexChar(x),
-                0x33 => Self::StoreDecimal(x),
-                0x55 => Self::Store(x),
-                0x65 => Self::Load(x),
-                _ => panic!("unable to decode instruction {}", params),
+                0x07 => Ok(Self::GetDelayTimer(x)),
+                0x15 => Ok(Self::SetDelayTimer(x)),
+                0x18 => Ok(Self::SetSoundTimer(x)),
+                0x1E => Ok(Self::AddToIndex(x)),
+                0x0A => Ok(Self::GetKey(x)),
+                0x29 => Ok(Self::SetIndexToHexChar(x)),
+                0x33 => Ok(Self::StoreDecimal(x)),
+                0x55 => Ok(Self::Store(x)),
+                0x65 => Ok(Self::Load(x)),
+                _ => Err(format!("unable to decode instruction {}", params)),
             },
-            _ => panic!("unable to decode instruction {}", params),
+            _ => Err(format!("unable to decode instruction {}", params)),
         }
     }
-}
-
-#[derive(Debug, PartialEq, Eq, Default)]
-#[allow(dead_code)]
-pub enum InterpreterKind {
-    #[default]
-    CHIP48,
-    COSMACVIP,
-    // SUPERCHIP,
 }
 
 // State the interpreter pulls from IO is stored here
@@ -202,24 +195,31 @@ pub enum InterpreterRequest {
 
 #[derive(Debug)]
 pub struct Interpreter {
-    kind: InterpreterKind,
-    memory: [u8; MEMORY_SIZE],
+    memory: [u8; PROGRAM_MEMORY_SIZE as usize],
     pc: u16,
     index: u16,
     stack: Vec<u16>,
     registers: [u8; 16],
     output: InterpreterOutput,
+    
+    pub program: Program
 }
 
-impl Default for Interpreter {
-    fn default() -> Self {
-        let mut memory = [0; MEMORY_SIZE];
+impl<'a> From<Program> for Interpreter {
+    fn from(program: Program) -> Self {
+        let mut memory = [0; PROGRAM_MEMORY_SIZE as usize];
+
         memory[FONT_STARTING_ADDRESS as usize..FONT_STARTING_ADDRESS as usize + FONT.len()]
             .copy_from_slice(&FONT);
+        
+        memory[PROGRAM_STARTING_ADDRESS as usize
+            ..PROGRAM_STARTING_ADDRESS as usize + program.data.len()]
+            .copy_from_slice(&program.data);
+        
         Interpreter {
-            kind: Default::default(),
+            program,
             memory,
-            pc: 0,
+            pc: PROGRAM_STARTING_ADDRESS,
             index: 0,
             stack: Vec::new(),
             registers: [0; 16],
@@ -232,25 +232,16 @@ impl Default for Interpreter {
     }
 }
 
-impl Interpreter {
-    // create interpreter from program path and program kind
-    pub fn from_program<P: AsRef<Path>>(path: P, kind: InterpreterKind) -> io::Result<Interpreter> {
-        let mut interp = Interpreter {
-            kind,
-            ..Default::default()
-        };
-        interp.load_program(path)?;
-        Ok(interp)
+impl Default for Interpreter {
+    fn default() -> Self {
+        Interpreter::from(Program::default())
     }
+}
 
-    // load program into interpreter (this was not written considering a program could already have been loaded in mind)
-    pub fn load_program<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
-        let program = read(path)?;
-        self.memory[PROGRAM_STARTING_ADDRESS as usize
-            ..PROGRAM_STARTING_ADDRESS as usize + program.len()]
-            .copy_from_slice(&program);
-        self.pc = PROGRAM_STARTING_ADDRESS;
-        Ok(())
+impl Interpreter {
+
+    pub fn registers_mut(&mut self) -> &mut [u8; 16] {
+        &mut self.registers
     }
 
     // interpret the next instruction
@@ -259,15 +250,17 @@ impl Interpreter {
         self.output.request = None;
 
         // fetch + decode
-        let inst = Instruction::decode(InstructionParameters::new(
-            (self.memory[self.pc as usize] as u16) << 8 | self.memory[self.pc as usize + 1] as u16, // assuming big-endianness (MSB first)
-        ));
+        let inst = Instruction::try_from(InstructionParameters::from([self.memory[self.pc as usize], self.memory[self.pc as usize + 1]])).unwrap();
 
         self.pc += 2;
 
         log::trace!("instruction {:?} ", inst);
 
-        // execute
+        // exec instruction
+        self.exec(inst, input)
+    }
+    
+    pub fn exec(&mut self, inst: Instruction, input: &InterpreterInput) -> &InterpreterOutput {
         match inst {
             Instruction::ClearScreen => {
                 log::info!("clearing screen");
@@ -279,10 +272,10 @@ impl Interpreter {
             Instruction::Jump(pc) => self.pc = pc,
 
             Instruction::JumpWithOffset(address, vx) => {
-                if self.kind == InterpreterKind::COSMACVIP {
-                    self.pc = address + self.registers[0] as u16;
-                } else {
+                if self.program.kind == ProgramKind::CHIP48 {
                     self.pc = address + self.registers[vx as usize] as u16;
+                } else {
+                    self.pc = address + self.registers[0] as u16;
                 }
             }
 
@@ -335,10 +328,12 @@ impl Interpreter {
             }
 
             Instruction::GetKey(vx) => {
-                if let Some(key_code) = match self.kind {
-                    InterpreterKind::COSMACVIP => input.just_released_key,
-                    _ => input.just_pressed_key,
-                } {
+                if let Some(key_code) = 
+                    match self.program.kind {
+                        ProgramKind::COSMACVIP => input.just_released_key,
+                        _ => input.just_pressed_key,
+                    } 
+                {
                     self.registers[vx as usize] = key_code;
                 } else {
                     self.pc -= 2;
@@ -378,8 +373,8 @@ impl Interpreter {
             }
 
             Instruction::Shift(vx, vy, right) => {
-                let bits = match self.kind {
-                    InterpreterKind::COSMACVIP => self.registers[vy as usize],
+                let bits = match self.program.kind {
+                    ProgramKind::COSMACVIP => self.registers[vy as usize],
                     _ => self.registers[vx as usize],
                 };
 
@@ -416,14 +411,14 @@ impl Interpreter {
             // TODO: maybe make optional behavior (register vf set on overflow) configurable
             Instruction::AddToIndex(vx) => {
                 self.index = (self.index as u32 + self.registers[vx as usize] as u32) as u16
-                    % MEMORY_SIZE as u16
+                    % PROGRAM_MEMORY_SIZE as u16
             }
 
             Instruction::Load(vx) => {
                 self.registers[..=vx as usize].copy_from_slice(
                     &self.memory[self.index as usize..=self.index as usize + vx as usize],
                 );
-                if self.kind == InterpreterKind::COSMACVIP {
+                if self.program.kind == ProgramKind::COSMACVIP {
                     self.index += vx as u16 + 1;
                 }
             }
@@ -431,7 +426,7 @@ impl Interpreter {
             Instruction::Store(vx) => {
                 self.memory[self.index as usize..=self.index as usize + vx as usize]
                     .copy_from_slice(&self.registers[..=vx as usize]);
-                if self.kind == InterpreterKind::COSMACVIP {
+                if self.program.kind == ProgramKind::COSMACVIP {
                     self.index += vx as u16 + 1;
                 }
             }
