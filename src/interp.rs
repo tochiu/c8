@@ -201,8 +201,7 @@ pub struct Interpreter {
     stack: Vec<u16>,
     registers: [u8; 16],
     output: InterpreterOutput,
-    
-    pub program: Program
+    program: Program
 }
 
 impl<'a> From<Program> for Interpreter {
@@ -240,10 +239,6 @@ impl Default for Interpreter {
 
 impl Interpreter {
 
-    pub fn registers_mut(&mut self) -> &mut [u8; 16] {
-        &mut self.registers
-    }
-
     // interpret the next instruction
     pub fn step(&mut self, input: &InterpreterInput) -> &InterpreterOutput {
         // clear output request
@@ -252,9 +247,9 @@ impl Interpreter {
         // fetch + decode
         let inst = Instruction::try_from(InstructionParameters::from([self.memory[self.pc as usize], self.memory[self.pc as usize + 1]])).unwrap();
 
+        log::trace!("instruction {:#05X?} {:?} ", self.pc, inst);
+        
         self.pc += 2;
-
-        log::trace!("instruction {:?} ", inst);
 
         // exec instruction
         self.exec(inst, input)

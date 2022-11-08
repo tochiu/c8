@@ -4,18 +4,20 @@ mod disp;
 mod input;
 mod interp;
 mod prog;
-mod analysis;
+mod disass;
 
-use disp::{Display, Terminal};
 use input::{Key, Keyboard};
+use disp::{Display, Terminal};
+use prog::{Program, ProgramKind};
 use interp::{Interpreter, InterpreterInput, InterpreterRequest};
+use disass::Disassembly;
 
 use device_query::DeviceEvents;
 use crossterm::event::{
     poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers,
 };
 use log::LevelFilter;
-use prog::{Program, ProgramKind};
+
 
 use std::{
     io,
@@ -25,9 +27,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::analysis::Analysis;
-
-const INSTRUCTION_FREQUENCY: u32 = 2000;
+const INSTRUCTION_FREQUENCY: u32 = 2;
 const TIMER_FREQUENCY: u32 = 60;
 
 #[derive(Default)]
@@ -129,11 +129,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // dissassemble if requested
     if disassemble {
-        print!("{}", Analysis::from(program));
+        if let Some(level) = logger_level.to_level() {
+            simple_logger::init_with_level(level).unwrap();
+        }
+
+        log::info!("Dissassembling \"{}\"", program_name);
+
+        print!("{}", Disassembly::from(program));
+
+        log::info!("Dissassembly complete");
+
         return Ok(());
     }
 
-    // initialize logger
+    // initialize tui logger
     if logger_level != LevelFilter::Off {
         tui_logger::init_logger(logger_level).unwrap();
         tui_logger::set_default_level(logger_level);
@@ -343,6 +352,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
  */
 pub struct Interval {
     // interval name
+    #[allow(dead_code)]
     name: &'static str,
 
     // desired duration of interval
@@ -406,13 +416,13 @@ impl Interval {
             self.quantum_duration = Duration::ZERO;
         }
 
-        log::trace!(
-            "name: {}, task: {} us, sleep: {} us, oversleep: {} us",
-            self.name,
-            task_duration.as_micros(),
-            sleep_duration.as_micros(),
-            self.oversleep_duration.as_micros()
-        );
+        // log::trace!(
+        //     "name: {}, task: {} us, sleep: {} us, oversleep: {} us",
+        //     self.name,
+        //     task_duration.as_micros(),
+        //     sleep_duration.as_micros(),
+        //     self.oversleep_duration.as_micros()
+        // );
         
         // update task start to now since sleep is done
         self.task_start = Instant::now();
