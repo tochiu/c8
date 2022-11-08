@@ -27,7 +27,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const INSTRUCTION_FREQUENCY: u32 = 2;
+const INSTRUCTION_FREQUENCY: u32 = 2000;
 const TIMER_FREQUENCY: u32 = 60;
 
 #[derive(Default)]
