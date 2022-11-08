@@ -1,0 +1,57 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Cargo launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=chip8-vm"
+                ]
+            },
+            "args": ["Test", "--disass"]
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'chip8-vm'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=chip8-vm",
+                    "--package=chip8-vm"
+                ],
+                "filter": {
+                    "name": "chip8-vm",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'chip8-vm'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=chip8-vm",
+                    "--package=chip8-vm"
+                ],
+                "filter": {
+                    "name": "chip8-vm",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
