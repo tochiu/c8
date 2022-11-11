@@ -194,6 +194,11 @@ pub enum InterpreterRequest {
 }
 
 #[derive(Debug)]
+pub enum InterpreterError {
+    BadInstruction(String)
+}
+
+#[derive(Debug)]
 pub struct Interpreter {
     memory: [u8; PROGRAM_MEMORY_SIZE as usize],
     pc: u16,
@@ -240,26 +245,25 @@ impl Default for Interpreter {
 impl Interpreter {
 
     // interpret the next instruction
-    pub fn step(&mut self, input: &InterpreterInput) -> &InterpreterOutput {
+    pub fn step(&mut self, input: &InterpreterInput) -> Result<&InterpreterOutput, InterpreterError> {
         // clear output request
         self.output.request = None;
 
         // fetch + decode
-        let inst = Instruction::try_from(InstructionParameters::from([self.memory[self.pc as usize], self.memory[self.pc as usize + 1]])).unwrap();
+        let inst = Instruction::try_from(InstructionParameters::from([self.memory[self.pc as usize], self.memory[self.pc as usize + 1]]))
+            .map_err(|str| InterpreterError::BadInstruction(str))?;
 
         log::trace!("instruction {:#05X?} {:?} ", self.pc, inst);
         
         self.pc += 2;
 
         // exec instruction
-        self.exec(inst, input)
+        Ok(self.exec(inst, input))
     }
     
     pub fn exec(&mut self, inst: Instruction, input: &InterpreterInput) -> &InterpreterOutput {
         match inst {
             Instruction::ClearScreen => {
-                log::info!("clearing screen");
-
                 self.output.display.fill(0);
                 self.output.request = Some(InterpreterRequest::Display);
             }
@@ -317,6 +321,7 @@ impl Interpreter {
             }
 
             Instruction::SkipIfKeyNotDown(vx) => {
+                // log::debug!("skip if {:?} key up", Key::try_from(self.registers[vx as usize]));
                 if input.down_keys >> self.registers[vx as usize] & 1 == 0 {
                     self.pc += 2
                 }
@@ -440,8 +445,6 @@ impl Interpreter {
             Instruction::Display(vx, vy, height) => {
                 let pos_x = self.registers[vx as usize] % DISPLAY_WIDTH;
                 let pos_y = self.registers[vy as usize] % DISPLAY_HEIGHT;
-
-                log::info!("drawing sprite @ (x = {:?}, y = {:?})", pos_x, pos_y);
 
                 self.registers[VFLAG] = 0;
 

@@ -17,44 +17,16 @@ use std::io;
 pub const DISPLAY_WIDTH: u8 = 64;
 pub const DISPLAY_HEIGHT: u8 = 32;
 
+pub const EMPTY_DISPLAY: DisplayBuffer = [0; DISPLAY_HEIGHT as usize];
+
 // Each u64 represents a row of the display with each bit representing whether that pixel should be on or not
 // The number of u64s represents the display height
 // NOTE: The most signficant bit corresponds to the left-most pixel on the row 
 pub type DisplayBuffer = [u64; DISPLAY_HEIGHT as usize];
 
-pub struct Display {
-    buf: DisplayBuffer,
-    rerender: bool,
-}
-
-impl Default for Display {
-    fn default() -> Self {
-        Display {
-            buf: [0; DISPLAY_HEIGHT as usize],
-            rerender: false,
-        }
-    }
-}
-
-impl Display {
-    pub fn update(&mut self, buf: &DisplayBuffer) {
-        self.buf = *buf;
-        self.refresh();
-    }
-
-    pub fn refresh(&mut self) {
-        self.rerender = true;
-    }
-
-    // if rerender is true, set it to false and return the display buffer, otherwise do nothing
-    pub fn extract_new_frame(&mut self) -> Option<DisplayBuffer> {
-        if self.rerender {
-            self.rerender = false;
-            Some(self.buf)
-        } else {
-            None
-        }
-    }
+pub enum RenderEvent {
+    Display(DisplayBuffer),
+    Refresh
 }
 
 struct DisplayWidget<'a> {

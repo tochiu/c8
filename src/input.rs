@@ -50,6 +50,31 @@ impl Key {
     }
 }
 
+impl TryFrom<u8> for Key {
+    type Error = &'static str;
+    fn try_from(code: u8) -> Result<Self, Self::Error> {
+        match code {
+            0x1 => Ok(Key::One),
+            0x2 => Ok(Key::Two),
+            0x3 => Ok(Key::Three),
+            0xC => Ok(Key::Four),
+            0x4 => Ok(Key::Q),
+            0x5 => Ok(Key::W),
+            0x6 => Ok(Key::E),
+            0xD => Ok(Key::R),
+            0x7 => Ok(Key::A),
+            0x8 => Ok(Key::S),
+            0x9 => Ok(Key::D),
+            0xE => Ok(Key::F),
+            0xA => Ok(Key::Z),
+            0x0 => Ok(Key::X),
+            0xB => Ok(Key::C),
+            0xF => Ok(Key::V),
+            _ => Err("not a valid key code")
+        }
+    }
+}
+
 impl TryFrom<DeviceKey> for Key {
     type Error = &'static str;
     fn try_from(key: DeviceKey) -> Result<Self, Self::Error> {
@@ -125,8 +150,10 @@ pub struct Keyboard {
 impl Keyboard {
     // on terminal focus
     pub fn handle_focus(&mut self) {
-        self.focused = true;
-        log::debug!("focus gained");
+        if !self.focused {
+            self.focused = true;
+            log::info!("focus gained");
+        }
     }
 
     // on terminal unfocus
@@ -136,25 +163,16 @@ impl Keyboard {
         self.key_down_change = None;
         self.key_up_change = None;
 
-        log::debug!("clearing pressed keys because of focus lost");
+        log::info!("clearing pressed keys because of focus lost");
     }
 
     // we default set focused to false but the terminal could just not fire a terminal focus event at the start or not support such events in the first place
     // therefore if we receive an event from crossterm but our state is unfocued we know this must be incorrect and update it accordingly
     // afterwards we must handle the trigger key if possible because we cannot rely on device_query being able to capture events after crossterm (a data race)
-    pub fn handle_crossterm_poke(&mut self, event: CrosstermKeyEvent) {
+    pub fn handle_focusing_key_down(&mut self, key: Key) {
         if !self.focused {
-            self.focused = true;
-            log::debug!("focus gained from terminal key event");
-
-            if let Ok(key) = Key::try_from(event.code) {
-                // release event only works on kitty terminals (which we dont even setup for) but lets just leave this here anyway
-                if event.kind == CrosstermKeyEventKind::Release {
-                    self.handle_key_up(key);
-                } else {
-                    self.handle_key_down(key);
-                }
-            }
+            self.handle_focus();
+            self.handle_key_down(key);
         }
     }
 
@@ -167,8 +185,8 @@ impl Keyboard {
             self.key_down_change = Some(key.to_code());
             self.focused_down_keys |= 1 << key.to_code();
 
-            log::debug!("focused key change detected: bitmap {:#018b}", self.focused_down_keys);
-            log::debug!("changed key -> pressed key {:?} code {:X?}", key, key.to_code());
+            log::info!("focused key change detected: bitmap {:#018b}", self.focused_down_keys);
+            log::info!("changed key -> pressed key {:?} code {:X?}", key, key.to_code());
         }
     }
 
@@ -181,8 +199,8 @@ impl Keyboard {
             self.key_up_change = Some(key.to_code());
             self.focused_down_keys &= !(1 << key.to_code());
 
-            log::debug!("focused key change detected: bitmap {:#018b}", self.focused_down_keys);
-            log::debug!("changed key -> released key {:?} code {:X?}", key, key.to_code());
+            log::info!("focused key change detected: bitmap {:#018b}", self.focused_down_keys);
+            log::info!("changed key -> released key {:?} code {:X?}", key, key.to_code());
         }
     }
 
