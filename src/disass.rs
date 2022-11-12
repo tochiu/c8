@@ -1,6 +1,6 @@
 use crate::{
     interp::Instruction,
-    prog::{Program, PROGRAM_MEMORY_SIZE, PROGRAM_STARTING_ADDRESS},
+    prog::{Program, PROGRAM_STARTING_ADDRESS},
 };
 
 use std::fmt::Display;
@@ -77,19 +77,17 @@ impl From<Program> for Disassembly {
 
 impl Disassembly {
     fn addr_index(&self, addr: u16) -> Option<usize> {
-        if addr % 2 == 0
-            && addr >= PROGRAM_STARTING_ADDRESS
-            && addr < PROGRAM_MEMORY_SIZE
+        if addr >= PROGRAM_STARTING_ADDRESS
             && addr < PROGRAM_STARTING_ADDRESS + self.program.data.len() as u16
         {
-            Some((addr - PROGRAM_STARTING_ADDRESS) as usize / 2)
+            Some((addr - PROGRAM_STARTING_ADDRESS) as usize)
         } else {
             None
         }
     }
 
     fn index_addr(&self, index: usize) -> u16 {
-        PROGRAM_STARTING_ADDRESS + 2 * index as u16
+        PROGRAM_STARTING_ADDRESS + index as u16
     }
 
     fn eval(&mut self, state: DisassemblyPath) -> bool {
@@ -114,6 +112,9 @@ impl Disassembly {
                     if let Some(index) = self.addr_index(addr) {
                         self.eval(state.fork(index))
                     } else {
+                        if state.tag == InstructionTag::Proven {
+                            log::error!("Attempt to jump to instruction {:#05X}", addr);
+                        }
                         false
                     }
                 }
@@ -122,33 +123,64 @@ impl Disassembly {
                 // should stick if the path intersects a similar or better path
                 // (this instruction is what is singe-handedly making this disassembler nontrivial)
                 Instruction::JumpWithOffset(addr, _) => {
-                    if let Some(index) = self.addr_index(addr) {
-                        let bound = (index + 128).min(self.tags.len());
-                        for kind in self.tags[index..bound].iter_mut() {
+                    let maybe_lbound = self.addr_index(addr);
+                    let maybe_rbound = self.addr_index(addr + 255);
+
+                    if maybe_lbound.or(maybe_rbound).is_some() {
+                        log::info!(
+                            "Jump with offset from {:#05X} to {:#05X} + [0, 256) found",
+                            self.index_addr(state.index),
+                            addr
+                        );
+
+                        let lbound = maybe_lbound.unwrap_or(0);
+                        let rbound = maybe_rbound.unwrap_or(self.tags.len().saturating_sub(1));
+                        for kind in self.tags[lbound..=rbound].iter_mut() {
                             if *kind == InstructionTag::Parsable {
                                 *kind = InstructionTag::Reachable;
                             }
                         }
 
-                        for i in index..bound {
+                        for i in lbound..=rbound {
                             self.eval(state.fork(i).tag(InstructionTag::Likely));
                         }
 
                         true
                     } else {
+                        if state.tag == InstructionTag::Proven {
+                            log::error!("Attempt to jump from {:#05X} to {:#05X} + [0, 256)", self.index_addr(state.index), addr);
+                        } else {
+                            log::warn!("Potential attempt to jump from {:#05X} to {:#05X} + [0, 256)", self.index_addr(state.index), addr);
+                        }
                         false
                     }
                 }
 
                 Instruction::CallSubroutine(addr) => {
                     if let Some(index) = self.addr_index(addr) {
-                        self.eval(state.fork(index).subroutine()) && self.eval(state.fork(state.index + 1))
+                        self.eval(state.fork(index).subroutine())
+                            && self.eval(state.fork(state.index + 2))
                     } else {
+                        if state.tag == InstructionTag::Proven {
+                            log::error!("Attempt to call subroutine {:#05X}", addr);
+                        }
                         false
                     }
                 }
 
-                Instruction::SubroutineReturn => state.depth > 0,
+                Instruction::SubroutineReturn => {
+                    if state.depth > 0 {
+                        true
+                    } else {
+                        if state.tag == InstructionTag::Proven {
+                            log::error!(
+                                "Attempted return at {:#05X} when stack is empty", 
+                                self.index_addr(state.index)
+                            );
+                        }
+                        false
+                    }
+                },
                 Instruction::SkipIfEqualsConstant(_, _)
                 | Instruction::SkipIfNotEqualsConstant(_, _)
                 | Instruction::SkipIfEquals(_, _)
@@ -158,14 +190,13 @@ impl Disassembly {
                     // evaluate branches (after this match statement the normal branch is evaluated)
                     // one quirk i notice is that only 1 of the skip branches must be valid for the branch to be valid
                     // this seems sensible to me for disassembly but i could be wrong (im probably wrong)
-                    let false_path_is_valid = self.eval(state.fork(state.index + 1));
-                    let true_path_is_valid = self.eval(state.fork(state.index + 2));
+                    let false_path_is_valid = self.eval(state.fork(state.index + 2));
+                    let true_path_is_valid = self.eval(state.fork(state.index + 4));
                     false_path_is_valid || true_path_is_valid
                 }
 
-                // if we made it this far then the instruction doesn't introduce a discontinuity
-                // so evaluate the next
-                _ => self.eval(state.fork(state.index + 1)),
+                // if we made it this far then the instruction doesn't introduce a discontinuity so evaluate the next
+                _ => self.eval(state.fork(state.index + 2)),
             };
 
             log::trace!(
@@ -181,15 +212,22 @@ impl Disassembly {
                 return false;
             }
 
-            return true;
+            true
+        } else {
+            log::trace!(
+                "path {:#05X?} is not parsable, bubbling!",
+                self.index_addr(state.index)
+            );
+
+            if state.tag == InstructionTag::Proven {
+                log::error!(
+                    "Could not decode proven instruction at {:#05X} (Binary could be faulty or instruction is dynamically loaded)", 
+                    self.index_addr(state.index)
+                );
+            }
+
+            false
         }
-
-        log::trace!(
-            "path {:#05X?} is not parsable, bubbling!",
-            self.index_addr(state.index)
-        );
-
-        return false;
     }
 }
 
@@ -218,7 +256,16 @@ impl Display for Disassembly {
         content_columns += 4 - (content_columns + 2) % 4;
 
         for (i, params) in self.program.instruction_parameters().enumerate() {
-            let addr = PROGRAM_STARTING_ADDRESS as usize + 2 * i;
+            if self.tags[i] < InstructionTag::Proven
+                && self
+                    .tags
+                    .get(i - 1)
+                    .map_or(false, |&tag| tag >= InstructionTag::Proven)
+            {
+                continue;
+            }
+
+            let addr = PROGRAM_STARTING_ADDRESS as usize + i;
             let addr_symbol = match self.tags[i] {
                 InstructionTag::Not => ' ',
                 InstructionTag::Parsable => '?',
@@ -232,7 +279,13 @@ impl Display for Disassembly {
 
             let (content, comment) = asm[i].as_ref().map_err(|_| std::fmt::Error)?;
 
-            write!(f, "{:#05X}: |{}| {:#06X}", addr, addr_symbol, params.bits)?;
+            write!(f, "{:#05X}: |{}| ", addr, addr_symbol)?;
+
+            if self.tags[i] >= InstructionTag::Parsable {
+                write!(f, "{:#06X}", params.bits)?;
+            } else {
+                write!(f, "{}", " ".repeat(6))?;
+            }
 
             if self.tags[i] >= InstructionTag::Proven {
                 if !content.is_empty() {
@@ -257,7 +310,7 @@ impl Display for Disassembly {
                 write_byte_str(byte1, 2, &mut graphic1)?;
 
                 let mut offset = 0;
-                
+
                 if self.tags[i] >= InstructionTag::Likely && !content.is_empty() {
                     write!(f, " {}", content)?;
                     offset = content.len() + 1;
@@ -270,14 +323,14 @@ impl Display for Disassembly {
                     byte0,
                     graphic0
                 )?;
-                writeln!(
-                    f,
-                    "{:#05X}: | |{}# {:08b} 2X GRAHPHIC {}",
-                    addr + 1,
-                    " ".repeat(content_columns + 8),
-                    byte1,
-                    graphic1
-                )?;
+
+                // writeln!(
+                //     f,
+                //     "       | |{}# {:08b} 2X GRAHPHIC {}",
+                //     " ".repeat(content_columns + 8),
+                //     byte1,
+                //     graphic1
+                // )?;
             }
         }
 
@@ -319,98 +372,98 @@ fn write_inst_asm(
         Instruction::SubroutineReturn => write!(f, "ret"),
 
         Instruction::SkipIfEqualsConstant(vx, value) => {
-            write!(f, "seq   $v{} {}", vx, value)?;
-            write!(c, "skip next if $v{} == {}", vx, value)
+            write!(f, "seq   v{:x} {}", vx, value)?;
+            write!(c, "skip next if v{:x} == {}", vx, value)
         }
         Instruction::SkipIfNotEqualsConstant(vx, value) => {
-            write!(f, "sne   $v{} {}", vx, value)?;
-            write!(c, "skip next if $v{} != {}", vx, value)
+            write!(f, "sne   v{:x} {}", vx, value)?;
+            write!(c, "skip next if v{:x} != {}", vx, value)
         }
         Instruction::SkipIfEquals(vx, vy) => {
-            write!(f, "seq   $v{} $v{}", vx, vy)?;
-            write!(c, "skip next if $v{} == $v{}", vx, vy)
+            write!(f, "seq   v{:x} v{:x}", vx, vy)?;
+            write!(c, "skip next if v{:x} == v{:x}", vx, vy)
         }
         Instruction::SkipIfNotEquals(vx, vy) => {
-            write!(f, "sne   $v{} $v{}", vx, vy)?;
-            write!(c, "skip next if $v{} != $v{}", vx, vy)
+            write!(f, "sne   v{:x} v{:x}", vx, vy)?;
+            write!(c, "skip next if v{:x} != v{:x}", vx, vy)
         }
         Instruction::SkipIfKeyDown(vx) => {
-            write!(f, "skd   $v{}", vx)?;
-            write!(c, "skip next if $v{} key is down", vx)
+            write!(f, "skd   v{:x}", vx)?;
+            write!(c, "skip next if v{:x} key is down", vx)
         }
         Instruction::SkipIfKeyNotDown(vx) => {
-            write!(f, "sku   $v{}", vx)?;
-            write!(c, "skip next if $v{} key is up", vx)
+            write!(f, "sku   v{:x}", vx)?;
+            write!(c, "skip next if v{:x} key is up", vx)
         }
         Instruction::GetKey(vx) => {
-            write!(f, "lnkp  $v{}", vx)?;
-            write!(c, "$v{} = load next key press", vx)
+            write!(f, "lnkp  v{:x}", vx)?;
+            write!(c, "v{:x} = load next key press", vx)
         }
         Instruction::SetConstant(vx, value) => {
-            write!(f, "mov   $v{} {}", vx, value)?;
-            write!(c, "$v{} = {}", vx, value)
+            write!(f, "mov   v{:x} {}", vx, value)?;
+            write!(c, "v{:x} = {}", vx, value)
         }
         Instruction::AddConstant(vx, value) => {
-            write!(f, "add   $v{} {}", vx, value)?;
-            write!(c, "$v{} += {}", vx, value)
+            write!(f, "add   v{:x} {}", vx, value)?;
+            write!(c, "v{:x} += {}", vx, value)
         }
         Instruction::Set(vx, vy) => {
-            write!(f, "mov   $v{} $v{}", vx, vy)?;
-            write!(c, "$v{} = $v{}", vx, vy)
+            write!(f, "mov   v{:x} v{:x}", vx, vy)?;
+            write!(c, "v{:x} = v{:x}", vx, vy)
         }
         Instruction::Or(vx, vy) => {
-            write!(f, "or    $v{} $v{}", vx, vy)?;
-            write!(c, "$v{} |= $v{}", vx, vy)
+            write!(f, "or    v{:x} v{:x}", vx, vy)?;
+            write!(c, "v{:x} |= v{:x}", vx, vy)
         }
         Instruction::And(vx, vy) => {
-            write!(f, "and   $v{} $v{}", vx, vy)?;
-            write!(c, "$v{} &= $v{}", vx, vy)
+            write!(f, "and   v{:x} v{:x}", vx, vy)?;
+            write!(c, "v{:x} &= v{:x}", vx, vy)
         }
         Instruction::Xor(vx, vy) => {
-            write!(f, "xor   $v{} $v{}", vx, vy)?;
-            write!(c, "$v{} ^= $v{}", vx, vy)
+            write!(f, "xor   v{:x} v{:x}", vx, vy)?;
+            write!(c, "v{:x} ^= v{:x}", vx, vy)
         }
         Instruction::Add(vx, vy) => {
-            write!(f, "add   $v{} $v{}", vx, vy)?;
-            write!(c, "$v{} += $v{}", vx, vy)
+            write!(f, "add   v{:x} v{:x}", vx, vy)?;
+            write!(c, "v{:x} += v{:x}", vx, vy)
         }
         Instruction::Sub(vx, vy, vx_minus_vy) => {
             if *vx_minus_vy {
-                write!(f, "sub   $v{} $v{}", vx, vy)?;
-                write!(c, "$v{} -= $v{}", vx, vy)
+                write!(f, "sub   v{:x} v{:x}", vx, vy)?;
+                write!(c, "v{:x} -= v{:x}", vx, vy)
             } else {
-                write!(f, "subn  $v{} $v{}", vx, vy)?;
-                write!(c, "$v{} = $v{} - $v{}", vx, vy, vx)
+                write!(f, "subn  v{:x} v{:x}", vx, vy)?;
+                write!(c, "v{:x} = v{:x} - v{:x}", vx, vy, vx)
             }
         }
         Instruction::Shift(vx, vy, right) => {
             if *right {
-                write!(f, "srl   $v{} $v{}", vx, vy)?;
-                write!(c, "$v{} = $v{} >> 1", vx, vy)
+                write!(f, "srl   v{:x} v{:x}", vx, vy)?;
+                write!(c, "v{:x} = v{:x} >> 1", vx, vy)
             } else {
-                write!(f, "sll   $v{} $v{}", vx, vy)?;
-                write!(c, "$v{} = $v{} << 1", vx, vy)
+                write!(f, "sll   v{:x} v{:x}", vx, vy)?;
+                write!(c, "v{:x} = v{:x} << 1", vx, vy)
             }
         }
         Instruction::GetDelayTimer(vx) => {
-            write!(f, "ldly  $v{}", vx)?;
-            write!(c, "$v{} = delay timer", vx)
+            write!(f, "ldly  v{:x}", vx)?;
+            write!(c, "v{:x} = delay timer", vx)
         }
         Instruction::SetDelayTimer(vx) => {
-            write!(f, "sdly  $v{}", vx)?;
-            write!(c, "delay timer = $v{}", vx)
+            write!(f, "sdly  v{:x}", vx)?;
+            write!(c, "delay timer = v{:x}", vx)
         }
         Instruction::SetSoundTimer(vx) => {
-            write!(f, "sound $v{}", vx)?;
-            write!(c, "sound timer = $v{}", vx)
+            write!(f, "sound v{:x}", vx)?;
+            write!(c, "sound timer = v{:x}", vx)
         }
         Instruction::SetIndex(value) => {
             write!(f, "iset  {:#05X}", value)?;
             write!(c, "index = {:#05X}", value)
         }
         Instruction::SetIndexToHexChar(vx) => {
-            write!(f, "ichr  $v{}", vx)?;
-            write!(c, "index = sprite address of hexadecimal char $v{}", vx)
+            write!(f, "ichr  v{:x}", vx)?;
+            write!(c, "index = sprite address of hexadecimal char v{:x}", vx)
         }
         Instruction::AddToIndex(value) => {
             write!(f, "iadd  {}", value)?;
@@ -418,25 +471,25 @@ fn write_inst_asm(
         }
         Instruction::Load(vx) => {
             write!(f, "load  {}", vx + 1)?;
-            write!(c, "load {} byte(s) into $v(0..={})", vx + 1, vx)
+            write!(c, "load {} byte(s) into v(0..={})", vx + 1, vx)
         }
         Instruction::Store(vx) => {
             write!(f, "save  {}", vx + 1)?;
-            write!(c, "save {} byte(s) from $v(0..={})", vx + 1, vx)
+            write!(c, "save {} byte(s) from v(0..={})", vx + 1, vx)
         }
         Instruction::StoreDecimal(vx) => {
-            write!(f, "sbcd  $v{}", vx)?;
-            write!(c, "save binary-coded decimal $v{}", vx)
+            write!(f, "sbcd  v{:x}", vx)?;
+            write!(c, "save binary-coded decimal v{:x}", vx)
         }
         Instruction::GenerateRandom(vx, bound) => {
-            write!(f, "rand  $v{} {}", vx, bound)?;
-            write!(c, "$v{} = rand in range [0, {}]", vx, bound)
+            write!(f, "rand  v{:x} {}", vx, bound)?;
+            write!(c, "v{:x} = rand in range [0, {}]", vx, bound)
         }
         Instruction::Display(vx, vy, height) => {
-            write!(f, "disp  $v{} $v{} {}", vx, vy, height)?;
+            write!(f, "disp  v{:x} v{:x} {}", vx, vy, height)?;
             write!(
                 c,
-                "display {} row{} of sprite at screen pos ($v{}, $v{})",
+                "display {} row{} of sprite at screen pos (v{:x}, v{:x})",
                 height,
                 if *height == 1 { "" } else { "s" },
                 vx,
