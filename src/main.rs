@@ -14,20 +14,24 @@ use prog::{Program, ProgramKind};
 use disass::Disassembly;
 
 use device_query::DeviceEvents;
-use crossterm::event::{
+use crossterm::{event::{
     poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers, KeyEventKind,
-};
+}, style::Stylize};
 use log::LevelFilter;
-use util::Interval;
-use vm::{VMRunner, VMRunConfig, VMEvent};
-
+use util::{Interval, IntervalAccuracy};
+use vm::{VMRunner, VMRunConfig, VMEvent, VMRunResult};
 
 use std::{
     io,
     sync::{Mutex, mpsc::{channel, TryRecvError}},
-    thread::{self, JoinHandle},
+    thread,
     time::Duration,
 };
+
+// TODO: maybe support sound (right now the sound timer does nothing external)
+
+const INSTRUCTION_FREQUENCY: u32 = 2000;
+const TIMER_FREQUENCY: u32 = 60;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // arg parsing
@@ -78,7 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             Some("cosmacvip") => ProgramKind::COSMACVIP,
             Some("chip48") => ProgramKind::CHIP48,
-            Some("common") => ProgramKind::COMMON,
+            Some("chip8") => ProgramKind::CHIP8,
             _ => Err("--kind must be followed by COSMACVIP, CHIP48, or COMMON")?,
         };
 
@@ -104,145 +108,146 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // dissassemble if requested
     if disassemble {
         if let Some(level) = logger_level.to_level() {
-            simple_logger::init_with_level(level).unwrap();
+            simple_logger::init_with_level(level)?;
         }
 
         log::info!("Dissassembling \"{}\"", program_name);
-        print!("{}", Disassembly::from(program));
+        let disassembly = Disassembly::from(program);
         log::info!("Dissassembly complete");
+        print!("{}", disassembly);
+    } else {
+        // initialize tui logger
+        if logger_level != LevelFilter::Off {
+            tui_logger::init_logger(logger_level)?;
+            tui_logger::set_default_level(logger_level);
+        }
 
-        return Ok(());
-    }
+        // thread-safe virtual machine runner
+        let mut vm_runner = VMRunner::spawn(VMRunConfig {
+            instruction_frequency: INSTRUCTION_FREQUENCY,
+            timer_frequency: TIMER_FREQUENCY,
+        }, program);
 
-    // initialize tui logger
-    if logger_level != LevelFilter::Off {
-        tui_logger::init_logger(logger_level).unwrap();
-        tui_logger::set_default_level(logger_level);
-    }
+        let (render_sender, render_thread) = { // terminal render thread
 
-    let mut handles: Vec<JoinHandle<Result<(), std::io::Error>>> = vec![];
-    let (render_sender, render_receiver) = channel::<RenderEvent>();
+            // terminal struct for drawing the display
+            let mut terminal = Terminal::setup(
+                format!(" {} Virtual Machine ({}) ", program_kind, program_name),
+                logger_level != LevelFilter::Off,
+            )?;
 
-    // thread-safe virtual machine runner
-    let mut vm_runner = VMRunner::spawn(VMRunConfig {
-        instruction_frequency: 2000,
-        timer_frequency: 60,
-        display_sender: render_sender.clone()
-    }, program);
+            let vm = vm_runner.vm();
 
-    { // terminal render thread
+            let (render_sender, render_receiver) = channel::<RenderEvent>();
 
-        // terminal struct for drawing the display
-        let mut terminal = Terminal::setup(
-            format!(" CHIP8 Virtual Machine ({}) ", program_name),
-            logger_level != LevelFilter::Off,
-        )?;
+            (render_sender, thread::spawn(move || -> Result<(), io::Error> {
+                let mut buf = EMPTY_DISPLAY;
 
-        handles.push(thread::spawn(move || -> Result<(), io::Error> {
-            let mut buf = EMPTY_DISPLAY;
+                let mut interval = Interval::new(
+                    "render",
+                    Duration::from_millis(16),
+                    Duration::from_millis(16),
+                    IntervalAccuracy::Default
+                );
 
-            let mut interval = Interval::new(
-                "render",
-                Duration::from_millis(16),
-                Duration::from_millis(16),
-            );
-
-            loop {
-                let mut rerender = false;
-                for event in render_receiver.try_iter() {
-                    match event {
-                        RenderEvent::Display(new_buf) => {
-                            buf = new_buf;
-                            rerender = true;
-                        },
-                        RenderEvent::Refresh => rerender = true
+                loop {
+                    let mut rerender = false;
+                    for event in render_receiver.try_iter() {
+                        match event {
+                            RenderEvent::Refresh => rerender = true
+                        }
                     }
-                }
 
-                if let Err(TryRecvError::Disconnected) = render_receiver.try_recv() {
-                    terminal.exit()?;
-                    return Ok(())
-                } 
+                    if let Err(TryRecvError::Disconnected) = render_receiver.try_recv() {
+                        terminal.exit()?;
+                        return Ok(())
+                    }
+
+                    if let Some(new_buf) = vm.lock().unwrap().extract_new_frame() {
+                        buf = new_buf;
+                        rerender = true;
+                    }
+                    
+                    if rerender {
+                        terminal.draw(&buf)?;
+                    }
+
+                    interval.sleep();
+                }
+            }))
+        };
+
+        let main_thread = { // main thread
+
+            let vm_event_sender = vm_runner.vm_event_sender();
+
+            thread::spawn(move || -> VMRunResult {
+
+                let device_state = device_query::DeviceState::new();
                 
-                if rerender {
-                    terminal.draw(&buf)?;
-                }
-                interval.sleep();
-            }
-        }));
-    }
+                let _guard_key_down = {
+                    let vm_event_sender = Mutex::new(vm_event_sender.clone());
+                    device_state.on_key_down(move |key| {
+                        if let Ok(key) = Key::try_from(*key) {
+                            vm_event_sender.lock().unwrap().send(VMEvent::KeyDown(key)).unwrap_or_default()
+                        }
+                    })
+                };
 
-    { // main thread
+                let _guard_key_up = {
+                    let vm_event_sender = Mutex::new(vm_event_sender.clone());
+                    device_state.on_key_up(move |key| {
+                        if let Ok(key) = Key::try_from(*key) {
+                            vm_event_sender.lock().unwrap().send(VMEvent::KeyUp(key)).unwrap_or_default()
+                        }
+                    })
+                };
 
-        let vm_event_sender = vm_runner.clone_event_sender();
+                // start vm
+                vm_runner.resume().unwrap();
 
-        handles.push(thread::spawn(move || -> Result<(), io::Error> {
-
-            let device_state = device_query::DeviceState::new();
-            
-            let _guard_key_down = {
-                let vm_event_sender = Mutex::new(vm_event_sender.clone());
-                device_state.on_key_down(move |key| {
-                    if let Ok(key) = Key::try_from(*key) {
-                        vm_event_sender.lock().unwrap().send(VMEvent::KeyDown(key)).unwrap_or_default()
-                    }
-                })
-            };
-
-            let _guard_key_up = {
-                let vm_event_sender = Mutex::new(vm_event_sender.clone());
-                device_state.on_key_up(move |key| {
-                    if let Ok(key) = Key::try_from(*key) {
-                        vm_event_sender.lock().unwrap().send(VMEvent::KeyUp(key)).unwrap_or_default()
-                    }
-                })
-            };
-
-            // start vm
-            vm_runner.resume().unwrap();
-
-            loop { // poll for important events specific to the terminal that device_qeury could not comprehend
-                if poll(Duration::from_millis(100))? {
-                    match read()? {
-                        Event::Resize(_, _) => render_sender.send(RenderEvent::Refresh).unwrap_or_default(),
-                        Event::FocusGained => vm_event_sender.send(VMEvent::Focus).unwrap_or_default(),
-                        Event::FocusLost => vm_event_sender.send(VMEvent::Unfocus).unwrap_or_default(),
-                        Event::Key(key_event) => { // Esc or Crtl+C interrupt handler
-                            if key_event.code == CrosstermKey::Esc
-                                || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL)
-                                    && (key_event.code == CrosstermKey::Char('c')
-                                        || key_event.code == CrosstermKey::Char('C'))
-                            {
-                                // exit virtual machine
-                                vm_runner.exit().unwrap();
-                                return Ok(());
-                            } else {
-                                // kinda expecting a crossterm key event to mean terminal is in focus
-                                // pretty sure device state executing first sinks a key input
-                                if key_event.kind == KeyEventKind::Press {
-                                    if let Ok(key) = Key::try_from(key_event.code) {
-                                        vm_event_sender.send(VMEvent::FocusingKeyDown(key)).unwrap_or_default();
+                loop { // poll for important events specific to the terminal that device_qeury could not comprehend
+                    if poll(Duration::from_millis(50)).unwrap() {
+                        match read().unwrap() {
+                            Event::Resize(_, _) => render_sender.send(RenderEvent::Refresh).unwrap_or_default(),
+                            Event::FocusGained => vm_event_sender.send(VMEvent::Focus).unwrap_or_default(),
+                            Event::FocusLost => vm_event_sender.send(VMEvent::Unfocus).unwrap_or_default(),
+                            Event::Key(key_event) => { // Esc or Crtl+C interrupt handler
+                                if key_event.code == CrosstermKey::Esc
+                                    || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL)
+                                        && (key_event.code == CrosstermKey::Char('c')
+                                            || key_event.code == CrosstermKey::Char('C'))
+                                {
+                                    // exit virtual machine
+                                    return vm_runner.exit()
+                                } else {
+                                    // kinda expecting a crossterm key event to mean terminal is in focus
+                                    // pretty sure device state executing first sinks a key input
+                                    if key_event.kind == KeyEventKind::Press {
+                                        if let Ok(key) = Key::try_from(key_event.code) {
+                                            vm_event_sender.send(VMEvent::FocusingKeyDown(key)).unwrap_or_default();
+                                        }
                                     }
                                 }
                             }
+                            _ => (),
                         }
-                        _ => (),
                     }
+
+                    // update log if its on
+                    if logger_level != LevelFilter::Off {
+                        render_sender.send(RenderEvent::Refresh).unwrap_or_default();
+                    }
+
+                    // TODO: we should check state and exit if panic here
                 }
+            })
+        };
 
-                // update log if its on
-                if logger_level != LevelFilter::Off {
-                    render_sender.send(RenderEvent::Refresh).unwrap_or_default();
-                }
-
-                // TODO: we should check state and exit if panic here
-            }
-        }))
-    }
-
-    // wait for all threads
-    for handler in handles {
-        handler.join().unwrap()?;
+        // wait for threads
+        render_thread.join().unwrap()?;
+        println!("\n  {} for {} thread", format!("Waiting").green().bold(), program_kind);
+        println!("{}", main_thread.join().unwrap().unwrap());
     }
 
     Ok(())

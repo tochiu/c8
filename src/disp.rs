@@ -1,3 +1,7 @@
+use crossterm::{
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use tui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -6,11 +10,6 @@ use tui::{
     Terminal as TUITerminal,
 };
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
-
-use crossterm::{
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
 
 use std::io;
 
@@ -21,12 +20,11 @@ pub const EMPTY_DISPLAY: DisplayBuffer = [0; DISPLAY_HEIGHT as usize];
 
 // Each u64 represents a row of the display with each bit representing whether that pixel should be on or not
 // The number of u64s represents the display height
-// NOTE: The most signficant bit corresponds to the left-most pixel on the row 
+// NOTE: The most signficant bit corresponds to the left-most pixel on the row
 pub type DisplayBuffer = [u64; DISPLAY_HEIGHT as usize];
 
 pub enum RenderEvent {
-    Display(DisplayBuffer),
-    Refresh
+    Refresh,
 }
 
 struct DisplayWidget<'a> {
@@ -39,7 +37,7 @@ impl<'a> Widget for DisplayWidget<'_> {
         let display_area = Rect::new(1, 1, DISPLAY_WIDTH as u16, DISPLAY_HEIGHT as u16);
 
         // if there is no common area between where the display must be drawn (display_area) and our allowed render area then we do nothing
-        if !render_area.intersects(display_area) { 
+        if !render_area.intersects(display_area) {
             return;
         }
 
@@ -47,7 +45,7 @@ impl<'a> Widget for DisplayWidget<'_> {
 
         let intersect_area = render_area.intersection(display_area);
 
-        // now get the bit for each position (x, y) in the intersection area 
+        // now get the bit for each position (x, y) in the intersection area
         // and change the color of the terminal background at that position accordingly
 
         for y in intersect_area.top()..intersect_area.bottom() {
@@ -75,8 +73,7 @@ pub struct Terminal {
 }
 
 impl Terminal {
-
-    // change terminal to an alternate screen so user doesnt lose terminal history on exit 
+    // change terminal to an alternate screen so user doesnt lose terminal history on exit
     // and enable raw mode so we have full authority over event handling and output
     pub fn setup(title: String, logger_enabled: bool) -> Result<Terminal, io::Error> {
         enable_raw_mode()?;
@@ -88,7 +85,7 @@ impl Terminal {
             logger_enabled,
         })
     }
-    
+
     // clean up the terminal so its usable after program exit
     pub fn exit(&mut self) -> Result<(), io::Error> {
         disable_raw_mode()?;
@@ -110,7 +107,13 @@ impl Terminal {
                 /* divide screen into two equally sized regions flowing horizontally */
                 let rects = Layout::default()
                     .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
+                    .constraints(
+                        if f.size().width > (64 + 2)*2 { 
+                            [Constraint::Length(64 + 2), Constraint::Length(f.size().width - (64 + 2))] 
+                        } else { 
+                            [Constraint::Percentage(50), Constraint::Percentage(50)] 
+                        }.as_ref()
+                    )
                     .split(f.size());
 
                 /* draw the vm window with display */

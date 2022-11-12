@@ -3,7 +3,7 @@ use crate::interp::InterpreterInput;
 use crossterm::event::KeyCode as CrosstermKey;
 use device_query::Keycode as DeviceKey;
 
-pub use crossterm::event::{KeyEventKind as CrosstermKeyEventKind, KeyEvent as CrosstermKeyEvent};
+pub use crossterm::event::{KeyEvent as CrosstermKeyEvent, KeyEventKind as CrosstermKeyEventKind};
 pub use device_query::DeviceState as KeyboardBackend;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
@@ -70,7 +70,7 @@ impl TryFrom<u8> for Key {
             0x0 => Ok(Key::X),
             0xB => Ok(Key::C),
             0xF => Ok(Key::V),
-            _ => Err("not a valid key code")
+            _ => Err("not a valid key code"),
         }
     }
 }
@@ -104,28 +104,26 @@ impl TryFrom<CrosstermKey> for Key {
     type Error = &'static str;
     fn try_from(key: CrosstermKey) -> Result<Self, Self::Error> {
         match key {
-            CrosstermKey::Char(c) => {
-                match c {
-                    '1' => Ok(Key::One),
-                    '2' => Ok(Key::Two),
-                    '3' => Ok(Key::Three),
-                    '4' => Ok(Key::Four),
-                    'Q' | 'q' => Ok(Key::Q),
-                    'W' | 'w' => Ok(Key::W),
-                    'E' | 'e' => Ok(Key::E),
-                    'R' | 'r' => Ok(Key::R),
-                    'A' | 'a' => Ok(Key::A),
-                    'S' | 's' => Ok(Key::S),
-                    'D' | 'd' => Ok(Key::D),
-                    'F' | 'f' => Ok(Key::F),
-                    'Z' | 'z' => Ok(Key::Z),
-                    'X' | 'x' => Ok(Key::X),
-                    'C' | 'c' => Ok(Key::C),
-                    'V' | 'v' => Ok(Key::V),
-                    _ => Err("not a valid char")
-                }
-            }
-            _ => Err("not a valid key")
+            CrosstermKey::Char(c) => match c {
+                '1' => Ok(Key::One),
+                '2' => Ok(Key::Two),
+                '3' => Ok(Key::Three),
+                '4' => Ok(Key::Four),
+                'Q' | 'q' => Ok(Key::Q),
+                'W' | 'w' => Ok(Key::W),
+                'E' | 'e' => Ok(Key::E),
+                'R' | 'r' => Ok(Key::R),
+                'A' | 'a' => Ok(Key::A),
+                'S' | 's' => Ok(Key::S),
+                'D' | 'd' => Ok(Key::D),
+                'F' | 'f' => Ok(Key::F),
+                'Z' | 'z' => Ok(Key::Z),
+                'X' | 'x' => Ok(Key::X),
+                'C' | 'c' => Ok(Key::C),
+                'V' | 'v' => Ok(Key::V),
+                _ => Err("not a valid char"),
+            },
+            _ => Err("not a valid key"),
         }
     }
 }
@@ -135,7 +133,7 @@ impl TryFrom<CrosstermKey> for Key {
 pub struct Keyboard {
     focused: bool,
 
-    // This field is a bitmap of the keyboard state because each key has 
+    // This field is a bitmap of the keyboard state because each key has
     // a hexadecimal value and there are exactly 16 of them we can do this
     // This field is needed for the SkipIfKeyDown and SkipIfKeyUp instructions
     // A 1 is key down and a 0 is key up
@@ -144,7 +142,7 @@ pub struct Keyboard {
     // These fields are used in the GetKey instruction since it must wait for a change
     // These fields are ephemeral and are therefore supposed to be cleared on flush (which should be called each interpreter step)
     key_down_change: Option<u8>,
-    key_up_change: Option<u8>
+    key_up_change: Option<u8>,
 }
 
 impl Keyboard {
@@ -181,12 +179,20 @@ impl Keyboard {
             return;
         }
 
-        if self.focused_down_keys >> key.to_code() & 1 == 0 { // make change if the bit corresponding to the key is 0 (released)
+        if self.focused_down_keys >> key.to_code() & 1 == 0 {
+            // make change if the bit corresponding to the key is 0 (released)
             self.key_down_change = Some(key.to_code());
             self.focused_down_keys |= 1 << key.to_code();
 
-            log::info!("focused key change detected: bitmap {:#018b}", self.focused_down_keys);
-            log::info!("changed key -> pressed key {:?} code {:X?}", key, key.to_code());
+            log::info!(
+                "focused key change detected: bitmap {:#018b}",
+                self.focused_down_keys
+            );
+            log::info!(
+                "changed key -> pressed key {:?} code {:X?}",
+                key,
+                key.to_code()
+            );
         }
     }
 
@@ -195,12 +201,20 @@ impl Keyboard {
             return;
         }
 
-        if self.focused_down_keys >> key.to_code() & 1 == 1 { // make change if the bit corresponding to the key if 1 (pressed)
+        if self.focused_down_keys >> key.to_code() & 1 == 1 {
+            // make change if the bit corresponding to the key if 1 (pressed)
             self.key_up_change = Some(key.to_code());
             self.focused_down_keys &= !(1 << key.to_code());
 
-            log::info!("focused key change detected: bitmap {:#018b}", self.focused_down_keys);
-            log::info!("changed key -> released key {:?} code {:X?}", key, key.to_code());
+            log::info!(
+                "focused key change detected: bitmap {:#018b}",
+                self.focused_down_keys
+            );
+            log::info!(
+                "changed key -> released key {:?} code {:X?}",
+                key,
+                key.to_code()
+            );
         }
     }
 

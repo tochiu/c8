@@ -200,13 +200,14 @@ pub enum InterpreterError {
 
 #[derive(Debug)]
 pub struct Interpreter {
-    memory: [u8; PROGRAM_MEMORY_SIZE as usize],
-    pc: u16,
-    index: u16,
-    stack: Vec<u16>,
-    registers: [u8; 16],
-    output: InterpreterOutput,
-    program: Program
+    pub memory: [u8; PROGRAM_MEMORY_SIZE as usize],
+    pub pc: u16,
+    pub index: u16,
+    pub stack: Vec<u16>,
+    pub registers: [u8; 16],
+    pub input: InterpreterInput,
+    pub output: InterpreterOutput,
+    pub program: Program
 }
 
 impl<'a> From<Program> for Interpreter {
@@ -227,6 +228,7 @@ impl<'a> From<Program> for Interpreter {
             index: 0,
             stack: Vec::new(),
             registers: [0; 16],
+            input: Default::default(),
             output: InterpreterOutput {
                 display: [0; DISPLAY_HEIGHT as usize],
                 awaiting_input: false,
@@ -244,8 +246,12 @@ impl Default for Interpreter {
 
 impl Interpreter {
 
+    pub fn input_mut(&mut self) -> &mut InterpreterInput {
+        &mut self.input
+    }
+
     // interpret the next instruction
-    pub fn step(&mut self, input: &InterpreterInput) -> Result<&InterpreterOutput, InterpreterError> {
+    pub fn step(&mut self) -> Result<&InterpreterOutput, InterpreterError> {
         // clear output request
         self.output.request = None;
 
@@ -258,10 +264,10 @@ impl Interpreter {
         self.pc += 2;
 
         // exec instruction
-        Ok(self.exec(inst, input))
+        Ok(self.exec(inst))
     }
     
-    pub fn exec(&mut self, inst: Instruction, input: &InterpreterInput) -> &InterpreterOutput {
+    pub fn exec(&mut self, inst: Instruction) -> &InterpreterOutput {
         match inst {
             Instruction::ClearScreen => {
                 self.output.display.fill(0);
@@ -315,14 +321,14 @@ impl Interpreter {
             }
 
             Instruction::SkipIfKeyDown(vx) => {
-                if input.down_keys >> self.registers[vx as usize] & 1 == 1 {
+                if self.input.down_keys >> self.registers[vx as usize] & 1 == 1 {
                     self.pc += 2
                 }
             }
 
             Instruction::SkipIfKeyNotDown(vx) => {
                 // log::debug!("skip if {:?} key up", Key::try_from(self.registers[vx as usize]));
-                if input.down_keys >> self.registers[vx as usize] & 1 == 0 {
+                if self.input.down_keys >> self.registers[vx as usize] & 1 == 0 {
                     self.pc += 2
                 }
             }
@@ -330,8 +336,8 @@ impl Interpreter {
             Instruction::GetKey(vx) => {
                 if let Some(key_code) = 
                     match self.program.kind {
-                        ProgramKind::COSMACVIP => input.just_released_key,
-                        _ => input.just_pressed_key,
+                        ProgramKind::COSMACVIP => self.input.just_released_key,
+                        _ => self.input.just_pressed_key,
                     } 
                 {
                     self.registers[vx as usize] = key_code;
@@ -387,7 +393,7 @@ impl Interpreter {
                 }
             }
 
-            Instruction::GetDelayTimer(vx) => self.registers[vx as usize] = input.delay_timer,
+            Instruction::GetDelayTimer(vx) => self.registers[vx as usize] = self.input.delay_timer,
 
             Instruction::SetDelayTimer(vx) => {
                 self.output.request = Some(InterpreterRequest::SetDelayTimer(
