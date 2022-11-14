@@ -1,5 +1,5 @@
 [package]
-name = "chip8-vm"
+name = "c8vm"
 version = "0.1.0"
 edition = "2021"
 
