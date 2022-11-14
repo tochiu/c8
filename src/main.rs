@@ -7,6 +7,7 @@ mod prog;
 mod disass;
 mod vm;
 mod util;
+mod debug;
 
 use input::Key;
 use disp::{Terminal, RenderEvent, EMPTY_DISPLAY};
@@ -23,10 +24,12 @@ use vm::{VMRunner, VMRunConfig, VMEvent, VMRunResult};
 
 use std::{
     io,
-    sync::{Mutex, mpsc::{channel, TryRecvError}},
+    sync::{Mutex, mpsc::{channel, TryRecvError}, Arc},
     thread,
     time::Duration,
 };
+
+use crate::debug::Debugger;
 
 // TODO: maybe support sound (right now the sound timer does nothing external)
 
@@ -102,6 +105,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         false
     };
 
+    let should_debug: bool = if let Some(i) = args.iter().position(|arg| arg == "--debug") {
+        args.remove(i);
+        true
+    } else {
+        false
+    };
+
     let program_name = args.first().ok_or("expected program name")?;
     let program = Program::read(format!("roms/{}.ch8", program_name), program_kind)?;
 
@@ -122,21 +132,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             tui_logger::set_default_level(logger_level);
         }
 
-        // thread-safe virtual machine runner
+        // virtual machine runner
         let mut vm_runner = VMRunner::spawn(VMRunConfig {
             instruction_frequency: INSTRUCTION_FREQUENCY,
             timer_frequency: TIMER_FREQUENCY,
         }, program);
 
+        // debugger
+        let maybe_dbg = if should_debug {
+            Some(Arc::new(Mutex::new(Debugger::new())))
+        } else {
+            None
+        };
+
         let (render_sender, render_thread) = { // terminal render thread
 
-            // terminal struct for drawing the display
+            let vm = vm_runner.vm();
             let mut terminal = Terminal::setup(
                 format!(" {} Virtual Machine ({}) ", program_kind, program_name),
                 logger_level != LevelFilter::Off,
+                maybe_dbg.clone()
             )?;
-
-            let vm = vm_runner.vm();
 
             let (render_sender, render_receiver) = channel::<RenderEvent>();
 
@@ -204,42 +220,67 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 // start vm
-                vm_runner.resume().unwrap();
+                if !should_debug {
+                    vm_runner.resume().unwrap();
+                }
 
-                loop { // poll for important events specific to the terminal that device_qeury could not comprehend
+                loop { // event loop
+
+                    let mut rerender = false;
+
                     if poll(Duration::from_millis(50)).unwrap() {
-                        match read().unwrap() {
-                            Event::Resize(_, _) => render_sender.send(RenderEvent::Refresh).unwrap_or_default(),
-                            Event::FocusGained => vm_event_sender.send(VMEvent::Focus).unwrap_or_default(),
-                            Event::FocusLost => vm_event_sender.send(VMEvent::Unfocus).unwrap_or_default(),
-                            Event::Key(key_event) => { // Esc or Crtl+C interrupt handler
-                                if key_event.code == CrosstermKey::Esc
-                                    || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL)
-                                        && (key_event.code == CrosstermKey::Char('c')
-                                            || key_event.code == CrosstermKey::Char('C'))
-                                {
-                                    // exit virtual machine
-                                    return vm_runner.exit()
-                                } else {
-                                    // kinda expecting a crossterm key event to mean terminal is in focus
-                                    // pretty sure device state executing first sinks a key input
-                                    if key_event.kind == KeyEventKind::Press {
-                                        if let Ok(key) = Key::try_from(key_event.code) {
-                                            vm_event_sender.send(VMEvent::FocusingKeyDown(key)).unwrap_or_default();
+                        if let Some(event) = read().ok() {
+                            let mut sink_key_event = false;
+                            if let Some(dbg) = maybe_dbg.as_ref() {
+                                let mut dbg = dbg.lock().unwrap();
+                                sink_key_event = sink_key_event || dbg.active;
+                                rerender = dbg.handle_input_event(event.clone(), &mut vm_runner);
+                                sink_key_event = sink_key_event || dbg.active;
+                            }
+
+                            match event {
+                                Event::Resize(_, _) => {
+                                    render_sender.send(RenderEvent::Refresh).ok();
+                                },
+                                Event::FocusGained => {
+                                    vm_event_sender.send(VMEvent::Focus).ok();
+                                },
+                                Event::FocusLost => {
+                                    vm_event_sender.send(VMEvent::Unfocus).ok();
+                                },
+                                Event::Key(key_event) => { // Esc or Crtl+C interrupt handler
+                                    if (key_event.code == CrosstermKey::Esc && !sink_key_event)
+                                        || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL)
+                                            && (key_event.code == CrosstermKey::Char('c')
+                                                || key_event.code == CrosstermKey::Char('C'))
+                                    {
+                                        // exit virtual machine
+                                        return vm_runner.exit()
+                                    } else if !sink_key_event {
+                                        // kinda expecting a crossterm key event to mean terminal is in focus
+                                        // pretty sure device state executing first sinks a key input
+                                        if let KeyEventKind::Repeat | KeyEventKind::Press = key_event.kind {
+                                            if let Ok(key) = Key::try_from(key_event.code) {
+                                                vm_event_sender.send(VMEvent::FocusingKeyDown(key)).ok();
+                                            }
                                         }
                                     }
-                                }
-                            }
-                            _ => (),
+                                },
+                                _ => (),
+                            };
                         }
                     }
 
-                    // update log if its on
+                    // TODO attach event listener to logger instead of polling to update
                     if logger_level != LevelFilter::Off {
-                        render_sender.send(RenderEvent::Refresh).unwrap_or_default();
+                        rerender = true;
                     }
 
-                    // TODO: we should check state and exit if panic here
+                    if rerender {
+                        render_sender.send(RenderEvent::Refresh).ok();
+                    }
+
+                    // TODO: we should check state and exit if panic here maybe
                 }
             })
         };

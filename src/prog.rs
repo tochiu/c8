@@ -12,7 +12,7 @@ pub enum ProgramKind {
     #[default]
     CHIP8,
     CHIP48,
-    COSMACVIP,
+    COSMACVIP
 }
 
 impl Display for ProgramKind {

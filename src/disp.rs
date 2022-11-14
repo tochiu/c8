@@ -1,6 +1,6 @@
 use crossterm::{
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}
 };
 use tui::{
     backend::CrosstermBackend,
@@ -11,7 +11,9 @@ use tui::{
 };
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
 
-use std::io;
+use std::{io::{self, stdout}, sync::{Arc, Mutex}, ops::Deref};
+
+use crate::debug::{Debugger, DebuggerWidget, DebuggerWidgetState};
 
 pub const DISPLAY_WIDTH: u8 = 64;
 pub const DISPLAY_HEIGHT: u8 = 32;
@@ -70,19 +72,21 @@ pub struct Terminal {
     title: String,
     inner: TUITerminal<CrosstermBackend<io::Stdout>>,
     logger_enabled: bool,
+    dbg: Option<(DebuggerWidgetState, Arc<Mutex<Debugger>>)>
 }
 
 impl Terminal {
     // change terminal to an alternate screen so user doesnt lose terminal history on exit
     // and enable raw mode so we have full authority over event handling and output
-    pub fn setup(title: String, logger_enabled: bool) -> Result<Terminal, io::Error> {
+    pub fn setup(title: String, logger_enabled: bool, dbg: Option<Arc<Mutex<Debugger>>>) -> Result<Terminal, io::Error> {
         enable_raw_mode()?;
-        let mut stdout = io::stdout();
+        let mut stdout = stdout();
         execute!(stdout, EnterAlternateScreen)?;
         Ok(Terminal {
             title,
             inner: TUITerminal::new(CrosstermBackend::new(stdout))?,
             logger_enabled,
+            dbg: dbg.map(|dbg| (Default::default(), dbg))
         })
     }
 
@@ -97,6 +101,36 @@ impl Terminal {
     // output the given vm display buffer to the terminal
     pub fn draw(&mut self, buf: &DisplayBuffer) -> Result<(), io::Error> {
         self.inner.draw(|f| {
+            if let Some((dbg_widget_state, dbg)) = self.dbg.as_mut() {
+                let _guard = dbg.lock().unwrap();
+                let dbg = _guard.deref();
+
+                if dbg.active {
+                    let dbg_area = f.size();
+                    let dbg_widget = DebuggerWidget {
+                        logger_enabled: self.logger_enabled,
+                        dbg
+                    };
+                    let logger_area = dbg_widget.logger_area(dbg_area);
+
+                    if let Some((x, y)) = dbg_widget.cursor_position(dbg_area, dbg_widget_state) {
+                        f.set_cursor(x, y);
+                    }
+
+                    f.render_stateful_widget(dbg_widget, dbg_area, dbg_widget_state);
+                    
+                    drop(_guard);
+
+                    if self.logger_enabled {
+                        f.render_widget(Terminal::logger_widget(), logger_area);
+                    }
+
+                    return // we dont want to exec code below
+                }
+            }
+
+            let screen_area = f.size();
+
             /* prepare vm display window with the program title at the top */
             let vm_window = Block::default()
                 .title(self.title.as_str())
@@ -104,51 +138,56 @@ impl Terminal {
                 .borders(Borders::ALL);
 
             if self.logger_enabled {
-                /* divide screen into two equally sized regions flowing horizontally */
+                /* divide screen into two regions flowing horizontally */
                 let rects = Layout::default()
                     .direction(Direction::Horizontal)
                     .constraints(
-                        if f.size().width > (64 + 2)*2 { 
-                            [Constraint::Length(64 + 2), Constraint::Length(f.size().width - (64 + 2))] 
-                        } else { 
-                            [Constraint::Percentage(50), Constraint::Percentage(50)] 
-                        }.as_ref()
+                        if screen_area.width > (64 + 2) * 2 {
+                            [
+                                Constraint::Length(64 + 2),
+                                Constraint::Length(screen_area.width - (64 + 2)),
+                            ]
+                        } else {
+                            [Constraint::Percentage(50), Constraint::Percentage(50)]
+                        }
+                        .as_ref(),
                     )
-                    .split(f.size());
+                    .split(screen_area);
 
                 /* draw the vm window with display */
                 f.render_widget(DisplayWidget { buf }, vm_window.inner(rects[0]));
                 f.render_widget(vm_window, rects[0]);
 
-                /* prepare to draw the vm logger */
-                let tui_w = TuiLoggerWidget::default()
-                    .block(
-                        Block::default()
-                            .title(" Log ")
-                            .border_style(Style::default().fg(Color::White))
-                            .borders(Borders::ALL),
-                    )
-                    .output_separator('|')
-                    .output_timestamp(Some("%H:%M:%S%.3f".to_string()))
-                    .output_level(Some(TuiLoggerLevelOutput::Abbreviated))
-                    .output_target(false)
-                    .output_file(false)
-                    .output_line(false)
-                    .style_error(Style::default().fg(Color::Red))
-                    .style_debug(Style::default().fg(Color::Cyan))
-                    .style_warn(Style::default().fg(Color::Yellow))
-                    .style_trace(Style::default().fg(Color::White))
-                    .style_info(Style::default().fg(Color::Green));
-
                 /* draw the vm logger */
-                f.render_widget(tui_w, rects[1]);
+                f.render_widget(Terminal::logger_widget(), rects[1]);
             } else {
                 /* draw the vm window with display */
-                f.render_widget(DisplayWidget { buf }, vm_window.inner(f.size()));
-                f.render_widget(vm_window, f.size());
+                f.render_widget(DisplayWidget { buf }, vm_window.inner(screen_area));
+                f.render_widget(vm_window, screen_area);
             }
         })?;
 
         Ok(())
+    }
+
+    pub fn logger_widget() -> TuiLoggerWidget<'static> {
+        TuiLoggerWidget::default()
+            .block(
+                Block::default()
+                    .title(" Log ")
+                    .border_style(Style::default().fg(Color::White))
+                    .borders(Borders::ALL),
+            )
+            .output_separator('|')
+            .output_timestamp(Some("%H:%M:%S%.3f".to_string()))
+            .output_level(Some(TuiLoggerLevelOutput::Abbreviated))
+            .output_target(false)
+            .output_file(false)
+            .output_line(false)
+            .style_error(Style::default().fg(Color::Red))
+            .style_debug(Style::default().fg(Color::Cyan))
+            .style_warn(Style::default().fg(Color::Yellow))
+            .style_trace(Style::default().fg(Color::White))
+            .style_info(Style::default().fg(Color::Green))
     }
 }

@@ -21,11 +21,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub struct VMRunConfig {
-    pub instruction_frequency: u32,
-    pub timer_frequency: u32
-}
-
 pub struct VM {
     interp: Interpreter,
 
@@ -132,6 +127,11 @@ pub enum VMEvent {
     Focus,
     Unfocus,
     FocusingKeyDown(Key),
+}
+
+pub struct VMRunConfig {
+    pub instruction_frequency: u32,
+    pub timer_frequency: u32
 }
 
 #[derive(Debug)]
