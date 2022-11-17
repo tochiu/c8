@@ -1,5 +1,5 @@
-use crate::disp::{DisplayBuffer, DISPLAY_HEIGHT, DISPLAY_WIDTH};
-use crate::prog::{Program, ProgramKind, PROGRAM_STARTING_ADDRESS, PROGRAM_MEMORY_SIZE};
+use super::disp::{DisplayBuffer, DISPLAY_HEIGHT, DISPLAY_WIDTH};
+use super::prog::{Program, ProgramKind, PROGRAM_STARTING_ADDRESS, PROGRAM_MEMORY_SIZE};
 
 use std::fmt::Display;
 

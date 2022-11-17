@@ -1,4 +1,4 @@
-use crate::interp::{Instruction, InstructionParameters};
+use super::interp::{Instruction, InstructionParameters};
 
 use std::{ffi::OsStr, fs::read, io, path::Path, fmt::Display};
 

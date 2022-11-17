@@ -1,4 +1,4 @@
-use crate::{
+use crate::vm::{
     interp::Instruction,
     prog::{Program, PROGRAM_STARTING_ADDRESS},
 };

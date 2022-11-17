@@ -1,10 +1,7 @@
-use crate::interp::InterpreterInput;
+use super::interp::InterpreterInput;
 
 use crossterm::event::KeyCode as CrosstermKey;
 use device_query::Keycode as DeviceKey;
-
-pub use crossterm::event::{KeyEvent as CrosstermKeyEvent, KeyEventKind as CrosstermKeyEventKind};
-pub use device_query::DeviceState as KeyboardBackend;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum Key {
@@ -134,7 +131,7 @@ pub struct Keyboard {
     focused: bool,
 
     // This field is a bitmap of the keyboard state because each key has
-    // a hexadecimal value and there are exactly 16 of them we can do this
+    // a hexadecimal value and there are exactly 16 of them so we can do this
     // This field is needed for the SkipIfKeyDown and SkipIfKeyUp instructions
     // A 1 is key down and a 0 is key up
     focused_down_keys: u16,

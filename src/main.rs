@@ -1,40 +1,38 @@
 extern crate log;
 
-mod disp;
-mod input;
-mod interp;
-mod prog;
-mod disass;
 mod vm;
 mod util;
 mod debug;
+mod disass;
+mod render;
+mod config;
 
-use input::Key;
-use disp::{Terminal, RenderEvent, EMPTY_DISPLAY};
-use prog::{Program, ProgramKind};
-use disass::Disassembly;
+use {
+    vm::{
+        input::Key,
+        prog::{Program, ProgramKind},
+        run::{VMRunner, VMEvent, VMRunResult}
+    },
+    util::{Interval, IntervalAccuracy},
+    disass::Disassembly,
+    render::{RenderRequest, Renderer, Screen}
+};
 
+use config::C8VMConfig;
 use device_query::DeviceEvents;
 use crossterm::{event::{
     poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers, KeyEventKind,
 }, style::Stylize};
 use log::LevelFilter;
-use util::{Interval, IntervalAccuracy};
-use vm::{VMRunner, VMRunConfig, VMEvent, VMRunResult};
 
 use std::{
     io,
-    sync::{Mutex, mpsc::{channel, TryRecvError}, Arc},
+    sync::{Mutex, mpsc::{channel, TryRecvError}},
     thread,
-    time::Duration,
+    time::Duration, ops::DerefMut,
 };
 
-use crate::debug::Debugger;
-
-// TODO: maybe support sound (right now the sound timer does nothing external)
-
-const INSTRUCTION_FREQUENCY: u32 = 2000;
-const TIMER_FREQUENCY: u32 = 60;
+use crate::debug::DebugRequest;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // arg parsing
@@ -105,7 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         false
     };
 
-    let should_debug: bool = if let Some(i) = args.iter().position(|arg| arg == "--debug") {
+    let debugging: bool = if let Some(i) = args.iter().position(|arg| arg == "--debug") {
         args.remove(i);
         true
     } else {
@@ -115,15 +113,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let program_name = args.first().ok_or("expected program name")?;
     let program = Program::read(format!("roms/{}.ch8", program_name), program_kind)?;
 
+    let config = C8VMConfig {
+        title: format!(" {} Virtual Machine ({}) ", program_kind, program_name),
+        logging: logger_level != LevelFilter::Off,
+        debugging,
+        ..Default::default()
+    };
+
     // dissassemble if requested
     if disassemble {
         if let Some(level) = logger_level.to_level() {
             simple_logger::init_with_level(level)?;
         }
 
-        log::info!("Dissassembling \"{}\"", program_name);
+        log::info!("Disassembling \"{}\"", program_name);
         let disassembly = Disassembly::from(program);
-        log::info!("Dissassembly complete");
+        log::info!("Disassembly complete");
         print!("{}", disassembly);
     } else {
         // initialize tui logger
@@ -133,32 +138,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // virtual machine runner
-        let mut vm_runner = VMRunner::spawn(VMRunConfig {
-            instruction_frequency: INSTRUCTION_FREQUENCY,
-            timer_frequency: TIMER_FREQUENCY,
-        }, program);
+        let mut vm_runner = VMRunner::spawn(config.clone(), program);
 
-        // debugger
-        let maybe_dbg = if should_debug {
-            Some(Arc::new(Mutex::new(Debugger::new())))
-        } else {
-            None
-        };
+        let (render_sender, render_thread) = { // render thread
 
-        let (render_sender, render_thread) = { // terminal render thread
-
-            let vm = vm_runner.vm();
-            let mut terminal = Terminal::setup(
-                format!(" {} Virtual Machine ({}) ", program_kind, program_name),
-                logger_level != LevelFilter::Off,
-                maybe_dbg.clone()
-            )?;
-
-            let (render_sender, render_receiver) = channel::<RenderEvent>();
+            let mut renderer = Renderer::setup(vm_runner.ware(), config.clone())?;
+            let (render_sender, render_receiver) = channel::<RenderRequest>();
 
             (render_sender, thread::spawn(move || -> Result<(), io::Error> {
-                let mut buf = EMPTY_DISPLAY;
-
                 let mut interval = Interval::new(
                     "render",
                     Duration::from_millis(16),
@@ -166,27 +153,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     IntervalAccuracy::Default
                 );
 
+                let mut queue = Vec::new();
+
                 loop {
-                    let mut rerender = false;
-                    for event in render_receiver.try_iter() {
-                        match event {
-                            RenderEvent::Refresh => rerender = true
-                        }
-                    }
+                    queue.extend(render_receiver.try_iter());
 
                     if let Err(TryRecvError::Disconnected) = render_receiver.try_recv() {
-                        terminal.exit()?;
+                        renderer.exit()?;
                         return Ok(())
                     }
-
-                    if let Some(new_buf) = vm.lock().unwrap().extract_new_frame() {
-                        buf = new_buf;
-                        rerender = true;
-                    }
                     
-                    if rerender {
-                        terminal.draw(&buf)?;
-                    }
+                    renderer.step(queue.drain(..).as_slice()).ok();
 
                     interval.sleep();
                 }
@@ -194,7 +171,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let main_thread = { // main thread
-
+            let vm_ware = vm_runner.ware();
             let vm_event_sender = vm_runner.vm_event_sender();
 
             thread::spawn(move || -> VMRunResult {
@@ -205,7 +182,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let vm_event_sender = Mutex::new(vm_event_sender.clone());
                     device_state.on_key_down(move |key| {
                         if let Ok(key) = Key::try_from(*key) {
-                            vm_event_sender.lock().unwrap().send(VMEvent::KeyDown(key)).unwrap_or_default()
+                            vm_event_sender.lock().unwrap().send(VMEvent::KeyDown(key)).ok();
                         }
                     })
                 };
@@ -214,50 +191,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let vm_event_sender = Mutex::new(vm_event_sender.clone());
                     device_state.on_key_up(move |key| {
                         if let Ok(key) = Key::try_from(*key) {
-                            vm_event_sender.lock().unwrap().send(VMEvent::KeyUp(key)).unwrap_or_default()
+                            vm_event_sender.lock().unwrap().send(VMEvent::KeyUp(key)).ok();
                         }
                     })
                 };
 
                 // start vm
-                if !should_debug {
+                if !debugging {
                     vm_runner.resume().unwrap();
                 }
 
                 loop { // event loop
 
-                    let mut rerender = false;
-
-                    if poll(Duration::from_millis(50)).unwrap() {
+                    if poll(Duration::from_millis(15)).unwrap_or(false) {
                         if let Some(event) = read().ok() {
-                            let mut sink_key_event = false;
-                            if let Some(dbg) = maybe_dbg.as_ref() {
-                                let mut dbg = dbg.lock().unwrap();
-                                sink_key_event = sink_key_event || dbg.active;
-                                rerender = dbg.handle_input_event(event.clone(), &mut vm_runner);
-                                sink_key_event = sink_key_event || dbg.active;
+
+                            let mut sink_vm_events = false;
+
+                            if debugging {
+                                let mut _guard = vm_ware.lock().unwrap();
+                                let (_, Some(dbg)) = _guard.deref_mut() else {
+                                    unreachable!("debug runs should contain a debugger");
+                                };
+
+                                sink_vm_events = sink_vm_events || dbg.active;
+
+                                // TODO: handle errors
+                                if let Some(request) = dbg.handle_input_event(event.clone()) {
+                                    match request {
+                                        DebugRequest::PauseRunner => {
+                                            vm_runner.pause().ok();
+                                        },
+                                        DebugRequest::ResumeRunner => {
+                                            vm_runner.resume().ok();
+                                        },
+                                        DebugRequest::UpdateRender => () // render gets updated below
+                                    }
+
+                                    log::info!("dbg active: {}", dbg.active);
+
+                                    render_sender.send(RenderRequest::Draw(if dbg.active { Screen::Debugger } else { Screen::VM })).ok();
+                                }
+
+                                sink_vm_events = sink_vm_events || dbg.active;
                             }
 
                             match event {
                                 Event::Resize(_, _) => {
-                                    render_sender.send(RenderEvent::Refresh).ok();
+                                    render_sender.send(RenderRequest::RedrawScreen).ok();
                                 },
                                 Event::FocusGained => {
-                                    vm_event_sender.send(VMEvent::Focus).ok();
+                                    if !sink_vm_events {
+                                        vm_event_sender.send(VMEvent::Focus).ok();
+                                    }
                                 },
                                 Event::FocusLost => {
-                                    vm_event_sender.send(VMEvent::Unfocus).ok();
+                                    if !sink_vm_events {
+                                        vm_event_sender.send(VMEvent::Unfocus).ok();
+                                    }
                                 },
                                 Event::Key(key_event) => { // Esc or Crtl+C interrupt handler
-                                    if (key_event.code == CrosstermKey::Esc && !sink_key_event)
-                                        || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL)
+                                    if (key_event.code == CrosstermKey::Esc && !sink_vm_events) // Esc is an exit if debugger isnt sinking keys
+                                        || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL) // Ctrl+C is a hard exit
                                             && (key_event.code == CrosstermKey::Char('c')
                                                 || key_event.code == CrosstermKey::Char('C'))
                                     {
                                         // exit virtual machine
                                         return vm_runner.exit()
-                                    } else if !sink_key_event {
-                                        // kinda expecting a crossterm key event to mean terminal is in focus
+                                    } else if !sink_vm_events {
+                                        // kinda expecting a crossterm key event to mean renderer is in focus
                                         // pretty sure device state executing first sinks a key input
                                         if let KeyEventKind::Repeat | KeyEventKind::Press = key_event.kind {
                                             if let Ok(key) = Key::try_from(key_event.code) {
@@ -273,11 +275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // TODO attach event listener to logger instead of polling to update
                     if logger_level != LevelFilter::Off {
-                        rerender = true;
-                    }
-
-                    if rerender {
-                        render_sender.send(RenderEvent::Refresh).ok();
+                        render_sender.send(RenderRequest::RedrawScreen).ok();
                     }
 
                     // TODO: we should check state and exit if panic here maybe

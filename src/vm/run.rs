@@ -1,10 +1,14 @@
-// TODO organize this file.. its so disorganized right now
-
-use crate::{
+use super::{
     input::{Key, Keyboard},
     interp::{Interpreter, InterpreterError, InterpreterRequest},
     prog::Program,
-    util::{Interval, IntervalAccuracy}, disp::DisplayBuffer
+    disp::DisplayBuffer
+};
+
+use crate::{
+    util::{Interval, IntervalAccuracy},
+    debug::Debugger, 
+    config::{C8VMConfig, GOOD_IPS_DIFF, OKAY_IPS_DIFF}
 };
 
 use crossterm::style::Stylize;
@@ -18,8 +22,13 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant}, ops::DerefMut,
 };
+
+pub type VMWare = Arc<Mutex<(VM, Option<Debugger>)>>;
+pub type VMRunResult = Result<VMRunAnalytics, VMRunError>;
+
+// TODO: maybe support sound (right now the sound timer does nothing external)
 
 pub struct VM {
     interp: Interpreter,
@@ -28,6 +37,7 @@ pub struct VM {
     event_queue: Vec<VMEvent>,
 
     // Virtualized IO
+
     display: bool,
     keyboard: Keyboard,
 
@@ -98,7 +108,6 @@ impl VM {
             .clamp(u8::MIN as f64, u8::MAX as f64);
 
         // update interpreter input
-
         let mut input = self.interp.input_mut();
 
         self.keyboard.flush(input); // the keyboard will write its state to the input
@@ -120,6 +129,192 @@ impl VM {
     }
 }
 
+pub struct VMRunner {
+
+    vmware: VMWare,
+
+    vm_event_sender: Sender<VMEvent>,
+    vm_continue_sender: Sender<bool>,
+    vm_result_receiver: Receiver<VMRunResult>,
+    vm_result: Cell<Option<VMRunResult>>,
+}
+
+impl VMRunner {
+    pub fn ware(&self) -> VMWare {
+        Arc::clone(&self.vmware)
+    }
+
+    pub fn vm_event_sender(&self) -> Sender<VMEvent> {
+        self.vm_event_sender.clone()
+    }
+
+    pub fn pause(&mut self) -> Result<(), VMControlError> {
+        self.can_continue(false)
+    }
+
+    pub fn resume(&mut self) -> Result<(), VMControlError> {
+        self.can_continue(true)
+    }
+
+    pub fn is_finished(&self) -> bool {
+        let vm_result = self.vm_result.take();
+        if vm_result.is_some() {
+            self.vm_result.set(vm_result); // oh ok we just checking so lets just.. put it back in lol
+            return true;
+        } else if let Ok(vm_result) = self.vm_result_receiver.try_recv() {
+            self.vm_result.set(Some(vm_result));
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    pub fn spawn(config: C8VMConfig, program: Program) -> Self {
+        let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
+        let (vm_result_sender, vm_result_receiver) = channel::<VMRunResult>();
+        let (vm_continue_sender, vm_continue_receiver) = channel::<bool>();
+
+        let program_name = program.name.clone();
+
+        let vmware = Arc::new(Mutex::new((
+            VM {
+                interp: Interpreter::from(program),
+
+                event: vm_event_receiver,
+                event_queue: Vec::new(),
+
+                // Virtualized IO
+                display: false,
+                keyboard: Keyboard::default(),
+
+                // these precise external timers will be mapped
+                // to a byte range when executing interpreter instructions
+                sound_timer: 0.0,
+                delay_timer: 0.0,
+
+                timer_frequency: config.timer_frequency,
+            },
+            if config.debugging {
+                Some(Debugger::new())
+            } else {
+                None
+            }
+        )));
+
+        let handle = {
+            let vmware = Arc::clone(&vmware);
+            thread::spawn(move || -> VMRunResult {
+                // this thread updates state the interpreter relies on,
+                // calls the next instruction with said state,
+                // and handles the output of said instruction
+
+                let mut timer_instant = Instant::now();
+                let mut interval = Interval::new(
+                    "interp",
+                    Duration::from_secs_f64(1.0 / config.instruction_frequency as f64),
+                    Duration::from_millis(8),
+                    IntervalAccuracy::High
+                );
+
+                let mut continuation = VMRunContinuation {
+                    cont: false,
+                    recv: vm_continue_receiver,
+                };
+
+                let mut runtime_start = Instant::now();
+                let mut runtime_duration = Duration::ZERO;
+                let mut interpreter_duration = Duration::ZERO;
+                let mut instructions_executed = 0;
+
+                loop {
+                    let mut _guard = vmware.lock().unwrap();
+                    let (vm, maybe_dbg) = _guard.deref_mut();
+
+                    if continuation.try_cont() { // we can step synchronously
+                        
+                        let time_elapsed = timer_instant.elapsed().as_secs_f64();
+                        timer_instant = Instant::now();
+
+                        instructions_executed += 1;
+                        
+                        vm.step(time_elapsed)?;
+
+                        interpreter_duration =
+                            interpreter_duration.saturating_add(timer_instant.elapsed());
+
+                        let can_continue = maybe_dbg.as_mut().map_or(true, |dbg| dbg.step(vm));
+
+                        drop(_guard);
+
+                        if can_continue {
+                            interval.sleep();
+                            continue;
+                        }
+                    } else {
+                        drop(_guard);
+                    }
+
+                    // we yield until either we can continue or we must exit
+
+                    runtime_duration = runtime_duration.saturating_add(runtime_start.elapsed());
+                    if continuation.can_cont() { 
+                        runtime_start = Instant::now();
+                        timer_instant = Instant::now();
+                        interval.reset();
+                    } else {
+                        return Ok(VMRunAnalytics {
+                            runtime_duration,
+                            interpreter_duration,
+                            instructions_executed,
+                            target_ips: config.instruction_frequency,
+                            program_name,
+                        });
+                    }
+                }
+            })
+        };
+
+        thread::spawn(move || {
+            vm_result_sender
+                .send(handle.join().map_or_else(
+                    |vm_panic_err| Err(VMRunError::ThreadPanic(vm_panic_err)),
+                    |vm_result| vm_result,
+                ))
+                .unwrap_or_default();
+        });
+
+        VMRunner {
+            vmware,
+            vm_event_sender,
+            vm_result_receiver,
+            vm_result: Cell::new(None),
+            vm_continue_sender,
+        }
+    }
+
+    pub fn exit(self) -> VMRunResult {
+        let VMRunner {
+            vm_continue_sender, ..
+        } = self;
+        drop(vm_continue_sender); // thread should detect senders were dropped (we are the only one) and exit thread if still alive
+        self.vm_result.take().unwrap_or_else(|| {
+            self.vm_result_receiver
+                .recv()
+                .unwrap_or_else(|_| unreachable!("recv must return a value"))
+        })
+    }
+
+    fn can_continue(&mut self, can_continue: bool) -> Result<(), VMControlError> {
+        if self.vm_result.get_mut().is_some() {
+            return Err(VMControlError::AlreadyDone);
+        }
+
+        self.vm_continue_sender
+            .send(can_continue)
+            .map_err(|_| VMControlError::ThreadNotResponding)
+    }
+}
+
 #[derive(Debug)]
 pub enum VMEvent {
     KeyUp(Key),
@@ -127,11 +322,6 @@ pub enum VMEvent {
     Focus,
     Unfocus,
     FocusingKeyDown(Key),
-}
-
-pub struct VMRunConfig {
-    pub instruction_frequency: u32,
-    pub timer_frequency: u32
 }
 
 #[derive(Debug)]
@@ -146,8 +336,6 @@ impl From<InterpreterError> for VMRunError {
     }
 }
 
-pub type VMRunResult = Result<VMRunAnalytics, VMRunError>;
-
 pub struct VMRunAnalytics {
     runtime_duration: Duration,
     interpreter_duration: Duration,
@@ -155,9 +343,6 @@ pub struct VMRunAnalytics {
     target_ips: u32,
     program_name: String,
 }
-
-const GOOD_IPS_DIFF: f64 = 1.0;
-const OKAY_IPS_DIFF: f64 = 10.0;
 
 impl Display for VMRunAnalytics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -201,180 +386,6 @@ impl Display for VMRunAnalytics {
             .bold(),
             self.target_ips
         )
-    }
-}
-
-pub struct VMRunner {
-    running: bool,
-
-    vm: Arc<Mutex<VM>>,
-    vm_event_sender: Sender<VMEvent>,
-    vm_result_receiver: Receiver<VMRunResult>,
-    vm_result: Cell<Option<VMRunResult>>,
-
-    vm_continue_sender: Sender<bool>,
-}
-
-impl VMRunner {
-    pub fn vm(&self) -> Arc<Mutex<VM>> {
-        Arc::clone(&self.vm)
-    }
-
-    pub fn vm_event_sender(&self) -> Sender<VMEvent> {
-        self.vm_event_sender.clone()
-    }
-
-    pub fn pause(&mut self) -> Result<(), VMControlError> {
-        self.can_continue(false)
-    }
-
-    pub fn resume(&mut self) -> Result<(), VMControlError> {
-        self.can_continue(true)
-    }
-
-    pub fn is_finished(&self) -> bool {
-        let vm_result = self.vm_result.take();
-        if vm_result.is_some() {
-            self.vm_result.set(vm_result); // oh ok we just checking so lets just.. put it back in lol
-            return true;
-        } else if let Ok(vm_result) = self.vm_result_receiver.try_recv() {
-            self.vm_result.set(Some(vm_result));
-            return true;
-        } else {
-            return false;
-        }
-    }
-
-    pub fn spawn(config: VMRunConfig, program: Program) -> Self {
-        let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
-        let (vm_result_sender, vm_result_receiver) = channel::<VMRunResult>();
-        let (vm_continue_sender, vm_continue_receiver) = channel::<bool>();
-
-        let program_name = program.name.clone();
-
-        let vm = Arc::new(Mutex::new(VM {
-            interp: Interpreter::from(program),
-
-            event: vm_event_receiver,
-            event_queue: Vec::new(),
-
-            // Virtualized IO
-            display: false,
-            keyboard: Keyboard::default(),
-
-            // these precise external timers will be mapped
-            // to a byte range when executing interpreter instructions
-            sound_timer: 0.0,
-            delay_timer: 0.0,
-
-            timer_frequency: config.timer_frequency,
-        }));
-
-        let handle = {
-            let vm = Arc::clone(&vm);
-            thread::spawn(move || -> VMRunResult {
-                // this thread updates state the interpreter relies on,
-                // calls the next instruction with said state,
-                // and handles the output of said instruction
-
-                let mut timer_instant = Instant::now();
-                let mut interval = Interval::new(
-                    "interp",
-                    Duration::from_secs_f64(1.0 / config.instruction_frequency as f64),
-                    Duration::from_millis(8),
-                    IntervalAccuracy::High
-                );
-
-                let mut continuation = VMRunContinuation {
-                    cont: false,
-                    recv: vm_continue_receiver,
-                };
-
-                let mut runtime_duration = Duration::ZERO;
-                let mut runtime_start = Instant::now();
-                let mut interpreter_duration = Duration::ZERO;
-                let mut instructions_executed = 0;
-                loop {
-                    let mut vm = vm.lock().unwrap();
-                    if continuation.try_cont() {
-                        // we can step synchronously
-                        instructions_executed += 1;
-                        let time_elapsed = timer_instant.elapsed().as_secs_f64();
-                        timer_instant = Instant::now();
-                        vm.step(time_elapsed)?;
-                        interpreter_duration =
-                            interpreter_duration.saturating_add(timer_instant.elapsed());
-                        drop(vm);
-
-                        // sleep
-                        interval.sleep();
-                    } else {
-                        drop(vm);
-                        runtime_duration = runtime_duration.saturating_add(runtime_start.elapsed());
-                        if continuation.can_cont() {
-                            // this yields until either we can continue or we must exit
-                            runtime_start = Instant::now();
-                            timer_instant = Instant::now();
-                            interval.reset();
-                        } else {
-                            return Ok(VMRunAnalytics {
-                                runtime_duration,
-                                interpreter_duration,
-                                instructions_executed,
-                                target_ips: config.instruction_frequency,
-                                program_name,
-                            });
-                        }
-                    }
-                }
-            })
-        };
-
-        thread::spawn(move || {
-            vm_result_sender
-                .send(handle.join().map_or_else(
-                    |vm_panic_err| Err(VMRunError::ThreadPanic(vm_panic_err)),
-                    |vm_result| vm_result,
-                ))
-                .unwrap_or_default();
-        });
-
-        VMRunner {
-            running: false,
-            vm,
-            vm_event_sender,
-            vm_result_receiver,
-            vm_result: Cell::new(None),
-            vm_continue_sender,
-        }
-    }
-
-    pub fn exit(self) -> VMRunResult {
-        let VMRunner {
-            vm_continue_sender, ..
-        } = self;
-        drop(vm_continue_sender); // thread should detect senders were dropped (we are the only one) and exit thread if still alive
-        self.vm_result.take().unwrap_or_else(|| {
-            self.vm_result_receiver
-                .recv()
-                .unwrap_or_else(|_| unreachable!("recv must return a value"))
-        })
-    }
-
-    fn can_continue(&mut self, can_continue: bool) -> Result<(), VMControlError> {
-        if self.vm_result.get_mut().is_some() {
-            return Err(VMControlError::AlreadyDone);
-        }
-
-        if self.running == can_continue {
-            return Ok(());
-        }
-
-        self.running = can_continue;
-
-        self.vm_continue_sender
-            .send(can_continue)
-            .map_err(|_| VMControlError::ThreadNotResponding)
     }
 }
 
