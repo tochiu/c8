@@ -19,7 +19,7 @@ use {
 };
 
 use config::C8VMConfig;
-use device_query::DeviceEvents;
+use device_query::{DeviceEvents, DeviceQuery};
 use crossterm::{event::{
     poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers, KeyEventKind,
 }, style::Stylize};
@@ -29,7 +29,7 @@ use std::{
     io,
     sync::{Mutex, mpsc::{channel, TryRecvError}},
     thread,
-    time::Duration, ops::DerefMut,
+    time::Duration, ops::DerefMut, collections::HashSet,
 };
 
 use crate::debug::DebugRequest;
@@ -177,24 +177,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             thread::spawn(move || -> VMRunResult {
 
                 let device_state = device_query::DeviceState::new();
-                
-                let _guard_key_down = {
-                    let vm_event_sender = Mutex::new(vm_event_sender.clone());
-                    device_state.on_key_down(move |key| {
-                        if let Ok(key) = Key::try_from(*key) {
-                            vm_event_sender.lock().unwrap().send(VMEvent::KeyDown(key)).ok();
-                        }
-                    })
-                };
-
-                let _guard_key_up = {
-                    let vm_event_sender = Mutex::new(vm_event_sender.clone());
-                    device_state.on_key_up(move |key| {
-                        if let Ok(key) = Key::try_from(*key) {
-                            vm_event_sender.lock().unwrap().send(VMEvent::KeyUp(key)).ok();
-                        }
-                    })
-                };
+                let mut last_keys = HashSet::new();
 
                 // start vm
                 if !debugging {
@@ -202,7 +185,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 loop { // event loop
-
                     if poll(Duration::from_millis(15)).unwrap_or(false) {
                         if let Some(event) = read().ok() {
 
@@ -227,8 +209,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         },
                                         DebugRequest::UpdateRender => () // render gets updated below
                                     }
-
-                                    log::info!("dbg active: {}", dbg.active);
 
                                     render_sender.send(RenderRequest::Draw(if dbg.active { Screen::Debugger } else { Screen::VM })).ok();
                                 }
@@ -260,7 +240,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         return vm_runner.exit()
                                     } else if !sink_vm_events {
                                         // kinda expecting a crossterm key event to mean renderer is in focus
-                                        // pretty sure device state executing first sinks a key input
                                         if let KeyEventKind::Repeat | KeyEventKind::Press = key_event.kind {
                                             if let Ok(key) = Key::try_from(key_event.code) {
                                                 vm_event_sender.send(VMEvent::FocusingKeyDown(key)).ok();
@@ -272,6 +251,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             };
                         }
                     }
+
+                    // execute device query step
+                    let keys = HashSet::from_iter(device_state.get_keys().into_iter().filter_map(|keycode| Key::try_from(keycode).ok()));
+
+                    for &key in keys.difference(&last_keys) {
+                        vm_event_sender.send(VMEvent::KeyDown(key)).ok();
+                    }
+
+                    for &key in last_keys.difference(&keys) {
+                        vm_event_sender.send(VMEvent::KeyUp(key)).ok();
+                    }
+
+                    last_keys = keys;
 
                     // TODO attach event listener to logger instead of polling to update
                     if logger_level != LevelFilter::Off {
