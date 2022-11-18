@@ -4,7 +4,8 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use tui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
-    widgets::StatefulWidget,
+    text::{Span, Spans},
+    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget, Wrap},
 };
 
 use std::collections::HashSet;
@@ -55,10 +56,7 @@ impl Debugger {
         dbg
     }
 
-    pub fn handle_input_event(
-        &mut self,
-        event: Event
-    ) -> Option<DebugRequest> {
+    pub fn handle_input_event(&mut self, event: Event) -> Option<DebugRequest> {
         let shell = &mut self.shell;
 
         let mut request: Option<DebugRequest> = None;
@@ -76,6 +74,7 @@ impl Debugger {
                         }
                     } else if key_event.code == KeyCode::Esc {
                         log::info!("c8vm interrupt!");
+                        shell.output.push("Paused.".into());
                         self.active = true;
                         request = Some(DebugRequest::PauseRunner);
                     }
@@ -85,14 +84,20 @@ impl Debugger {
         }
 
         for cmd in shell.cmd_queue.drain(..) {
+            shell.output.push(shell.prefix.clone() + &cmd);
             // TODO: add more commands here
             if cmd == "r" || cmd == "c" {
                 if self.active {
                     log::info!("c8vm resume!");
+                    shell.output.push("Continuing.".into());
                     self.active = false;
                     request = Some(DebugRequest::ResumeRunner);
                     break;
                 }
+            } else {
+                shell
+                    .output
+                    .push("Command not recognized. Type \"h\" to get a list of commands.".into());
             }
         }
 
@@ -146,6 +151,7 @@ pub struct Shell {
     history_index: usize,
     input: String,
     input_enabled: bool,
+    output: Vec<String>,
 }
 
 impl Shell {
@@ -221,6 +227,7 @@ pub struct DebuggerWidgetState {
 pub struct DebuggerWidget<'a> {
     pub logging: bool,
     pub dbg: &'a Debugger,
+    pub vm: &'a VM,
 }
 
 impl<'a> DebuggerWidget<'a> {
@@ -267,17 +274,44 @@ impl<'a> DebuggerWidget<'a> {
         (main, shell, logger)
     }
 
+    fn main_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect) {
+        let mut rects = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(area.width.saturating_sub(14) / 5),
+                Constraint::Length(14),
+                Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14) / 5)),
+            ])
+            .split(area);
+
+        let (output_area, memory_area) = (rects[0], rects[2]);
+
+        area = rects[1];
+        rects = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(17),
+                Constraint::Length(4),
+                Constraint::Length(1 + self.vm.interpreter().stack.len().max(1) as u16),
+            ])
+            .split(area);
+
+        let (pointer_area, register_area, timer_area, stack_area) =
+            (rects[0], rects[1], rects[2], rects[3]);
+
+        (
+            memory_area,
+            pointer_area,
+            register_area,
+            timer_area,
+            stack_area,
+            output_area,
+        )
+    }
+
     fn can_draw_shell(&self, area: Rect) -> bool {
         self.dbg.shell_active && area.area() > 0
-    }
-}
-
-impl<'a> From<&'a Debugger> for DebuggerWidget<'a> {
-    fn from(dbg: &'a Debugger) -> Self {
-        DebuggerWidget {
-            dbg,
-            logging: false,
-        }
     }
 }
 
@@ -285,6 +319,94 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
     type State = DebuggerWidgetState;
     fn render(self, area: Rect, buf: &mut tui::buffer::Buffer, state: &mut Self::State) {
         let (main_area, shell_area, _) = self.areas(area);
+        let (memory_area, pointer_area, register_area, timer_area, stack_area, output_area) =
+            self.main_areas(main_area);
+
+        let base_border = Borders::TOP.union(Borders::LEFT);
+
+        let pointer_block = Block::default().title(" Pointers ").borders(base_border);
+        let timer_block = Block::default().title(" Timers ").borders(base_border);
+        let stack_block = Block::default()
+            .title(" Stack ")
+            .borders(base_border.union(Borders::BOTTOM));
+        let output_block = Block::default().title(" Output ").borders(Borders::TOP);
+        let output_text_area = output_block.inner(output_area);
+
+        let mut lines = self
+            .dbg
+            .shell
+            .output
+            .iter()
+            .map(|out| out.as_bytes().chunks(output_text_area.width as usize))
+            .flatten()
+            .rev()
+            .take(output_text_area.height as usize)
+            .map(|bytes| Spans::from(std::str::from_utf8(bytes).unwrap_or("**unparsable**")))
+            .collect::<Vec<_>>();
+        let line_count = lines.len() as u16;
+
+        lines.reverse();
+
+        Paragraph::new(lines).render(
+            Rect::new(
+                output_text_area.x,
+                output_text_area.bottom().saturating_sub(line_count),
+                output_text_area.width,
+                line_count,
+            ),
+            buf,
+        );
+
+        output_block.render(output_area, buf);
+
+        Block::default()
+            .title(" Memory ")
+            .borders(base_border.union(Borders::BOTTOM).union(if self.logging {
+                Borders::NONE
+            } else {
+                Borders::RIGHT
+            }))
+            .render(memory_area, buf);
+
+        let interp = self.vm.interpreter();
+
+        Paragraph::new(vec![
+            Spans::from(format!("pc {:#05X}", interp.pc)),
+            Spans::from(format!("i  {:#05X}", interp.index)),
+        ])
+        .block(pointer_block)
+        .render(pointer_area, buf);
+
+        Paragraph::new(
+            interp
+                .registers
+                .iter()
+                .enumerate()
+                .map(|(i, val)| Spans::from(format!("v{:x} {:0>3} ({:#04X})", i, val, val)))
+                .collect::<Vec<_>>(),
+        )
+        .block(Block::default().title(" Registers ").borders(base_border))
+        .render(register_area, buf);
+
+        Paragraph::new(vec![
+            Spans::from(format!("sound {:0>7.3}", self.vm.sound_timer())),
+            Spans::from(format!("delay {:0>7.3}", self.vm.delay_timer())),
+            Spans::from(format!("  |-> {:0>3}", interp.input.delay_timer)),
+        ])
+        .block(timer_block)
+        .render(timer_area, buf);
+
+        Paragraph::new(
+            interp
+                .stack
+                .iter()
+                .enumerate()
+                .map(|(i, addr)| Spans::from(format!("#{:0>2} {:#05X}", i, addr)))
+                .collect::<Vec<_>>(),
+        )
+        .block(stack_block)
+        .render(stack_area, buf);
+
         if self.can_draw_shell(area) {
             ShellWidget::from(&self.dbg.shell).render(shell_area, buf, &mut state.shell)
         }

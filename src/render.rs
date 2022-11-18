@@ -140,7 +140,7 @@ impl Renderer {
     fn draw_dbg(&mut self) -> Result<(), io::Error> {
         self.terminal.draw(|f| {
             let mut _guard = self.vm_ware.lock().unwrap();
-            let (_, Some(dbg)) = _guard.deref_mut() else {
+            let (vm, Some(dbg)) = _guard.deref_mut() else {
                 unreachable!("debugger must exist for debugger draw call to be made")
             };
             let Some(dbg_widget_state) = self.widget_state.1.as_mut() else {
@@ -150,6 +150,7 @@ impl Renderer {
             let dbg_area = f.size();
             let dbg_widget = DebuggerWidget {
                 dbg,
+                vm,
                 logging: self.config.logging,
             };
 
