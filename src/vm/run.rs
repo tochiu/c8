@@ -70,6 +70,12 @@ impl VM {
         self.event_queue.extend(self.event.try_iter());
     }
 
+    pub fn clear_events(&mut self) {
+        for _ in self.event.try_iter() {
+            continue; // no-op
+        }
+    }
+
     pub fn clear_event_queue(&mut self) {
         self.queue_events();
         self.event_queue.clear();
@@ -225,12 +231,18 @@ impl VMRunner {
                 let mut runtime_duration = Duration::ZERO;
                 let mut interpreter_duration = Duration::ZERO;
                 let mut instructions_executed = 0;
+                let mut just_resumed = false;
 
                 loop {
                     let mut _guard = vmware.lock().unwrap();
                     let (vm, maybe_dbg) = _guard.deref_mut();
 
                     if continuation.try_cont() { // we can step synchronously
+
+                        if just_resumed {
+                            just_resumed = false;
+                            vm.clear_events();
+                        }
                         
                         let time_elapsed = timer_instant.elapsed().as_secs_f64();
                         timer_instant = Instant::now();
@@ -257,7 +269,8 @@ impl VMRunner {
                     // we yield until either we can continue or we must exit
 
                     runtime_duration = runtime_duration.saturating_add(runtime_start.elapsed());
-                    if continuation.can_cont() { 
+                    if continuation.can_cont() {
+                        just_resumed = true;
                         runtime_start = Instant::now();
                         timer_instant = Instant::now();
                         interval.reset();
