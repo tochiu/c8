@@ -137,6 +137,8 @@ impl VM {
 
 pub struct VMRunner {
 
+    config: C8VMConfig,
+
     vmware: VMWare,
 
     vm_event_sender: Sender<VMEvent>,
@@ -148,6 +150,10 @@ pub struct VMRunner {
 impl VMRunner {
     pub fn ware(&self) -> VMWare {
         Arc::clone(&self.vmware)
+    }
+
+    pub fn config(&self) -> &C8VMConfig {
+        &self.config
     }
 
     pub fn vm_event_sender(&self) -> Sender<VMEvent> {
@@ -182,8 +188,8 @@ impl VMRunner {
 
         let program_name = program.name.clone();
 
-        let vmware = Arc::new(Mutex::new((
-            VM {
+        let vmware = Arc::new(Mutex::new({
+            let vm = VM {
                 interp: Interpreter::from(program),
 
                 event: vm_event_receiver,
@@ -199,13 +205,15 @@ impl VMRunner {
                 delay_timer: 0.0,
 
                 timer_frequency: config.timer_frequency,
-            },
-            if config.debugging {
-                Some(Debugger::new())
+            };
+            let dbg = if config.debugging {
+                Some(Debugger::init(&vm))
             } else {
                 None
-            }
-        )));
+            };
+
+            (vm, dbg)
+        }));
 
         let handle = {
             let vmware = Arc::clone(&vmware);
@@ -297,6 +305,7 @@ impl VMRunner {
         });
 
         VMRunner {
+            config,
             vmware,
             vm_event_sender,
             vm_result_receiver,

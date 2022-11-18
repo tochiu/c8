@@ -338,7 +338,7 @@ impl Display for Disassembly {
     }
 }
 
-fn write_byte_str(byte: u8, bit_width: usize, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+pub fn write_byte_str(byte: u8, bit_width: usize, f: &mut impl std::fmt::Write) -> std::fmt::Result {
     for filled in (0..8).rev().map(|i| byte >> i & 1 == 1) {
         write!(
             f,
@@ -354,7 +354,7 @@ fn write_byte_str(byte: u8, bit_width: usize, f: &mut impl std::fmt::Write) -> s
     Ok(())
 }
 
-fn write_inst_asm(
+pub fn write_inst_asm(
     inst: &Instruction,
     f: &mut impl std::fmt::Write,
     c: &mut impl std::fmt::Write,
@@ -471,11 +471,11 @@ fn write_inst_asm(
         }
         Instruction::Load(vx) => {
             write!(f, "load  {}", vx + 1)?;
-            write!(c, "load {} byte(s) into v(0..={})", vx + 1, vx)
+            write!(c, "load {} byte{} into v(0..={})", vx + 1, if *vx == 0 { "" } else { " " }, vx)
         }
         Instruction::Store(vx) => {
             write!(f, "save  {}", vx + 1)?;
-            write!(c, "save {} byte(s) from v(0..={})", vx + 1, vx)
+            write!(c, "save {} byte{} from v(0..={})", vx + 1, if *vx == 0 { "" } else { " " }, vx)
         }
         Instruction::StoreDecimal(vx) => {
             write!(f, "sbcd  v{:x}", vx)?;

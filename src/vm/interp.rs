@@ -256,7 +256,7 @@ impl Interpreter {
         self.output.request = None;
 
         // fetch + decode
-        let inst = Instruction::try_from(InstructionParameters::from([self.memory[self.pc as usize], self.memory[self.pc as usize + 1]]))
+        let inst = Instruction::try_from(self.fetch())
             .map_err(|str| InterpreterError::BadInstruction(str))?;
 
         log::trace!("instruction {:#05X?} {:?} ", self.pc, inst);
@@ -265,6 +265,10 @@ impl Interpreter {
 
         // exec instruction
         Ok(self.exec(inst))
+    }
+
+    pub fn fetch(&self) -> InstructionParameters {
+        InstructionParameters::from([self.memory[self.pc as usize], self.memory[self.pc as usize + 1]])
     }
     
     pub fn exec(&mut self, inst: Instruction) -> &InterpreterOutput {

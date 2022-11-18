@@ -147,10 +147,15 @@ impl Renderer {
                 unreachable!("debugger screen state must exist for debugger draw call to be made")
             };
 
+            if let Some(buf) = vm.extract_new_frame() {
+                self.vm_disp.buffer = buf;
+            }
+
             let dbg_area = f.size();
             let dbg_widget = DebuggerWidget {
                 dbg,
                 vm,
+                vm_disp: &self.vm_disp,
                 logging: self.config.logging,
             };
 

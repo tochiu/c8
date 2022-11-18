@@ -7,7 +7,8 @@ use tui::{
 pub const DISPLAY_WIDTH: u8 = 64;
 pub const DISPLAY_HEIGHT: u8 = 32;
 
-const DISPLAY_WINDOW_WIDTH: u16 = DISPLAY_WIDTH as u16 + 2;
+pub const DISPLAY_WINDOW_WIDTH: u16 = DISPLAY_WIDTH as u16 + 2;
+pub const DISPLAY_WINDOW_HEIGHT: u16 = DISPLAY_HEIGHT as u16 + 2;
 
 const CLEAR_DISPLAY: DisplayBuffer = [0; DISPLAY_HEIGHT as usize];
 

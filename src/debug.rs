@@ -1,14 +1,21 @@
-use crate::vm::run::VM;
+use crate::{
+    disass::write_inst_asm,
+    vm::{
+        disp::{Display, DisplayWidget, DISPLAY_WINDOW_HEIGHT, DISPLAY_WINDOW_WIDTH},
+        interp::{Instruction, Interpreter},
+        run::{VMRunner, VM},
+    },
+};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use tui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
-    text::{Span, Spans},
-    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget, Wrap},
+    text::Spans,
+    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt::Write};
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Watchpoint {
@@ -27,15 +34,9 @@ pub enum DebugEvent {
     BreakpointReached(u16),
 }
 
-pub enum DebugRequest {
-    ResumeRunner,
-    PauseRunner,
-    UpdateRender,
-}
-
 #[derive(Default)]
 pub struct Debugger {
-    pub active: bool,
+    active: bool,
 
     breakpoints: HashSet<u16>,
     watchpoints: HashSet<Watchpoint>,
@@ -44,72 +45,147 @@ pub struct Debugger {
 
     shell: Shell,
     shell_active: bool,
+
+    vm_visible: bool,
 }
 
 impl Debugger {
-    pub fn new() -> Self {
+    pub fn init(vm: &VM) -> Self {
         let mut dbg = Self::default();
-        dbg.active = true;
+        dbg.active = false;
+        dbg.vm_visible = true;
         dbg.shell_active = true;
         dbg.shell.input_enabled = true;
-        dbg.shell.prefix.push_str("(c8vm) ");
+        dbg.shell.prefix.push_str("(c8db) ");
+        dbg.activate(vm);
         dbg
     }
 
-    pub fn handle_input_event(&mut self, event: Event) -> Option<DebugRequest> {
-        let shell = &mut self.shell;
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
 
-        let mut request: Option<DebugRequest> = None;
+    pub fn handle_input_event(
+        &mut self,
+        event: Event,
+        vm_runner: &mut VMRunner,
+        vm: &mut VM,
+    ) -> bool {
+        let mut render = false;
 
-        let history_index = shell.history_index;
-        let input_len = shell.input.len();
-        let cursor_position = shell.cursor_position;
+        let history_index = self.shell.history_index;
+        let input_len = self.shell.input.len();
+        let cursor_position = self.shell.cursor_position;
 
         match event {
             Event::Key(key_event) => {
                 if let KeyEventKind::Press | KeyEventKind::Repeat = key_event.kind {
                     if self.active {
                         if self.shell_active {
-                            shell.handle_key_event(key_event);
+                            self.shell.handle_key_event(key_event);
                         }
                     } else if key_event.code == KeyCode::Esc {
-                        log::info!("c8vm interrupt!");
-                        shell.output.push("Paused.".into());
-                        self.active = true;
-                        request = Some(DebugRequest::PauseRunner);
+                        self.pause(vm_runner, vm);
+                        render = true;
                     }
                 }
             }
             _ => (),
         }
 
-        for cmd in shell.cmd_queue.drain(..) {
-            shell.output.push(shell.prefix.clone() + &cmd);
-            // TODO: add more commands here
-            if cmd == "r" || cmd == "c" {
-                if self.active {
-                    log::info!("c8vm resume!");
-                    shell.output.push("Continuing.".into());
-                    self.active = false;
-                    request = Some(DebugRequest::ResumeRunner);
-                    break;
+        let cmds = self.shell.cmd_queue.drain(..);
+
+        if self.active {
+            for cmd_str in cmds.collect::<Vec<_>>() {
+                self.shell.output.push(self.shell.prefix.clone() + &cmd_str);
+                // TODO: add more commands here
+
+                let mut cmd_args = cmd_str.split_ascii_whitespace();
+
+                let Some(cmd) = cmd_args.next() else {
+                    self.shell.output_unrecognized_cmd();
+                    continue;
+                };
+
+                match cmd {
+                    "r" | "c" | "run" | "cont" | "continue" => {
+                        log::info!("c8vm resume!");
+                        vm_runner.resume().unwrap();
+                        self.deactivate();
+                        render = true;
+                        break;
+                    }
+                    "s" | "step" => {
+                        let amt = cmd_args
+                            .next()
+                            .and_then(|arg| arg.parse::<u128>().ok())
+                            .unwrap_or(1)
+                            .min(u16::MAX as u128) as usize;
+                        log::info!("stepping {}!", amt);
+
+                        for _ in 0..amt {
+                            vm.step(1.0 / vm_runner.config().instruction_frequency as f64)
+                                .unwrap();
+                            self.shell.output_pc(vm.interpreter());
+                        }
+
+                        if amt > 1 {
+                            self.shell.output.push(format!("Stepped {} times", amt));
+                        }
+
+                        render = true;
+                    }
+                    "show" => {
+                        let Some("vm") = cmd_args.next() else {
+                            self.shell.output_unrecognized_cmd();
+                            continue;
+                        };
+
+                        self.vm_visible = true;
+                        render = true;
+                    }
+                    "hide" => {
+                        let Some("vm") = cmd_args.next() else {
+                            self.shell.output_unrecognized_cmd();
+                            continue;
+                        };
+
+                        self.vm_visible = false;
+                        render = false;
+                    }
+                    _ => {
+                        self.shell.output_unrecognized_cmd();
+                        render = true;
+                    }
                 }
-            } else {
-                shell
-                    .output
-                    .push("Command not recognized. Type \"h\" to get a list of commands.".into());
             }
         }
 
-        if request.is_none()
-            && !(shell.input.len() == input_len
-                && shell.cursor_position == cursor_position
-                && shell.history_index == history_index)
+        if !(self.shell.input.len() == input_len
+            && self.shell.cursor_position == cursor_position
+            && self.shell.history_index == history_index)
         {
-            request = Some(DebugRequest::UpdateRender);
+            render = true;
         }
 
-        request
+        render
+    }
+
+    pub fn pause(&mut self, vm_runner: &mut VMRunner, vm: &VM) {
+        log::info!("c8vm interrupt!");
+        vm_runner.pause().unwrap();
+        self.activate(vm);
+    }
+
+    pub fn activate(&mut self, vm: &VM) {
+        self.shell.output.push("Paused.".into());
+        self.shell.output_pc(vm.interpreter());
+        self.active = true;
+    }
+
+    pub fn deactivate(&mut self) {
+        self.shell.output.push("Continuing.".into());
+        self.active = false;
     }
 
     pub fn step(&mut self, vm: &VM) -> bool {
@@ -135,7 +211,7 @@ impl Debugger {
         }
 
         if !self.active && !self.event_queue.is_empty() {
-            self.active = true;
+            self.activate(vm);
         }
 
         return self.event_queue.is_empty();
@@ -184,14 +260,19 @@ impl Shell {
                 }
             }
             KeyCode::Enter => {
-                let cmd = self.input.trim();
+                let cmd = if self.input.is_empty() {
+                    self.history.last().map(String::as_str).unwrap_or_default()
+                } else {
+                    self.input.trim()
+                };
+
                 if !cmd.is_empty() {
                     log::info!("issueing command: {}", cmd);
                     self.cmd_queue.push(cmd.into());
                     if self.history.last().map_or(true, |last_cmd| cmd != last_cmd) {
                         self.history.push(cmd.into());
-                        self.history_index = self.history.len();
                     }
+                    self.history_index = self.history.len();
                     self.input.clear();
                     self.cursor_position = 0;
                 }
@@ -215,6 +296,31 @@ impl Shell {
             _ => (),
         }
     }
+
+    pub fn output_pc(&mut self, interp: &Interpreter) {
+        let mut buf = format!("{:#05X?}: ", interp.pc);
+        let mut inst_asm = String::new();
+        let mut inst_comment = String::new();
+        if let Ok(inst) = Instruction::try_from(interp.fetch()) {
+            write_inst_asm(&inst, &mut inst_asm, &mut inst_comment).ok();
+            write!(buf, "{}", inst_asm).ok();
+            self.output.push(buf);
+            if inst_comment.is_empty() {
+                self.output.push(" ".into());
+            } else {
+                self.output
+                    .push(format!("{}# {}", " ".repeat(11), inst_comment));
+            }
+        } else {
+            buf.push_str(">> BAD INSTRUCTION <<");
+            self.output.push(buf);
+        }
+    }
+
+    pub fn output_unrecognized_cmd(&mut self) {
+        self.output
+            .push("Command not recognized. Type \"h\" to get a list of commands.".into());
+    }
 }
 
 // render
@@ -228,6 +334,7 @@ pub struct DebuggerWidget<'a> {
     pub logging: bool,
     pub dbg: &'a Debugger,
     pub vm: &'a VM,
+    pub vm_disp: &'a Display,
 }
 
 impl<'a> DebuggerWidget<'a> {
@@ -244,10 +351,10 @@ impl<'a> DebuggerWidget<'a> {
     }
 
     pub fn logger_area(&self, area: Rect) -> Rect {
-        self.areas(area).2
+        self.areas(area).3
     }
 
-    fn areas(&self, area: Rect) -> (Rect, Rect, Rect) {
+    fn areas(&self, area: Rect) -> (Rect, Rect, Rect, Rect) {
         let (region, shell) = if self.can_draw_shell(area) {
             let rects = Layout::default()
                 .direction(Direction::Vertical)
@@ -261,26 +368,50 @@ impl<'a> DebuggerWidget<'a> {
             (area, Rect::default())
         };
 
-        let (main, logger) = if self.logging {
+        let (main, region) = {
             let rects = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .constraints(if self.dbg.vm_visible {
+                    [
+                        Constraint::Length(region.width.saturating_sub(DISPLAY_WINDOW_WIDTH)),
+                        Constraint::Length(DISPLAY_WINDOW_WIDTH),
+                    ]
+                } else if self.logging {
+                    [Constraint::Percentage(80), Constraint::Percentage(20)]
+                } else {
+                    [Constraint::Percentage(100), Constraint::Percentage(0)]
+                })
                 .split(region);
             (rects[0], rects[1])
-        } else {
-            (region, Rect::default())
         };
 
-        (main, shell, logger)
+        let (vm, logger) = {
+            let rects = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(if self.dbg.vm_visible && self.logging {
+                    [
+                        Constraint::Length(DISPLAY_WINDOW_HEIGHT),
+                        Constraint::Length(region.height.saturating_sub(DISPLAY_WINDOW_HEIGHT)),
+                    ]
+                } else if self.logging {
+                    [Constraint::Percentage(0), Constraint::Percentage(100)]
+                } else {
+                    [Constraint::Percentage(100), Constraint::Percentage(0)]
+                })
+                .split(region);
+            (rects[0], rects[1])
+        };
+
+        (main, shell, vm, logger)
     }
 
     fn main_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect) {
         let mut rects = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Length(area.width.saturating_sub(14) / 5),
+                Constraint::Length(area.width.saturating_sub(14) / 4),
                 Constraint::Length(14),
-                Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14) / 5)),
+                Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14) / 4)),
             ])
             .split(area);
 
@@ -318,9 +449,17 @@ impl<'a> DebuggerWidget<'a> {
 impl<'a> StatefulWidget for DebuggerWidget<'_> {
     type State = DebuggerWidgetState;
     fn render(self, area: Rect, buf: &mut tui::buffer::Buffer, state: &mut Self::State) {
-        let (main_area, shell_area, _) = self.areas(area);
+        let (main_area, shell_area, vm_area, _) = self.areas(area);
         let (memory_area, pointer_area, register_area, timer_area, stack_area, output_area) =
             self.main_areas(main_area);
+
+        if self.dbg.vm_visible {
+            DisplayWidget {
+                display: self.vm_disp,
+                logging: false,
+            }
+            .render(vm_area, buf);
+        }
 
         let base_border = Borders::TOP.union(Borders::LEFT);
 
@@ -361,11 +500,13 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         Block::default()
             .title(" Memory ")
-            .borders(base_border.union(Borders::BOTTOM).union(if self.logging {
-                Borders::NONE
-            } else {
-                Borders::RIGHT
-            }))
+            .borders(base_border.union(Borders::BOTTOM).union(
+                if self.logging || self.dbg.vm_visible {
+                    Borders::NONE
+                } else {
+                    Borders::RIGHT
+                },
+            ))
             .render(memory_area, buf);
 
         let interp = self.vm.interpreter();

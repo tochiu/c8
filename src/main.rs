@@ -19,7 +19,7 @@ use {
 };
 
 use config::C8VMConfig;
-use device_query::{DeviceEvents, DeviceQuery};
+use device_query::DeviceQuery;
 use crossterm::{event::{
     poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers, KeyEventKind,
 }, style::Stylize};
@@ -27,12 +27,10 @@ use log::LevelFilter;
 
 use std::{
     io,
-    sync::{Mutex, mpsc::{channel, TryRecvError}},
+    sync::mpsc::{channel, TryRecvError},
     thread,
     time::Duration, ops::DerefMut, collections::HashSet,
 };
-
-use crate::debug::DebugRequest;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // arg parsing
@@ -192,28 +190,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             if debugging {
                                 let mut _guard = vm_ware.lock().unwrap();
-                                let (_, Some(dbg)) = _guard.deref_mut() else {
+                                let (vm, Some(dbg)) = _guard.deref_mut() else {
                                     unreachable!("debug runs should contain a debugger");
                                 };
 
-                                sink_vm_events = sink_vm_events || dbg.active;
+                                sink_vm_events = sink_vm_events || dbg.is_active();
 
                                 // TODO: handle errors
-                                if let Some(request) = dbg.handle_input_event(event.clone()) {
-                                    match request {
-                                        DebugRequest::PauseRunner => {
-                                            vm_runner.pause().ok();
-                                        },
-                                        DebugRequest::ResumeRunner => {
-                                            vm_runner.resume().ok();
-                                        },
-                                        DebugRequest::UpdateRender => () // render gets updated below
-                                    }
-
-                                    render_sender.send(RenderRequest::Draw(if dbg.active { Screen::Debugger } else { Screen::VM })).ok();
+                                if dbg.handle_input_event(event.clone(), &mut vm_runner, vm) {
+                                    render_sender.send(RenderRequest::Draw(if dbg.is_active() { Screen::Debugger } else { Screen::VM })).ok();
                                 }
 
-                                sink_vm_events = sink_vm_events || dbg.active;
+                                sink_vm_events = sink_vm_events || dbg.is_active();
                             }
 
                             match event {
