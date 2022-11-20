@@ -198,9 +198,11 @@ pub enum InterpreterError {
     BadInstruction(String)
 }
 
+pub type InterpreterMemory = [u8; PROGRAM_MEMORY_SIZE as usize];
+
 #[derive(Debug)]
 pub struct Interpreter {
-    pub memory: [u8; PROGRAM_MEMORY_SIZE as usize],
+    pub memory: InterpreterMemory,
     pub pc: u16,
     pub index: u16,
     pub stack: Vec<u16>,
@@ -212,18 +214,9 @@ pub struct Interpreter {
 
 impl<'a> From<Program> for Interpreter {
     fn from(program: Program) -> Self {
-        let mut memory = [0; PROGRAM_MEMORY_SIZE as usize];
-
-        memory[FONT_STARTING_ADDRESS as usize..FONT_STARTING_ADDRESS as usize + FONT.len()]
-            .copy_from_slice(&FONT);
-        
-        memory[PROGRAM_STARTING_ADDRESS as usize
-            ..PROGRAM_STARTING_ADDRESS as usize + program.data.len()]
-            .copy_from_slice(&program.data);
-        
         Interpreter {
+            memory: Self::alloc(&program),
             program,
-            memory,
             pc: PROGRAM_STARTING_ADDRESS,
             index: 0,
             stack: Vec::new(),
@@ -245,6 +238,30 @@ impl Default for Interpreter {
 }
 
 impl Interpreter {
+
+    pub fn instruction_parameters(binary: &[u8]) -> impl Iterator<Item = InstructionParameters> + '_ {
+        binary
+            .windows(2)
+            .map(|slice| InstructionParameters::from([slice[0], slice[1]]))
+    }
+
+    // pub fn instructions(binary: &[u8]) -> impl Iterator<Item = Option<Instruction>> + '_ {
+    //     Self::instruction_parameters(binary)
+    //         .map(|params| Instruction::try_from(params).ok())
+    // }
+
+    pub fn alloc(program: &Program) -> InterpreterMemory {
+        let mut memory = [0; PROGRAM_MEMORY_SIZE as usize];
+
+        memory[FONT_STARTING_ADDRESS as usize..FONT_STARTING_ADDRESS as usize + FONT.len()]
+            .copy_from_slice(&FONT);
+        
+        memory[PROGRAM_STARTING_ADDRESS as usize
+            ..PROGRAM_STARTING_ADDRESS as usize + program.data.len()]
+            .copy_from_slice(&program.data);
+        
+        memory
+    }
 
     pub fn input_mut(&mut self) -> &mut InterpreterInput {
         &mut self.input

@@ -1,5 +1,3 @@
-use super::interp::{Instruction, InstructionParameters};
-
 use std::{ffi::OsStr, fs::read, io, path::Path, fmt::Display};
 
 pub const PROGRAM_STARTING_ADDRESS: u16 = 0x200;
@@ -65,16 +63,5 @@ impl Program {
         } else {
             Ok(program)
         }
-    }
-
-    pub fn instruction_parameters(&self) -> impl Iterator<Item = InstructionParameters> + '_ {
-        self.data
-            .windows(2)
-            .map(|slice| InstructionParameters::from([slice[0], slice[1]]))
-    }
-
-    pub fn instructions(&self) -> impl Iterator<Item = Option<Instruction>> + '_ {
-        self.instruction_parameters()
-            .map(|params| Instruction::try_from(params).ok())
     }
 }
