@@ -124,10 +124,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             simple_logger::init_with_level(level)?;
         }
 
-        log::info!("Disassembling \"{}\"", program_name);
-        let disassembly = Disassembly::from(program);
-        log::info!("Disassembly complete");
-        print!("{}", disassembly);
+        let mut disass = Disassembly::from(program);
+        disass.run();
+        print!("{}", disass);
     } else {
         // initialize tui logger
         if logger_level != LevelFilter::Off {
