@@ -9,11 +9,11 @@ const INSTRUCTION_COLUMNS: usize = 36;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 enum InstructionTag {
-    Not,
-    Parsable,
-    Reachable,
-    Likely,
-    Proven,
+    Not,        // Instruction that cannot be parsed
+    Parsable,   // Instruction that can be parsed
+    Reachable,  // Parsable instruction that is reachable by at least one execution path
+    Valid,      // Reachable instruction whose subsequent execution contains at least one path that leads to a valid or better instruction
+    Proven,     // Valid instruction that can be reached by at least one static execution path (path w/o jump with offset)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -104,12 +104,15 @@ impl Disassembly {
         addr <= PROGRAM_MEMORY_SIZE - 2
     }
 
-    fn eval(&mut self, state: DisassemblyPath) -> bool {
+    pub fn eval(&mut self, state: DisassemblyPath) -> bool {
         if let Some(Some(instruction)) = self.instructions.get(state.addr as usize) {
             let tag_old = self.tags[state.addr as usize];
             if tag_old >= state.tag {
-                log::trace!("path {:#05X?} is already good!", state.addr);
+                log::trace!("path {:#05X?} is already good, backtracking!", state.addr);
                 return true;
+            } else if tag_old == InstructionTag::Reachable { // reachable tag => instruction is reachable but path is invalid
+                log::trace!("path {:#05X?} is already invalid, backtracking!", state.addr);
+                return false;
             }
 
             // update tag
@@ -118,15 +121,20 @@ impl Disassembly {
             log::trace!("traversing path {:#05X?}", state.addr);
 
             // traverse
-            let path_is_valid = match *instruction {
+
+            /* this is specifically to warn when only one skip branch is valid */
+            let mut one_skip_branch_is_valid = false;
+            let mut true_skip_branch_is_valid = false;
+
+            let (self_is_valid, path_is_valid) = match *instruction {
                 Instruction::Jump(addr) => {
                     if Disassembly::validate_jump_addr(addr) {
-                        self.eval(state.fork(addr))
+                        (true, self.eval(state.fork(addr)))
                     } else {
                         if state.tag == InstructionTag::Proven {
                             log::error!("Attempt to jump to instruction {:#05X}", addr);
                         }
-                        false
+                        (false, false)
                     }
                 }
 
@@ -147,24 +155,20 @@ impl Disassembly {
 
                     if maybe_lbound.or(maybe_rbound).is_some() {
                         log::info!(
-                            "Jump with offset from {:#05X} to {:#05X} + [0, 256) found",
+                            "Jumping from {:#05X} to {:#05X} + [0, 256)",
                             state.addr,
                             addr
                         );
 
                         let lbound = maybe_lbound.unwrap_or(0);
                         let rbound = maybe_rbound.unwrap_or(PROGRAM_MEMORY_SIZE as usize - 2);
-                        for kind in self.tags[lbound..=rbound].iter_mut() {
-                            if *kind == InstructionTag::Parsable {
-                                *kind = InstructionTag::Reachable;
-                            }
-                        }
 
                         for i in lbound..=rbound {
-                            self.eval(state.fork(i as u16).tag(InstructionTag::Likely));
+                            self.eval(state.fork(i as u16).tag(InstructionTag::Valid));
                         }
 
-                        true
+                        (true, true) 
+                        // ^ We don't account for jump with offset instructions that have all invalid paths (only case where we should return (true, false))
                     } else {
                         if state.tag == InstructionTag::Proven {
                             log::error!(
@@ -179,25 +183,27 @@ impl Disassembly {
                                 addr
                             );
                         }
-                        false
+                        (false, false)
                     }
                 }
 
                 Instruction::CallSubroutine(addr) => {
                     if Disassembly::validate_jump_addr(addr) {
-                        self.eval(state.fork(addr).subroutine())
-                            && self.eval(state.fork(state.addr + 2))
+                        // i would check that state.addr + 2 is a valid address but technically the subroutine could never return 
+                        // so it isn't certain that we traverse the next instruction, valid or not
+                        (true, self.eval(state.fork(addr).subroutine())
+                            && self.eval(state.fork(state.addr + 2)))
                     } else {
                         if state.tag == InstructionTag::Proven {
                             log::error!("Attempt to call subroutine {:#05X}", addr);
                         }
-                        false
+                        (false, false)
                     }
                 }
 
                 Instruction::SubroutineReturn => {
                     if state.depth > 0 {
-                        true
+                        (true, true)
                     } else {
                         if state.tag == InstructionTag::Proven {
                             log::error!(
@@ -205,7 +211,7 @@ impl Disassembly {
                                 state.addr
                             );
                         }
-                        false
+                        (false, false)
                     }
                 }
 
@@ -215,34 +221,61 @@ impl Disassembly {
                 | Instruction::SkipIfNotEquals(_, _)
                 | Instruction::SkipIfKeyDown(_)
                 | Instruction::SkipIfKeyNotDown(_) => {
-                    // evaluate branches (after this match statement the normal branch is evaluated)
-                    // one quirk i notice is that only 1 of the skip branches must be valid for the branch to be valid
-                    // this seems sensible to me for disassembly but i could be wrong (im probably wrong)
-                    let false_path_is_valid = self.eval(state.fork(state.addr + 2));
-                    let true_path_is_valid = self.eval(state.fork(state.addr + 4));
-                    false_path_is_valid || true_path_is_valid
+                    
+                    // if neither branch addresses are valid then it is impossible for the skip instruction to be valid
+                    if Disassembly::validate_jump_addr(state.addr + 2) || Disassembly::validate_jump_addr(state.addr + 4) {
+
+                        // evaluate branches (after this match statement the normal branch is evaluated)
+                        // one quirk i notice is that only 1 of the skip branches must be valid for the branch to be valid
+                        // this seems sensible to me for disassembly but i could be wrong (im probably wrong)
+                        let false_path_is_valid = self.eval(state.fork(state.addr + 2));
+                        let true_path_is_valid = self.eval(state.fork(state.addr + 4));
+
+                        let path_is_valid = false_path_is_valid || true_path_is_valid;
+
+                        if path_is_valid {
+                            if !true_path_is_valid {
+                                one_skip_branch_is_valid = true;
+                                true_skip_branch_is_valid = false;
+                            } else if !false_path_is_valid {
+                                one_skip_branch_is_valid = true;
+                                true_skip_branch_is_valid = true;
+                            }
+                        }
+                        
+                        (true, path_is_valid)
+                    } else {
+                        (false, false)
+                    }
                 }
 
                 // if we made it this far then the instruction doesn't introduce a discontinuity so evaluate the next
-                _ => self.eval(state.fork(state.addr + 2)),
+                _ => (true, self.eval(state.fork(state.addr + 2))),
             };
 
             log::trace!(
-                "path {:#05X?} is being marked as {}, bubbling up!",
+                "path {:#05X?} is being marked as {}, backtracking!",
                 state.addr,
                 if path_is_valid { "good" } else { "bad" }
             );
 
             if !path_is_valid {
                 // invalid path means we must revert
-                self.tags[state.addr as usize] = tag_old;
-                log::trace!("invalid path!");
+                //     IF the instruction itself is valid then it must be tagged as reachable (meaning it was the subsequent path that was invalid)
+                //     ELSE it is reverted back to its old tag (which currently should always be Parsable if we made it this far)
+                self.tags[state.addr as usize] = if self_is_valid { InstructionTag::Reachable } else { tag_old };
                 return false;
+            } else if one_skip_branch_is_valid { // we care to warn if only one branch is valid or better
+                if true_skip_branch_is_valid {
+                    log::warn!("True branch of skip instruction at {:#05X} is valid but false branch isn't", state.addr);
+                } else {
+                    log::warn!("False branch of skip instruction at {:#05X} is valid but true branch isn't", state.addr);
+                }
             }
 
             true
         } else {
-            log::trace!("path {:#05X?} is not parsable, bubbling!", state.addr);
+            log::trace!("path {:#05X?} is not parsable, backtracking!", state.addr);
 
             if state.tag == InstructionTag::Proven {
                 log::error!(
@@ -271,7 +304,7 @@ impl Disassembly {
             InstructionTag::Not => ' ',
             InstructionTag::Parsable => '?',
             InstructionTag::Reachable => '*',
-            InstructionTag::Likely => 'O',
+            InstructionTag::Valid => 'O',
             InstructionTag::Proven => {
                 if let Some(Instruction::JumpWithOffset(_, _)) = instruction {
                     '!'
@@ -322,8 +355,8 @@ impl Display for Disassembly {
 
             self.write_addr_disass(addr, &mut bin_header, &mut asm_content, &mut asm_comment)?;
 
-            let show_bin_comment = tag <= InstructionTag::Likely;
-            let show_asm_content = tag >= InstructionTag::Likely;
+            let show_bin_comment = tag <= InstructionTag::Valid;
+            let show_asm_content = tag >= InstructionTag::Valid;
             let show_asm_comment = show_asm_content && asm_comment.len() > 0;
 
             let mut content_length = 0;
@@ -496,7 +529,7 @@ pub fn write_inst_asm(
                 c,
                 "load {} byte{} into v(0..={})",
                 vx + 1,
-                if *vx == 0 { "" } else { " " },
+                if *vx == 0 { "" } else { "s" },
                 vx
             )
         }
@@ -506,7 +539,7 @@ pub fn write_inst_asm(
                 c,
                 "save {} byte{} from v(0..={})",
                 vx + 1,
-                if *vx == 0 { "" } else { " " },
+                if *vx == 0 { "" } else { "s" },
                 vx
             )
         }
@@ -522,7 +555,7 @@ pub fn write_inst_asm(
             write!(f, "disp  v{:x} v{:x} {}", vx, vy, height)?;
             write!(
                 c,
-                "display {} row{} of sprite at screen pos (v{:x}, v{:x})",
+                "draw {} byte{} at pos (v{:x}, v{:x})",
                 height,
                 if *height == 1 { "" } else { "s" },
                 vx,
