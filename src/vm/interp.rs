@@ -181,6 +181,7 @@ pub struct InterpreterInput {
 pub struct InterpreterOutput {
     pub display: DisplayBuffer,
     pub awaiting_input: bool,
+    pub executed: Option<Instruction>,
 
     pub request: Option<InterpreterRequest>,
 }
@@ -195,7 +196,8 @@ pub enum InterpreterRequest {
 
 #[derive(Debug)]
 pub enum InterpreterError {
-    BadInstruction(String)
+    BadInstruction(String),
+    InvalidProgramCounter
 }
 
 pub type InterpreterMemory = [u8; PROGRAM_MEMORY_SIZE as usize];
@@ -225,6 +227,7 @@ impl<'a> From<Program> for Interpreter {
             output: InterpreterOutput {
                 display: [0; DISPLAY_HEIGHT as usize],
                 awaiting_input: false,
+                executed: None,
                 request: None,
             },
         }
@@ -245,11 +248,6 @@ impl Interpreter {
             .map(|slice| InstructionParameters::from([slice[0], slice[1]]))
     }
 
-    // pub fn instructions(binary: &[u8]) -> impl Iterator<Item = Option<Instruction>> + '_ {
-    //     Self::instruction_parameters(binary)
-    //         .map(|params| Instruction::try_from(params).ok())
-    // }
-
     pub fn alloc(program: &Program) -> InterpreterMemory {
         let mut memory = [0; PROGRAM_MEMORY_SIZE as usize];
 
@@ -269,19 +267,30 @@ impl Interpreter {
 
     // interpret the next instruction
     pub fn step(&mut self) -> Result<&InterpreterOutput, InterpreterError> {
-        // clear output request
+        // clear output request & clear executed instruction
         self.output.request = None;
+        self.output.executed = None;
 
-        // fetch + decode
-        let inst = Instruction::try_from(self.fetch())
-            .map_err(|str| InterpreterError::BadInstruction(str))?;
+        if (self.pc as usize) < self.memory.len() - 1 {
+            // fetch + decode
+            match Instruction::try_from(self.fetch()) {
+                Ok(inst) => {
+                    log::trace!("instruction {:#05X?} {:?} ", self.pc, inst);
+                    self.pc += 2;
+                    self.output.executed = Some(inst);
 
-        log::trace!("instruction {:#05X?} {:?} ", self.pc, inst);
-        
-        self.pc += 2;
-
-        // exec instruction
-        Ok(self.exec(inst))
+                    // execute instruction
+                    Ok(self.exec(inst))
+                }
+                Err(e) => {
+                    log::error!("{}", e);
+                    Err(InterpreterError::BadInstruction(e))
+                }
+            }
+        } else {
+            log::error!("Program counter address is invalid ({:#06X?})", self.pc);
+            Err(InterpreterError::InvalidProgramCounter)
+        }
     }
 
     pub fn fetch(&self) -> InstructionParameters {

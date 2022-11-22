@@ -1,17 +1,17 @@
 use crate::{
-    disass::write_inst_asm,
+    disass::{write_inst_asm, Disassembler, InstructionTag, INSTRUCTION_COLUMNS, write_byte_str},
     vm::{
         disp::{Display, DisplayWidget, DISPLAY_WINDOW_HEIGHT, DISPLAY_WINDOW_WIDTH},
         interp::{Instruction, Interpreter},
-        run::{VMRunner, VM},
+        run::{VMRunner, VM}, prog::PROGRAM_MEMORY_SIZE,
     },
 };
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use tui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::Style,
-    text::Spans,
+    style::{Style, Color, Modifier},
+    text::{Spans, Span},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 
@@ -34,7 +34,6 @@ pub enum DebugEvent {
     BreakpointReached(u16),
 }
 
-#[derive(Default)]
 pub struct Debugger {
     active: bool,
 
@@ -42,6 +41,8 @@ pub struct Debugger {
     watchpoints: HashSet<Watchpoint>,
     watch_state: DebugWatchState,
     event_queue: Vec<DebugEvent>,
+
+    disassembler: Disassembler,
 
     shell: Shell,
     shell_active: bool,
@@ -51,12 +52,26 @@ pub struct Debugger {
 
 impl Debugger {
     pub fn init(vm: &VM) -> Self {
-        let mut dbg = Self::default();
-        dbg.active = false;
+        let mut dbg = Debugger {
+            active: false,
+            breakpoints: Default::default(),
+            watchpoints: Default::default(),
+            watch_state: Default::default(),
+            event_queue: Default::default(),
+
+            disassembler: Disassembler::from(vm.interpreter().program.clone()), // cant derive default >:)
+
+            shell: Default::default(),
+            shell_active: false,
+
+            vm_visible: false
+        };
+        
         dbg.vm_visible = true;
         dbg.shell_active = true;
         dbg.shell.input_enabled = true;
         dbg.shell.prefix.push_str("(c8db) ");
+        dbg.disassembler.run();
         dbg.activate(vm);
         dbg
     }
@@ -123,14 +138,20 @@ impl Debugger {
                             .min(u16::MAX as u128) as usize;
                         log::info!("stepping {}!", amt);
 
-                        for _ in 0..amt {
+                        let mut amt_stepped = 0;
+
+                        for step in 0..amt {
+                            amt_stepped = step + 1;
                             vm.step(1.0 / vm_runner.config().instruction_frequency as f64)
                                 .unwrap();
                             self.shell.output_pc(vm.interpreter());
+                            if !self.step(vm) {
+                                break;
+                            }
                         }
 
-                        if amt > 1 {
-                            self.shell.output.push(format!("Stepped {} times", amt));
+                        if amt_stepped > 1 {
+                            self.shell.output.push(format!("Stepped {} times", amt_stepped));
                         }
 
                         render = true;
@@ -213,6 +234,9 @@ impl Debugger {
         if !self.active && !self.event_queue.is_empty() {
             self.activate(vm);
         }
+
+        // update disassembler
+        self.disassembler.update(vm.interpreter());
 
         return self.event_queue.is_empty();
     }
@@ -409,9 +433,9 @@ impl<'a> DebuggerWidget<'a> {
         let mut rects = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Length(area.width.saturating_sub(14) / 4),
+                Constraint::Length(area.width.saturating_sub(14) / 3),
                 Constraint::Length(14),
-                Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14) / 4)),
+                Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14) / 3)),
             ])
             .split(area);
 
@@ -471,6 +495,17 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         let output_block = Block::default().title(" Output ").borders(Borders::TOP);
         let output_text_area = output_block.inner(output_area);
 
+        let memory_block = Block::default()
+            .title(" Memory ")
+            .borders(base_border.union(Borders::BOTTOM).union(
+                if self.logging || self.dbg.vm_visible {
+                    Borders::NONE
+                } else {
+                    Borders::RIGHT
+                },
+            ));
+        let memory_lines_area = memory_block.inner(memory_area);
+
         let mut lines = self
             .dbg
             .shell
@@ -497,17 +532,12 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         );
 
         output_block.render(output_area, buf);
-
-        Block::default()
-            .title(" Memory ")
-            .borders(base_border.union(Borders::BOTTOM).union(
-                if self.logging || self.dbg.vm_visible {
-                    Borders::NONE
-                } else {
-                    Borders::RIGHT
-                },
-            ))
-            .render(memory_area, buf);
+        
+        memory_block.render(memory_area, buf);
+        MemoryWidget {
+            vm: self.vm,
+            disassembler: &self.dbg.disassembler
+        }.render(memory_lines_area, buf);
 
         let interp = self.vm.interpreter();
 
@@ -551,6 +581,124 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         if self.can_draw_shell(area) {
             ShellWidget::from(&self.dbg.shell).render(shell_area, buf, &mut state.shell)
         }
+    }
+}
+
+pub struct MemoryWidget<'a> {
+    disassembler: &'a Disassembler,
+    vm: &'a VM
+}
+
+impl<'a> MemoryWidget<'_> {
+
+    const COMMENT_DELIM: &'static str = "# ";
+
+    fn write_span(&self, addr: u16, is_pc: bool, bin_header: &mut String, asm_content: &mut String, comment: &mut String) -> Option<Spans> {
+        let byte = self.disassembler.memory[addr as usize];
+        let tag = self.disassembler.tags[addr as usize];
+
+        if is_pc 
+            || tag >= InstructionTag::Proven
+            || addr == 0
+            || !self
+                .disassembler
+                .tags
+                .get(addr as usize - 1)
+                .map_or(false, |&tag| tag >= InstructionTag::Proven)
+        {
+            bin_header.clear();
+            asm_content.clear();
+            comment.clear();
+            
+            asm_content.push(' ');
+            comment.push_str(MemoryWidget::COMMENT_DELIM);
+
+            self.disassembler.write_addr_disass(addr, bin_header, asm_content, comment).ok();
+
+            let show_bin_comment = tag <= InstructionTag::Valid && !is_pc;
+            let show_asm_content = tag >= InstructionTag::Valid || is_pc;
+            let show_comment = show_bin_comment || show_asm_content && comment.len() > MemoryWidget::COMMENT_DELIM.len();
+
+            if show_comment {
+                if !show_asm_content {
+                    asm_content.clear();
+                }
+
+                let padding = INSTRUCTION_COLUMNS.saturating_sub(bin_header.len() + asm_content.len());
+
+                asm_content.reserve_exact(padding);
+                for _ in 0..padding {
+                    asm_content.push(' ');
+                }
+            }
+
+            if show_bin_comment {
+                comment.clear();
+                write!(comment, "{}{:08b} 2X GRAHPHIC ", MemoryWidget::COMMENT_DELIM, byte).ok();
+                write_byte_str(comment, byte, 2).ok();
+            }
+
+            let mut spans: Vec<Span> = Vec::with_capacity(3);
+
+            spans.push(Span::raw(bin_header.clone()));
+            if show_asm_content || show_comment {
+                spans.push(Span::raw(asm_content.clone()));
+            }
+            if show_comment {
+                spans.push(Span::styled(comment.clone(), Style::default().fg(Color::Yellow)));
+            }
+
+            Some(Spans::from(spans))
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Widget for MemoryWidget<'_> {
+    fn render(self, area: Rect, buf: &mut tui::buffer::Buffer) {
+        if area.area() == 0 {
+            return;
+        }
+
+        let mut bin_header = String::new();
+        let mut asm_content = String::new();
+        let mut comment = String::new();
+
+        let interp = self.vm.interpreter();
+
+        let mut lines: Vec<Spans> = Vec::with_capacity(area.height as usize);
+        let mut addr = interp.pc;
+
+        let amt_ahead = (area.height - area.height/2) as usize;
+        
+        while lines.len() < amt_ahead && addr < PROGRAM_MEMORY_SIZE {
+            if let Some(mut line) = self.write_span(addr, addr == interp.pc, &mut bin_header, &mut asm_content, &mut comment) {
+                if addr == interp.pc {
+                    let line_len = line.0.iter().fold(0, |len, span| len + span.content.len());
+                    if line_len < area.width as usize {
+                        line.0.push(Span::raw(" ".repeat(area.width as usize - line_len)));
+                    }
+
+                    for span in line.0.iter_mut() {
+                        (*span).style = span.style.add_modifier(Modifier::BOLD).bg(Color::LightCyan).fg(Color::Black);
+                    }
+                }
+                lines.push(line);
+            }
+            addr += 1;
+        }
+
+        addr = interp.pc;
+        while addr > 0 && lines.len() < area.height as usize {
+            addr -= 1;
+            //pc_line += 1;
+            if let Some(line) = self.write_span(addr, false, &mut bin_header, &mut asm_content, &mut comment) {
+                lines.insert(0, line);
+            }
+        }
+
+        Paragraph::new(lines).render(area, buf);
     }
 }
 

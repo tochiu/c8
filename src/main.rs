@@ -14,7 +14,7 @@ use {
         run::{VMRunner, VMEvent, VMRunResult}
     },
     util::{Interval, IntervalAccuracy},
-    disass::Disassembly,
+    disass::Disassembler,
     render::{RenderRequest, Renderer, Screen}
 };
 
@@ -124,7 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             simple_logger::init_with_level(level)?;
         }
 
-        let mut disass = Disassembly::from(program);
+        let mut disass = Disassembler::from(program);
         disass.run();
         print!("{}", disass);
     } else {

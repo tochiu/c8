@@ -3,17 +3,20 @@ use crate::vm::{
     prog::{Program, PROGRAM_MEMORY_SIZE, PROGRAM_STARTING_ADDRESS},
 };
 
-use std::{fmt::{Display, Write}, time::Instant};
+use std::{
+    fmt::{Display, Write},
+    time::Instant,
+};
 
-const INSTRUCTION_COLUMNS: usize = 36;
+pub const INSTRUCTION_COLUMNS: usize = 36;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
-enum InstructionTag {
-    Not,        // Instruction that cannot be parsed
-    Parsable,   // Instruction that can be parsed
-    Reachable,  // Parsable instruction that is reachable by at least one execution path
-    Valid,      // Reachable instruction whose subsequent execution contains at least one path that leads to a valid or better instruction
-    Proven,     // Valid instruction that can be reached by at least one static execution path (path w/o jump with offset)
+pub enum InstructionTag {
+    Not,       // Instruction that cannot be parsed
+    Parsable,  // Instruction that can be parsed
+    Reachable, // Parsable instruction that is reachable by at least one execution path
+    Valid,     // Reachable instruction whose subsequent execution contains at least one path that leads to a valid or better instruction
+    Proven,    // Valid instruction that can be reached by at least one static execution path (path w/o jump with offset)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -43,19 +46,20 @@ impl DisassemblyPath {
     }
 }
 
-pub struct Disassembly {
-    instruction_params: Vec<InstructionParameters>,
-    instructions: Vec<Option<Instruction>>,
-    program: Program,
-    memory: InterpreterMemory,
-    tags: Vec<InstructionTag>,
+pub struct Disassembler {
+    pub instruction_params: Vec<InstructionParameters>,
+    pub instructions: Vec<Option<Instruction>>,
+    pub program: Program,
+    pub memory: InterpreterMemory,
+    pub tags: Vec<InstructionTag>
 }
 
-impl From<Program> for Disassembly {
+impl From<Program> for Disassembler {
     fn from(program: Program) -> Self {
         let memory = Interpreter::alloc(&program);
 
-        let mut instruction_params = Interpreter::instruction_parameters(&memory).collect::<Vec<_>>();
+        let mut instruction_params =
+            Interpreter::instruction_parameters(&memory).collect::<Vec<_>>();
         let mut instructions = instruction_params
             .iter()
             .cloned()
@@ -81,7 +85,7 @@ impl From<Program> for Disassembly {
         instructions.push(None);
         tags.push(InstructionTag::Not);
 
-        Disassembly {
+        Disassembler {
             instruction_params,
             instructions,
             program,
@@ -91,17 +95,57 @@ impl From<Program> for Disassembly {
     }
 }
 
-impl Disassembly {
+impl Disassembler {
     fn validate_jump_addr(addr: u16) -> bool {
         addr <= PROGRAM_MEMORY_SIZE - 2
     }
 
-    pub fn run_from(&mut self, path: DisassemblyPath) {
-        log::info!("Disassembling \"{}\" starting at {:#05X}", &self.program.name, path.addr);
-        let now = Instant::now();
-        self.eval(path);
-        let elapsed = now.elapsed().as_micros();
-        log::info!("Disassembled \"{}\" in {} us", &self.program.name, elapsed);
+    pub fn update(&mut self, interp: &Interpreter) {
+        let memory = interp.memory;
+        let mut disass_required = false;
+
+        for ((((new_param_bits, byte), params), inst), tag) in memory
+            .windows(2)
+            .zip(self.memory.iter_mut())
+            .zip(self.instruction_params.iter_mut())
+            .zip(self.instructions.iter_mut())
+            .zip(self.tags.iter_mut())
+            .filter(|((((new_param_bits, byte), _), _), _)| new_param_bits[0] != **byte)
+        {
+            *byte = new_param_bits[0];
+            *params = InstructionParameters::from([new_param_bits[0], new_param_bits[1]]);
+            *inst = Instruction::try_from(*params).ok();
+
+            disass_required = disass_required || *tag > InstructionTag::Parsable || *tag < InstructionTag::Parsable && inst.is_some();
+
+            *tag = if inst.is_some() { InstructionTag::Parsable } else { InstructionTag::Not };
+        }
+
+        // handle edge-case of last byte because it doesn't fit into the size of an instruction
+
+        let Some(last_byte) = self.memory.last_mut() else {
+            unreachable!("disass memory size must be nonzero");
+        };
+
+        let Some(new_last_byte) = memory.last() else {
+            unreachable!("interp memory size must be nonzero");
+        };
+
+        *last_byte = *new_last_byte;
+
+        if disass_required {
+            // reset tags that are >=parsable back to parsable before rerunning disassembler
+            for tag in self.tags.iter_mut() {
+                *tag = (*tag).min(InstructionTag::Parsable);
+            }
+            self.run();
+        }
+
+        self.run_from(DisassemblyPath {
+            addr: interp.pc,
+            tag: InstructionTag::Proven,
+            depth: interp.stack.len()
+        });
     }
 
     pub fn run(&mut self) {
@@ -112,13 +156,26 @@ impl Disassembly {
         })
     }
 
+    pub fn run_from(&mut self, path: DisassemblyPath) {
+        log::info!(
+            "Disassembling \"{}\" starting at {:#05X}",
+            &self.program.name,
+            path.addr
+        );
+        let now = Instant::now();
+        self.eval(path);
+        let elapsed = now.elapsed().as_micros();
+        log::info!("Disassembled \"{}\" in {} us", &self.program.name, elapsed);
+    }
+
     fn eval(&mut self, path: DisassemblyPath) -> bool {
         if let Some(Some(instruction)) = self.instructions.get(path.addr as usize) {
             let tag_old = self.tags[path.addr as usize];
             if tag_old >= path.tag {
                 log::trace!("path {:#05X?} is already good, backtracking!", path.addr);
                 return true;
-            } else if tag_old == InstructionTag::Reachable { // reachable tag => instruction is reachable but path is invalid
+            } else if tag_old == InstructionTag::Reachable {
+                // reachable tag => instruction is reachable but path is invalid
                 log::trace!("path {:#05X?} is already invalid, backtracking!", path.addr);
                 return false;
             }
@@ -136,7 +193,7 @@ impl Disassembly {
 
             let (self_is_valid, path_is_valid) = match *instruction {
                 Instruction::Jump(addr) => {
-                    if Disassembly::validate_jump_addr(addr) {
+                    if Disassembler::validate_jump_addr(addr) {
                         (true, self.eval(path.fork(addr)))
                     } else {
                         if path.tag == InstructionTag::Proven {
@@ -150,12 +207,12 @@ impl Disassembly {
                 // should stick if the path intersects a similar or better path
                 // (this instruction is what is singe-handedly making this disassembler nontrivial)
                 Instruction::JumpWithOffset(addr, _) => {
-                    let maybe_lbound = if Disassembly::validate_jump_addr(addr) {
+                    let maybe_lbound = if Disassembler::validate_jump_addr(addr) {
                         Some(addr as usize)
                     } else {
                         None
                     };
-                    let maybe_rbound = if Disassembly::validate_jump_addr(addr + 255) {
+                    let maybe_rbound = if Disassembler::validate_jump_addr(addr + 255) {
                         Some(addr as usize + 255)
                     } else {
                         None
@@ -175,7 +232,7 @@ impl Disassembly {
                             self.eval(path.fork(i as u16).tag(InstructionTag::Valid));
                         }
 
-                        (true, true) 
+                        (true, true)
                         // ^ We don't account for jump with offset instructions that have all invalid paths (only case where we should return (true, false))
                     } else {
                         if path.tag == InstructionTag::Proven {
@@ -196,11 +253,14 @@ impl Disassembly {
                 }
 
                 Instruction::CallSubroutine(addr) => {
-                    if Disassembly::validate_jump_addr(addr) {
-                        // i would check that path.addr + 2 is a valid address but technically the subroutine could never return 
+                    if Disassembler::validate_jump_addr(addr) {
+                        // i would check that path.addr + 2 is a valid address but technically the subroutine could never return
                         // so it isn't certain that we traverse the next instruction, valid or not
-                        (true, self.eval(path.fork(addr).subroutine())
-                            && self.eval(path.fork(path.addr + 2)))
+                        (
+                            true,
+                            self.eval(path.fork(addr).subroutine())
+                                && self.eval(path.fork(path.addr + 2)),
+                        )
                     } else {
                         if path.tag == InstructionTag::Proven {
                             log::error!("Attempt to call subroutine {:#05X}", addr);
@@ -229,10 +289,10 @@ impl Disassembly {
                 | Instruction::SkipIfNotEquals(_, _)
                 | Instruction::SkipIfKeyDown(_)
                 | Instruction::SkipIfKeyNotDown(_) => {
-                    
                     // if neither branch addresses are valid then it is impossible for the skip instruction to be valid
-                    if Disassembly::validate_jump_addr(path.addr + 2) || Disassembly::validate_jump_addr(path.addr + 4) {
-
+                    if Disassembler::validate_jump_addr(path.addr + 2)
+                        || Disassembler::validate_jump_addr(path.addr + 4)
+                    {
                         // evaluate branches (after this match statement the normal branch is evaluated)
                         // one quirk i notice is that only 1 of the skip branches must be valid for the branch to be valid
                         // this seems sensible to me for disassembly but i could be wrong (im probably wrong)
@@ -250,7 +310,7 @@ impl Disassembly {
                                 true_skip_branch_is_valid = true;
                             }
                         }
-                        
+
                         (true, path_is_valid)
                     } else {
                         (false, false)
@@ -271,9 +331,14 @@ impl Disassembly {
                 // invalid path means we must revert
                 //     IF the instruction itself is valid then it must be tagged as reachable (meaning it was the subsequent path that was invalid)
                 //     ELSE it is reverted back to its old tag (which currently should always be Parsable if we made it this far)
-                self.tags[path.addr as usize] = if self_is_valid { InstructionTag::Reachable } else { tag_old };
+                self.tags[path.addr as usize] = if self_is_valid {
+                    InstructionTag::Reachable
+                } else {
+                    tag_old
+                };
                 return false;
-            } else if one_skip_branch_is_valid { // we care to warn if only one branch is valid or better
+            } else if one_skip_branch_is_valid {
+                // we care to warn if only one branch is valid or better
                 if true_skip_branch_is_valid {
                     log::warn!("True branch of skip instruction at {:#05X} is valid but false branch isn't", path.addr);
                 } else {
@@ -296,7 +361,7 @@ impl Disassembly {
         }
     }
 
-    fn write_addr_disass(
+    pub fn write_addr_disass(
         &self,
         addr: u16,
         a: &mut impl std::fmt::Write,
@@ -338,7 +403,7 @@ impl Disassembly {
     }
 }
 
-impl Display for Disassembly {
+impl Display for Disassembler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut bin_header = String::new();
         let mut asm_content = String::new();
@@ -348,7 +413,13 @@ impl Display for Disassembly {
             .iter()
             .take(self.program.data.len())
             .enumerate()
-            .map(|(i, tag)| (PROGRAM_STARTING_ADDRESS + i as u16, self.memory[PROGRAM_STARTING_ADDRESS as usize + i], *tag))
+            .map(|(i, tag)| {
+                (
+                    PROGRAM_STARTING_ADDRESS + i as u16,
+                    self.memory[PROGRAM_STARTING_ADDRESS as usize + i],
+                    *tag,
+                )
+            })
             .filter(|(addr, _, tag)| {
                 *tag >= InstructionTag::Proven
                     || !self
@@ -379,7 +450,11 @@ impl Display for Disassembly {
             }
 
             if show_bin_comment || show_asm_comment {
-                write!(f, "{}# ", " ".repeat(INSTRUCTION_COLUMNS.saturating_sub(content_length)))?;
+                write!(
+                    f,
+                    "{}# ",
+                    " ".repeat(INSTRUCTION_COLUMNS.saturating_sub(content_length))
+                )?;
             }
 
             if show_bin_comment {
@@ -396,7 +471,7 @@ impl Display for Disassembly {
     }
 }
 
-pub fn  write_byte_str(
+pub fn write_byte_str(
     f: &mut impl std::fmt::Write,
     byte: u8,
     bit_width: usize,
