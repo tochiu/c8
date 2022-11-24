@@ -19,6 +19,18 @@ pub enum InstructionTag {
     Proven,    // Valid instruction that can be reached by at least one static execution path (path w/o jump with offset)
 }
 
+impl InstructionTag {
+    fn to_symbol(self) -> char {
+        match self {
+            InstructionTag::Not => ' ',
+            InstructionTag::Parsable => '?',
+            InstructionTag::Reachable => '*',
+            InstructionTag::Valid => 'O',
+            InstructionTag::Proven => 'X',
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct DisassemblyPath {
     addr: u16,
@@ -51,7 +63,7 @@ pub struct Disassembler {
     pub instructions: Vec<Option<Instruction>>,
     pub program: Program,
     pub memory: InterpreterMemory,
-    pub tags: Vec<InstructionTag>
+    pub tags: Vec<InstructionTag>,
 }
 
 impl From<Program> for Disassembler {
@@ -68,7 +80,6 @@ impl From<Program> for Disassembler {
             .collect::<Vec<_>>();
         let mut tags = instructions
             .iter()
-            .cloned()
             .map(|maybe_inst| {
                 if maybe_inst.is_some() {
                     InstructionTag::Parsable
@@ -79,9 +90,10 @@ impl From<Program> for Disassembler {
             .collect::<Vec<_>>();
 
         // the last byte isn't processed (since instructions are 16 bits) so we must insert it manually
-        instruction_params.push(InstructionParameters::from(
-            (memory.last().cloned().unwrap_or_default() as u16) << 8,
-        ));
+        instruction_params.push(InstructionParameters::from([
+            memory.last().cloned().unwrap_or_default(),
+            0,
+        ]));
         instructions.push(None);
         tags.push(InstructionTag::Not);
 
@@ -116,9 +128,15 @@ impl Disassembler {
             *params = InstructionParameters::from([new_param_bits[0], new_param_bits[1]]);
             *inst = Instruction::try_from(*params).ok();
 
-            disass_required = disass_required || *tag > InstructionTag::Parsable || *tag < InstructionTag::Parsable && inst.is_some();
+            disass_required = disass_required
+                || *tag > InstructionTag::Parsable
+                || *tag < InstructionTag::Parsable && inst.is_some();
 
-            *tag = if inst.is_some() { InstructionTag::Parsable } else { InstructionTag::Not };
+            *tag = if inst.is_some() {
+                InstructionTag::Parsable
+            } else {
+                InstructionTag::Not
+            };
         }
 
         // handle edge-case of last byte because it doesn't fit into the size of an instruction
@@ -144,7 +162,7 @@ impl Disassembler {
         self.run_from(DisassemblyPath {
             addr: interp.pc,
             tag: InstructionTag::Proven,
-            depth: interp.stack.len()
+            depth: interp.stack.len(),
         });
     }
 
@@ -373,22 +391,8 @@ impl Disassembler {
         let instruction = self.instructions[index];
         let tag = self.tags[index];
 
-        let addr_symbol = match tag {
-            InstructionTag::Not => ' ',
-            InstructionTag::Parsable => '?',
-            InstructionTag::Reachable => '*',
-            InstructionTag::Valid => 'O',
-            InstructionTag::Proven => {
-                if let Some(Instruction::JumpWithOffset(_, _)) = instruction {
-                    '!'
-                } else {
-                    'X'
-                }
-            }
-        };
-
         // address + tag symbol
-        write!(a, "{:#05X}: |{}|", addr, addr_symbol)?;
+        write!(a, "{:#05X}: |{}|", addr, tag.to_symbol())?;
 
         // instruction if parsable
         if tag >= InstructionTag::Parsable {
@@ -477,15 +481,15 @@ pub fn write_byte_str(
     bit_width: usize,
 ) -> std::fmt::Result {
     for filled in (0..8).rev().map(|i| byte >> i & 1 == 1) {
-        write!(
-            f,
-            "{}",
-            if filled {
-                "@".repeat(bit_width)
-            } else {
-                ".".repeat(bit_width)
+        if filled {
+            for _ in 0..bit_width {
+                f.write_char('@')?;
             }
-        )?;
+        } else {
+            for _ in 0..bit_width {
+                f.write_char('.')?;
+            }
+        }
     }
 
     Ok(())
