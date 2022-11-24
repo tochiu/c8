@@ -1,17 +1,18 @@
 use crate::{
-    disass::{write_inst_asm, Disassembler, InstructionTag, INSTRUCTION_COLUMNS, write_byte_str},
+    disass::{write_byte_str, write_inst_asm, Disassembler, InstructionTag, INSTRUCTION_COLUMNS},
     vm::{
         disp::{Display, DisplayWidget, DISPLAY_WINDOW_HEIGHT, DISPLAY_WINDOW_WIDTH},
         interp::{Instruction, Interpreter},
-        run::{VMRunner, VM}, prog::PROGRAM_MEMORY_SIZE,
+        prog::PROGRAM_MEMORY_SIZE,
+        run::{VMRunner, VM},
     },
 };
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use tui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Style, Color, Modifier},
-    text::{Spans, Span},
+    style::{Color, Modifier, Style},
+    text::{Span, Spans},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 
@@ -19,7 +20,7 @@ use std::{collections::HashSet, fmt::Write};
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Watchpoint {
-    Index,
+    Pointer(MemoryPointer),
     Register(u8),
 }
 
@@ -27,11 +28,18 @@ pub enum Watchpoint {
 pub struct DebugWatchState {
     registers: [u8; 16],
     index: u16,
+    pc: u16,
 }
 
 pub enum DebugEvent {
-    WatchpointChange(Watchpoint, u16, u16),
+    WatchpointTrigger(Watchpoint, u16, u16),
     BreakpointReached(u16),
+}
+
+#[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
+pub enum MemoryPointer {
+    ProgramCounter,
+    Index,
 }
 
 pub struct Debugger {
@@ -43,6 +51,10 @@ pub struct Debugger {
     event_queue: Vec<DebugEvent>,
 
     disassembler: Disassembler,
+
+    memory_addr: u16,
+    memory_follow: Option<MemoryPointer>,
+    memory_active: bool,
 
     shell: Shell,
     shell_active: bool,
@@ -61,12 +73,16 @@ impl Debugger {
 
             disassembler: Disassembler::from(vm.interpreter().program.clone()), // cant derive default >:)
 
+            memory_addr: vm.interpreter().pc,
+            memory_follow: Some(MemoryPointer::ProgramCounter),
+            memory_active: false,
+
             shell: Default::default(),
             shell_active: false,
 
-            vm_visible: false
+            vm_visible: false,
         };
-        
+
         dbg.vm_visible = true;
         dbg.shell_active = true;
         dbg.shell.input_enabled = true;
@@ -113,15 +129,16 @@ impl Debugger {
         if self.active {
             for cmd_str in cmds.collect::<Vec<_>>() {
                 self.shell.output.push(self.shell.prefix.clone() + &cmd_str);
-                // TODO: add more commands here
 
-                let mut cmd_args = cmd_str.split_ascii_whitespace();
+                let lowercase_cmd_str = cmd_str.to_ascii_lowercase();
+                let mut cmd_args = lowercase_cmd_str.split_ascii_whitespace();
 
                 let Some(cmd) = cmd_args.next() else {
                     self.shell.output_unrecognized_cmd();
                     continue;
                 };
 
+                // TODO: add more commands here
                 match cmd {
                     "r" | "c" | "run" | "cont" | "continue" => {
                         log::info!("c8vm resume!");
@@ -151,7 +168,9 @@ impl Debugger {
                         }
 
                         if amt_stepped > 1 {
-                            self.shell.output.push(format!("Stepped {} times", amt_stepped));
+                            self.shell
+                                .output
+                                .push(format!("Stepped {} times", amt_stepped));
                         }
 
                         render = true;
@@ -213,7 +232,10 @@ impl Debugger {
         let interp = vm.interpreter();
         for &watchpoint in self.watchpoints.iter() {
             let (old_val, new_val) = match watchpoint {
-                Watchpoint::Index => (self.watch_state.index, interp.index),
+                Watchpoint::Pointer(pointer) => match pointer {
+                    MemoryPointer::Index => (self.watch_state.index, interp.index),
+                    MemoryPointer::ProgramCounter => (self.watch_state.pc, interp.pc),
+                },
                 Watchpoint::Register(vx) => (
                     self.watch_state.registers[vx as usize] as u16,
                     interp.registers[vx as usize] as u16,
@@ -222,7 +244,7 @@ impl Debugger {
 
             if old_val != new_val {
                 self.event_queue
-                    .push(DebugEvent::WatchpointChange(watchpoint, old_val, new_val));
+                    .push(DebugEvent::WatchpointTrigger(watchpoint, old_val, new_val));
             }
         }
 
@@ -237,6 +259,14 @@ impl Debugger {
 
         // update disassembler
         self.disassembler.update(vm.interpreter());
+
+        // update memory addr
+        if let Some(ptr) = self.memory_follow {
+            self.memory_addr = match ptr {
+                MemoryPointer::Index => interp.index,
+                MemoryPointer::ProgramCounter => interp.pc,
+            }
+        }
 
         return self.event_queue.is_empty();
     }
@@ -495,15 +525,16 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         let output_block = Block::default().title(" Output ").borders(Borders::TOP);
         let output_text_area = output_block.inner(output_area);
 
-        let memory_block = Block::default()
-            .title(" Memory ")
-            .borders(base_border.union(Borders::BOTTOM).union(
-                if self.logging || self.dbg.vm_visible {
-                    Borders::NONE
-                } else {
-                    Borders::RIGHT
-                },
-            ));
+        let memory_block =
+            Block::default()
+                .title(" Memory ")
+                .borders(base_border.union(Borders::BOTTOM).union(
+                    if self.logging || self.dbg.vm_visible {
+                        Borders::NONE
+                    } else {
+                        Borders::RIGHT
+                    },
+                ));
         let memory_lines_area = memory_block.inner(memory_area);
 
         let mut lines = self
@@ -532,12 +563,14 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         );
 
         output_block.render(output_area, buf);
-        
+
         memory_block.render(memory_area, buf);
         MemoryWidget {
             vm: self.vm,
-            disassembler: &self.dbg.disassembler
-        }.render(memory_lines_area, buf);
+            disassembler: &self.dbg.disassembler,
+            addr: self.dbg.memory_addr,
+        }
+        .render(memory_lines_area, buf);
 
         let interp = self.vm.interpreter();
 
@@ -586,72 +619,124 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
 pub struct MemoryWidget<'a> {
     disassembler: &'a Disassembler,
-    vm: &'a VM
+    vm: &'a VM,
+    addr: u16,
 }
 
 impl<'a> MemoryWidget<'_> {
-
     const COMMENT_DELIM: &'static str = "# ";
 
-    fn write_span(&self, addr: u16, is_pc: bool, bin_header: &mut String, asm_content: &mut String, comment: &mut String) -> Option<Spans> {
-        let byte = self.disassembler.memory[addr as usize];
+    fn is_addr_rendered(&self, addr: u16) -> bool {
         let tag = self.disassembler.tags[addr as usize];
-
-        if is_pc 
-            || tag >= InstructionTag::Proven
+        tag >= InstructionTag::Proven
             || addr == 0
+            || addr == self.addr
+            || self.vm.interpreter().pc == addr
+            || self.vm.interpreter().index == addr
             || !self
                 .disassembler
                 .tags
                 .get(addr as usize - 1)
                 .map_or(false, |&tag| tag >= InstructionTag::Proven)
-        {
-            bin_header.clear();
-            asm_content.clear();
-            comment.clear();
-            
-            asm_content.push(' ');
-            comment.push_str(MemoryWidget::COMMENT_DELIM);
+    }
 
-            self.disassembler.write_addr_disass(addr, bin_header, asm_content, comment).ok();
+    fn addr_span(
+        &self,
+        addr: u16,
+        addr_line_width: u16,
+        addr_header: &mut String,
+        addr_content: &mut String,
+        addr_comment: &mut String,
+    ) -> Spans {
+        let byte = self.disassembler.memory[addr as usize];
+        let tag = self.disassembler.tags[addr as usize];
 
-            let show_bin_comment = tag <= InstructionTag::Valid && !is_pc;
-            let show_asm_content = tag >= InstructionTag::Valid || is_pc;
-            let show_comment = show_bin_comment || show_asm_content && comment.len() > MemoryWidget::COMMENT_DELIM.len();
+        addr_header.clear();
+        addr_content.clear();
+        addr_comment.clear();
 
-            if show_comment {
-                if !show_asm_content {
-                    asm_content.clear();
-                }
+        addr_content.push(' ');
+        addr_comment.push_str(MemoryWidget::COMMENT_DELIM);
 
-                let padding = INSTRUCTION_COLUMNS.saturating_sub(bin_header.len() + asm_content.len());
+        self.disassembler
+            .write_addr_disass(addr, addr_header, addr_content, addr_comment)
+            .ok();
 
-                asm_content.reserve_exact(padding);
-                for _ in 0..padding {
-                    asm_content.push(' ');
-                }
+        let force_asm = addr == self.vm.interpreter().pc;
+
+        let show_addr_content = tag >= InstructionTag::Valid || force_asm;
+        let show_bin_comment =
+            tag < InstructionTag::Proven && (tag < InstructionTag::Parsable || !force_asm);
+        let show_addr_comment = show_bin_comment
+            || show_addr_content && addr_comment.len() > MemoryWidget::COMMENT_DELIM.len();
+
+        if show_addr_comment {
+            if !show_addr_content {
+                addr_content.clear();
             }
 
-            if show_bin_comment {
-                comment.clear();
-                write!(comment, "{}{:08b} 2X GRAHPHIC ", MemoryWidget::COMMENT_DELIM, byte).ok();
-                write_byte_str(comment, byte, 2).ok();
-            }
+            let padding =
+                INSTRUCTION_COLUMNS.saturating_sub(addr_header.len() + addr_content.len());
 
-            let mut spans: Vec<Span> = Vec::with_capacity(3);
-
-            spans.push(Span::raw(bin_header.clone()));
-            if show_asm_content || show_comment {
-                spans.push(Span::raw(asm_content.clone()));
+            addr_content.reserve_exact(padding);
+            for _ in 0..padding {
+                addr_content.push(' ');
             }
-            if show_comment {
-                spans.push(Span::styled(comment.clone(), Style::default().fg(Color::Yellow)));
-            }
-
-            Some(Spans::from(spans))
-        } else {
-            None
         }
+
+        if show_bin_comment {
+            addr_comment.clear();
+            write!(
+                addr_comment,
+                "{}{:#04X} ",
+                MemoryWidget::COMMENT_DELIM,
+                byte
+            )
+            .ok();
+            write_byte_str(addr_comment, byte, 1).ok();
+        }
+
+        let mut spans: Vec<Span> = Vec::with_capacity(3);
+
+        spans.push(Span::raw(addr_header.clone()));
+        if show_addr_content || show_addr_comment {
+            spans.push(Span::raw(addr_content.clone()));
+        }
+        if show_addr_comment {
+            spans.push(Span::styled(
+                addr_comment.clone(),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+
+        let is_addr_pc = addr == self.vm.interpreter().pc;
+        let is_addr_index = addr == self.vm.interpreter().index;
+        let is_addr_selected = addr == self.addr;
+
+        if is_addr_pc || is_addr_index || is_addr_selected {
+            let line_len = spans.iter().fold(0, |len, span| len + span.width());
+            if line_len < addr_line_width as usize {
+                spans.push(Span::raw(" ".repeat(addr_line_width as usize - line_len)));
+            }
+
+            let highlight_color = if is_addr_selected {
+                Color::LightCyan
+            } else if is_addr_pc {
+                Color::LightMagenta
+            } else {
+                Color::LightYellow
+            };
+
+            for span in spans.iter_mut() {
+                (*span).style = span
+                    .style
+                    .add_modifier(Modifier::BOLD)
+                    .bg(highlight_color)
+                    .fg(Color::Black);
+            }
+        }
+
+        Spans::from(spans)
     }
 }
 
@@ -661,40 +746,42 @@ impl<'a> Widget for MemoryWidget<'_> {
             return;
         }
 
-        let mut bin_header = String::new();
-        let mut asm_content = String::new();
-        let mut comment = String::new();
-
-        let interp = self.vm.interpreter();
+        let mut addr_header = String::new();
+        let mut addr_content = String::new();
+        let mut addr_comment = String::new();
 
         let mut lines: Vec<Spans> = Vec::with_capacity(area.height as usize);
-        let mut addr = interp.pc;
+        let mut addr = self.addr;
 
-        let amt_ahead = (area.height - area.height/2) as usize;
-        
-        while lines.len() < amt_ahead && addr < PROGRAM_MEMORY_SIZE {
-            if let Some(mut line) = self.write_span(addr, addr == interp.pc, &mut bin_header, &mut asm_content, &mut comment) {
-                if addr == interp.pc {
-                    let line_len = line.0.iter().fold(0, |len, span| len + span.content.len());
-                    if line_len < area.width as usize {
-                        line.0.push(Span::raw(" ".repeat(area.width as usize - line_len)));
-                    }
+        let lines_ahead = (area.height - area.height / 2) as usize;
 
-                    for span in line.0.iter_mut() {
-                        (*span).style = span.style.add_modifier(Modifier::BOLD).bg(Color::LightCyan).fg(Color::Black);
-                    }
-                }
-                lines.push(line);
+        while lines.len() < lines_ahead && addr < PROGRAM_MEMORY_SIZE {
+            if self.is_addr_rendered(addr) {
+                lines.push(self.addr_span(
+                    addr,
+                    area.width,
+                    &mut addr_header,
+                    &mut addr_content,
+                    &mut addr_comment,
+                ));
             }
             addr += 1;
         }
 
-        addr = interp.pc;
+        addr = self.addr.min(PROGRAM_MEMORY_SIZE);
         while addr > 0 && lines.len() < area.height as usize {
             addr -= 1;
-            //pc_line += 1;
-            if let Some(line) = self.write_span(addr, false, &mut bin_header, &mut asm_content, &mut comment) {
-                lines.insert(0, line);
+            if self.is_addr_rendered(addr) {
+                lines.insert(
+                    0,
+                    self.addr_span(
+                        addr,
+                        area.width,
+                        &mut addr_header,
+                        &mut addr_content,
+                        &mut addr_comment,
+                    ),
+                );
             }
         }
 
