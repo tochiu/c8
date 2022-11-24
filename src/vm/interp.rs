@@ -181,7 +181,6 @@ pub struct InterpreterInput {
 pub struct InterpreterOutput {
     pub display: DisplayBuffer,
     pub awaiting_input: bool,
-    pub executed: Option<Instruction>,
 
     pub request: Option<InterpreterRequest>,
 }
@@ -227,7 +226,6 @@ impl<'a> From<Program> for Interpreter {
             output: InterpreterOutput {
                 display: [0; DISPLAY_HEIGHT as usize],
                 awaiting_input: false,
-                executed: None,
                 request: None,
             },
         }
@@ -267,9 +265,8 @@ impl Interpreter {
 
     // interpret the next instruction
     pub fn step(&mut self) -> Result<&InterpreterOutput, InterpreterError> {
-        // clear output request & clear executed instruction
+        // clear output request
         self.output.request = None;
-        self.output.executed = None;
 
         if (self.pc as usize) < self.memory.len() - 1 {
             // fetch + decode
@@ -277,7 +274,6 @@ impl Interpreter {
                 Ok(inst) => {
                     log::trace!("instruction {:#05X?} {:?} ", self.pc, inst);
                     self.pc += 2;
-                    self.output.executed = Some(inst);
 
                     // execute instruction
                     Ok(self.exec(inst))
