@@ -108,6 +108,15 @@ pub enum MemoryPointer {
     Index,
 }
 
+impl MemoryPointer {
+    fn identifier(self) -> &'static str {
+        match self {
+            Self::Index => "i",
+            Self::ProgramCounter => "pc"
+        }
+    }
+}
+
 pub struct AddressFlags;
 
 impl AddressFlags {
@@ -370,6 +379,38 @@ impl Debugger {
                             } else {
                                 self.shell.output_unrecognized_cmd();
                             }
+                        }
+                    }
+                    "f" | "follow" => {
+                        let Some(arg) = cmd_args.next() else {
+                            self.shell.output.push("Follow command syntax:".into());
+                            self.shell.output.push("    - follow (pc/i)".into());
+                            continue;
+                        };
+
+                        match arg {
+                            "pc" => {
+                                self.memory_follow = Some(MemoryPointer::ProgramCounter);
+                                self.set_memory_addr(vm.interpreter().pc);
+                            }
+                            "i" | "index" => {
+                                self.memory_follow = Some(MemoryPointer::Index);
+                                self.set_memory_addr(vm.interpreter().index);
+                            }
+                            _ => {
+                                self.shell.output.push("Please specify a pointer (pc/i) to follow".into());
+                                continue;
+                            }
+                        }
+
+                        self.shell.output.push(format!("Following {}", arg));
+                    }
+                    "uf" | "unfollow" => {
+                        if let Some(pointer) = self.memory_follow {
+                            self.memory_follow = None;
+                            self.shell.output.push(format!("Unfollowing {}", pointer.identifier()));
+                        } else {
+                            self.shell.output.push("Already unfollowed".into());
                         }
                     }
                     _ => {
