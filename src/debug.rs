@@ -16,30 +16,84 @@ use tui::{
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 
-use std::{collections::HashSet, fmt::Write, num::IntErrorKind};
+use std::{collections::{HashSet, HashMap}, fmt::Write, num::IntErrorKind};
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Watchpoint {
     Pointer(MemoryPointer),
     Register(u8),
+    Address(u16)
 }
 
 #[derive(Default)]
-pub struct DebugWatchState {
+pub struct WatchState {
     registers: [u8; 16],
     index: u16,
     pc: u16,
+    addresses: HashMap<u16, u8>,
     instruction: Option<Instruction>,
 }
 
-impl From<&Interpreter> for DebugWatchState {
+impl From<&Interpreter> for WatchState {
     fn from(interp: &Interpreter) -> Self {
-        DebugWatchState {
+        WatchState {
             registers: interp.registers,
             index: interp.index,
             pc: interp.pc,
+            addresses: Default::default(),
             instruction: Instruction::try_from(interp.fetch()).ok(),
         }
+    }
+}
+
+impl WatchState {
+    fn update(&mut self, event_queue: &mut Vec<DebugEvent>, interp: &Interpreter, watchpoints: &HashSet<Watchpoint>) {
+        for &watchpoint in watchpoints.iter() {
+            match watchpoint {
+                Watchpoint::Pointer(pointer) => match pointer {
+                    MemoryPointer::Index => {
+                        let old_val = self.index;
+                        let new_val = interp.index;
+
+                        if old_val != new_val {
+                            event_queue.push(DebugEvent::WatchpointTrigger(watchpoint, old_val, new_val));
+                        }
+                    },
+                    MemoryPointer::ProgramCounter => {
+                        let old_val = self.pc;
+                        let new_val = interp.pc;
+
+                        if old_val != new_val {
+                            event_queue.push(DebugEvent::WatchpointTrigger(watchpoint, old_val, new_val));
+                        }
+                    },
+                },
+                Watchpoint::Register(vx) => {
+                    let old_val = self.registers[vx as usize];
+                    let new_val = interp.registers[vx as usize];
+
+                    if old_val != new_val {
+                        event_queue.push(DebugEvent::WatchpointTrigger(watchpoint, old_val as u16, new_val as u16));
+                    }
+                }
+                Watchpoint::Address(addr) => {
+                    let Some(&old_val) = self.addresses.get(&addr) else {
+                        unreachable!("address watchpoint {:#05X} must store state in hashtable", addr)
+                    };
+                    let new_val = interp.memory[addr as usize];
+
+                    if old_val != new_val {
+                        self.addresses.insert(addr, new_val);
+                        event_queue.push(DebugEvent::WatchpointTrigger(watchpoint, old_val as u16, new_val as u16));
+                    }
+                }
+            }
+        }
+
+        self.pc = interp.pc;
+        self.index = interp.index;
+        self.registers.copy_from_slice(&interp.registers);
+        self.instruction = Instruction::try_from(interp.fetch()).ok();
     }
 }
 
@@ -88,7 +142,7 @@ pub struct Debugger {
 
     breakpoints: HashSet<u16>,
     watchpoints: HashSet<Watchpoint>,
-    watch_state: DebugWatchState,
+    watch_state: WatchState,
     event_queue: Vec<DebugEvent>,
 
     disassembler: Disassembler,
@@ -110,10 +164,10 @@ impl Debugger {
             active: false,
             breakpoints: Default::default(),
             watchpoints: Default::default(),
-            watch_state: DebugWatchState::from(vm.interpreter()),
+            watch_state: WatchState::from(vm.interpreter()),
             event_queue: Default::default(),
 
-            disassembler: Disassembler::from(vm.interpreter().program.clone()), // cant derive default >:)
+            disassembler: Disassembler::from(vm.interpreter().program.clone()),
 
             memory_addr: 0,
             memory_addr_flags: [0; PROGRAM_MEMORY_SIZE as usize],
@@ -176,6 +230,7 @@ impl Debugger {
             _ => (),
         }
 
+        render = render || self.shell.cmd_queue.len() > 0;
         let cmds = self.shell.cmd_queue.drain(..);
 
         if self.active {
@@ -196,7 +251,6 @@ impl Debugger {
                         log::info!("c8vm resume!");
                         self.deactivate();
                         vm_runner.resume().unwrap();
-                        render = true;
                         break;
                     }
                     "s" | "step" => {
@@ -224,8 +278,6 @@ impl Debugger {
                                 .output
                                 .push(format!("Stepped {} times", amt_stepped));
                         }
-
-                        render = true;
                     }
                     "w" | "watch" => {
                         let Some(arg) = cmd_args.next() else {
@@ -244,6 +296,9 @@ impl Debugger {
                                         self.shell.output.push("Please specify a valid register (v0..vf) to watch".into());
                                         continue;
                                     }
+                                } else if let Some(addr) = parse_addr(arg) {
+                                    self.watch_state.addresses.insert(addr, vm.interpreter().memory[addr as usize]);
+                                    self.watchpoints.insert(Watchpoint::Address(addr))
                                 } else {
                                     self.shell.output.push("Please specify a register or pointer to watch".into());
                                     continue;
@@ -278,7 +333,6 @@ impl Debugger {
                         };
 
                         self.vm_visible = true;
-                        render = true;
                     }
                     "hide" => {
                         let Some("vm") = cmd_args.next() else {
@@ -287,12 +341,10 @@ impl Debugger {
                         };
 
                         self.vm_visible = false;
-                        render = false;
                     }
                     "m" | "mem" => {
                         self.memory_active = true;
                         self.shell_active = false;
-                        render = true;
                     }
                     "g" | "goto" => {
                         let Some(arg) = cmd_args.next() else {
@@ -303,25 +355,20 @@ impl Debugger {
                         match arg {
                             "start" => {
                                 self.set_memory_addr(0);
-                                render = true;
                             }
                             "end" => {
                                 self.set_memory_addr(PROGRAM_MEMORY_SIZE - 1);
-                                render = true;
                             }
                             "pc" => {
                                 self.set_memory_addr(vm.interpreter().pc);
-                                render = true;
                             }
                             "i" | "index" => {
                                 self.set_memory_addr(vm.interpreter().index);
-                                render = true;
                             }
                             _ => if let Some(addr) = parse_addr(arg) {
                                 self.set_memory_addr(addr);
                             } else {
                                 self.shell.output_unrecognized_cmd();
-                                continue;
                             }
                         }
                     }
@@ -426,26 +473,12 @@ impl Debugger {
 
     pub fn step(&mut self, vm: &VM) -> bool {
         let interp = vm.interpreter();
-        let old_watch_state = &self.watch_state;
-        let new_watch_state = DebugWatchState::from(interp);
 
-        for &watchpoint in self.watchpoints.iter() {
-            let (old_val, new_val) = match watchpoint {
-                Watchpoint::Pointer(pointer) => match pointer {
-                    MemoryPointer::Index => (old_watch_state.index, new_watch_state.index),
-                    MemoryPointer::ProgramCounter => (old_watch_state.pc, new_watch_state.pc),
-                },
-                Watchpoint::Register(vx) => (
-                    old_watch_state.registers[vx as usize] as u16,
-                    new_watch_state.registers[vx as usize] as u16,
-                ),
-            };
-
-            if old_val != new_val {
-                self.event_queue
-                    .push(DebugEvent::WatchpointTrigger(watchpoint, old_val, new_val));
-            }
-        }
+        let exec_pc = self.watch_state.pc;
+        let exec_inst = self.watch_state.instruction;
+        let exec_index = self.watch_state.index;
+        
+        self.watch_state.update(&mut self.event_queue, interp, &self.watchpoints);
 
         if self.breakpoints.contains(&interp.pc) {
             self.event_queue
@@ -454,45 +487,43 @@ impl Debugger {
 
         // update read write execute flags
 
-        if let Some(inst) = old_watch_state.instruction {
-            if let Some(flags) = self.memory_addr_flags.get_mut(old_watch_state.pc as usize) {
+        if let Some(inst) = exec_inst {
+            if let Some(flags) = self.memory_addr_flags.get_mut(exec_pc as usize) {
                 *flags |= AddressFlags::EXECUTE;
             }
 
             match inst {
                 Instruction::Display(_, _, height) => {
-                    if let Some(addr) = interp.checked_addr_add(old_watch_state.index, height.saturating_sub(1) as u16) {
-                        for flags in self.memory_addr_flags[old_watch_state.index as usize..=addr as usize].iter_mut() {
-                            *flags |= AddressFlags::DRAW
+                    if let Some(addr) = interp.checked_addr_add(exec_index, height.saturating_sub(1) as u16) {
+                        for flags in self.memory_addr_flags[exec_index as usize..=addr as usize].iter_mut() {
+                            *flags |= AddressFlags::DRAW;
                         }
                     }
                 }
                 Instruction::Load(vx) => {
-                    if let Some(addr) = interp.checked_addr_add(old_watch_state.index, vx as u16) {
-                        for flags in self.memory_addr_flags[old_watch_state.index as usize..=addr as usize].iter_mut() {
-                            *flags |= AddressFlags::READ
+                    if let Some(addr) = interp.checked_addr_add(exec_index, vx as u16) {
+                        for flags in self.memory_addr_flags[exec_index as usize..=addr as usize].iter_mut() {
+                            *flags |= AddressFlags::READ;
                         }
                     }
                 }
                 Instruction::Store(vx) => {
-                    if let Some(addr) = interp.checked_addr_add(old_watch_state.index, vx as u16) {
-                        for flags in self.memory_addr_flags[old_watch_state.index as usize..=addr as usize].iter_mut() {
-                            *flags |= AddressFlags::WRITE
+                    if let Some(addr) = interp.checked_addr_add(exec_index, vx as u16) {
+                        for flags in self.memory_addr_flags[exec_index as usize..=addr as usize].iter_mut() {
+                            *flags |= AddressFlags::WRITE;
                         }
                     }
                 }
                 Instruction::StoreDecimal(_) => {
-                    if let Some(addr) = interp.checked_addr_add(old_watch_state.index, 2) {
-                        for flags in self.memory_addr_flags[old_watch_state.index as usize..=addr as usize].iter_mut() {
-                            *flags |= AddressFlags::WRITE
+                    if let Some(addr) = interp.checked_addr_add(exec_index, 2) {
+                        for flags in self.memory_addr_flags[exec_index as usize..=addr as usize].iter_mut() {
+                            *flags |= AddressFlags::WRITE;
                         }
                     }
                 }
                 _ => ()
             }
         }
-
-        self.watch_state = new_watch_state;
 
         // update disassembler
         self.disassembler.update(vm.interpreter());
@@ -530,6 +561,11 @@ impl Debugger {
                                 self.shell.output.push(format!("Register v{:x} changed", register));
                                 self.shell.output.push(format!("Old value = {:0>3} ({:#05X})", old, old));
                                 self.shell.output.push(format!("New value = {:0>3} ({:#05X})", new, new));
+                            }
+                            Watchpoint::Address(addr) => {
+                                self.shell.output.push(format!("Address {:#05X} changed", addr));
+                                self.shell.output.push(format!("Old value = {:0>3} ({:#04X})", old, old));
+                                self.shell.output.push(format!("New value = {:0>3} ({:#04X})", new, new));
                             }
                         }
                     }
