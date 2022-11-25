@@ -196,7 +196,9 @@ pub enum InterpreterRequest {
 #[derive(Debug)]
 pub enum InterpreterError {
     BadInstruction(String),
-    InvalidProgramCounter
+    OutOfBoundsPC,
+    OutOfBoundsRead,
+    OutOfBoundsWrite
 }
 
 pub type InterpreterMemory = [u8; PROGRAM_MEMORY_SIZE as usize];
@@ -259,6 +261,15 @@ impl Interpreter {
         memory
     }
 
+    pub fn checked_addr_add(&self, addr: u16, amt: u16) -> Option<u16> {
+        let (result_addr, result_overflow) = addr.overflowing_add(amt);
+        if (addr as usize) < self.memory.len() && (result_addr as usize) < self.memory.len() && !result_overflow {
+            Some(result_addr)
+        } else {
+            None
+        }
+    }
+
     pub fn input_mut(&mut self) -> &mut InterpreterInput {
         &mut self.input
     }
@@ -276,7 +287,7 @@ impl Interpreter {
                     self.pc += 2;
 
                     // execute instruction
-                    Ok(self.exec(inst))
+                    Ok(self.exec(inst)?)
                 }
                 Err(e) => {
                     log::error!("{}", e);
@@ -284,8 +295,8 @@ impl Interpreter {
                 }
             }
         } else {
-            log::error!("Program counter address is invalid ({:#06X?})", self.pc);
-            Err(InterpreterError::InvalidProgramCounter)
+            log::error!("Program counter address is out of bounds ({:#06X?})", self.pc);
+            Err(InterpreterError::OutOfBoundsPC)
         }
     }
 
@@ -293,7 +304,7 @@ impl Interpreter {
         InstructionParameters::from([self.memory[self.pc as usize], self.memory[self.pc as usize + 1]])
     }
     
-    pub fn exec(&mut self, inst: Instruction) -> &InterpreterOutput {
+    pub fn exec(&mut self, inst: Instruction) -> Result<&InterpreterOutput, InterpreterError> {
         match inst {
             Instruction::ClearScreen => {
                 self.output.display.fill(0);
@@ -442,31 +453,42 @@ impl Interpreter {
 
             // TODO: maybe make optional behavior (register vf set on overflow) configurable
             Instruction::AddToIndex(vx) => {
-                self.index = (self.index as u32 + self.registers[vx as usize] as u32) as u16
-                    % PROGRAM_MEMORY_SIZE as u16
+                self.index = self.index.overflowing_add(self.registers[vx as usize] as u16).0;
             }
 
             Instruction::Load(vx) => {
-                self.registers[..=vx as usize].copy_from_slice(
-                    &self.memory[self.index as usize..=self.index as usize + vx as usize],
-                );
-                if self.program.kind == ProgramKind::COSMACVIP {
-                    self.index += vx as u16 + 1;
+                if let Some(addr) = self.checked_addr_add(self.index, vx as u16) {
+                    self.registers[..=vx as usize].copy_from_slice(
+                        &self.memory[self.index as usize..=addr as usize],
+                    );
+                    if self.program.kind == ProgramKind::COSMACVIP {
+                        self.index = addr.overflowing_add(1).0;
+                    }
+                } else {
+                    return Err(InterpreterError::OutOfBoundsRead); 
                 }
             }
 
             Instruction::Store(vx) => {
-                self.memory[self.index as usize..=self.index as usize + vx as usize]
-                    .copy_from_slice(&self.registers[..=vx as usize]);
-                if self.program.kind == ProgramKind::COSMACVIP {
-                    self.index += vx as u16 + 1;
+                if let Some(addr) = self.checked_addr_add(self.index, vx as u16) {
+                    self.memory[self.index as usize..=addr as usize]
+                        .copy_from_slice(&self.registers[..=vx as usize]);
+                    if self.program.kind == ProgramKind::COSMACVIP {
+                        self.index = addr.overflowing_add(1).0;
+                    }
+                } else {
+                    return Err(InterpreterError::OutOfBoundsWrite);
                 }
             }
 
             Instruction::StoreDecimal(vx) => {
-                let number = self.registers[vx as usize];
-                for i in 0..3 {
-                    self.memory[self.index as usize + i] = number / 10u8.pow(2 - i as u32) % 10;
+                if let Some(addr) = self.checked_addr_add(self.index, 2) {
+                    let number = self.registers[vx as usize];
+                    for (i, val) in self.memory[self.index as usize..=addr as usize].iter_mut().rev().enumerate() {
+                        *val = number / 10u8.pow(i as u32) % 10;
+                    }
+                } else {
+                    return Err(InterpreterError::OutOfBoundsWrite);
                 }
             }
 
@@ -475,6 +497,10 @@ impl Interpreter {
             }
 
             Instruction::Display(vx, vy, height) => {
+                if self.checked_addr_add(self.index, height.saturating_sub(1) as u16).is_none() {
+                    return Err(InterpreterError::OutOfBoundsRead);
+                }
+
                 let pos_x = self.registers[vx as usize] % DISPLAY_WIDTH;
                 let pos_y = self.registers[vy as usize] % DISPLAY_HEIGHT;
 
@@ -507,6 +533,6 @@ impl Interpreter {
             }
         }
 
-        &self.output
+        Ok(&self.output)
     }
 }
