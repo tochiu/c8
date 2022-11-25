@@ -16,7 +16,7 @@ use tui::{
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 
-use std::{collections::HashSet, fmt::Write};
+use std::{collections::HashSet, fmt::Write, num::IntErrorKind};
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Watchpoint {
@@ -29,6 +29,18 @@ pub struct DebugWatchState {
     registers: [u8; 16],
     index: u16,
     pc: u16,
+    instruction: Option<Instruction>,
+}
+
+impl From<&Interpreter> for DebugWatchState {
+    fn from(interp: &Interpreter) -> Self {
+        DebugWatchState {
+            registers: interp.registers,
+            index: interp.index,
+            pc: interp.pc,
+            instruction: Instruction::try_from(interp.fetch()).ok(),
+        }
+    }
 }
 
 pub enum DebugEvent {
@@ -42,6 +54,19 @@ pub enum MemoryPointer {
     Index,
 }
 
+pub struct AddressFlags;
+
+impl AddressFlags {
+    const DRAW: u8 = 0b1;
+    const READ: u8 = 0b10;
+    const WRITE: u8 = 0b100;
+    const EXECUTE: u8 = 0b1000;
+
+    pub fn extract(flags: u8) -> (bool, bool, bool, bool) {
+        (flags & Self::DRAW == Self::DRAW, flags & Self::READ == Self::READ, flags & Self::WRITE == Self::WRITE, flags & Self::EXECUTE == Self::EXECUTE)
+    }
+}
+
 pub struct Debugger {
     active: bool,
 
@@ -53,6 +78,7 @@ pub struct Debugger {
     disassembler: Disassembler,
 
     memory_addr: u16,
+    memory_addr_flags: [u8; PROGRAM_MEMORY_SIZE as usize],
     memory_follow: Option<MemoryPointer>,
     memory_active: bool,
 
@@ -68,12 +94,13 @@ impl Debugger {
             active: false,
             breakpoints: Default::default(),
             watchpoints: Default::default(),
-            watch_state: Default::default(),
+            watch_state: DebugWatchState::from(vm.interpreter()),
             event_queue: Default::default(),
 
             disassembler: Disassembler::from(vm.interpreter().program.clone()), // cant derive default >:)
 
-            memory_addr: vm.interpreter().pc,
+            memory_addr: 0,
+            memory_addr_flags: [0; PROGRAM_MEMORY_SIZE as usize],
             memory_follow: Some(MemoryPointer::ProgramCounter),
             memory_active: false,
 
@@ -83,6 +110,8 @@ impl Debugger {
             vm_visible: false,
         };
 
+        dbg.set_memory_addr(vm.interpreter().pc);
+
         dbg.vm_visible = true;
         dbg.shell_active = true;
         dbg.shell.input_enabled = true;
@@ -90,6 +119,10 @@ impl Debugger {
         dbg.disassembler.run();
         dbg.activate(vm);
         dbg
+    }
+
+    pub fn set_memory_addr(&mut self, addr: u16) {
+        self.memory_addr = addr.clamp(0, PROGRAM_MEMORY_SIZE - 1);
     }
 
     pub fn is_active(&self) -> bool {
@@ -114,6 +147,9 @@ impl Debugger {
                     if self.active {
                         if self.shell_active {
                             self.shell.handle_key_event(key_event);
+                        } else if self.memory_active {
+                            let should_render = self.handle_memory_key_event(key_event, &vm);
+                            render = render || should_render;
                         }
                     } else if key_event.code == KeyCode::Esc {
                         self.pause(vm_runner, vm);
@@ -193,6 +229,56 @@ impl Debugger {
                         self.vm_visible = false;
                         render = false;
                     }
+                    "m" | "mem" => {
+                        self.memory_active = true;
+                        self.shell_active = false;
+                        render = true;
+                    }
+                    "g" | "goto" => {
+                        let Some(arg) = cmd_args.next() else {
+                            self.shell.output_unrecognized_cmd();
+                            continue;
+                        };
+
+                        match arg {
+                            "start" => {
+                                self.set_memory_addr(0);
+                                render = true;
+                            }
+                            "end" => {
+                                self.set_memory_addr(PROGRAM_MEMORY_SIZE - 1);
+                                render = true;
+                            }
+                            "pc" => {
+                                self.set_memory_addr(vm.interpreter().pc);
+                                render = true;
+                            }
+                            "i" | "index" => {
+                                self.set_memory_addr(vm.interpreter().index);
+                                render = true;
+                            }
+                            _ => {
+                                let (arg, radix) = if arg.starts_with("0x") {
+                                    (arg.trim_start_matches("0x"), 16)
+                                } else {
+                                    (arg, 10)
+                                };
+
+                                if let Ok(addr) = u16::from_str_radix(arg, radix).or_else(|err| {
+                                    match err.kind() {
+                                        IntErrorKind::PosOverflow => Ok(u16::MAX),
+                                        IntErrorKind::NegOverflow => Ok(0),
+                                        _ => Err(err),
+                                    }
+                                }) {
+                                    self.set_memory_addr(addr)
+                                } else {
+                                    self.shell.output_unrecognized_cmd();
+                                    continue;
+                                }
+                            }
+                        }
+                    }
                     _ => {
                         self.shell.output_unrecognized_cmd();
                         render = true;
@@ -209,6 +295,62 @@ impl Debugger {
         }
 
         render
+    }
+
+    pub fn handle_memory_key_event(&mut self, event: KeyEvent, vm: &VM) -> bool {
+        match event.code {
+            KeyCode::Esc => {
+                self.memory_active = false;
+                self.shell_active = true;
+                true
+            }
+            KeyCode::Down | KeyCode::Char('s') | KeyCode::Char('S') => {
+                let mut new_addr = self
+                    .memory_addr
+                    .saturating_add(1)
+                    .clamp(0, PROGRAM_MEMORY_SIZE - 1);
+                let memory_widget = MemoryWidget {
+                    disassembler: &self.disassembler,
+                    vm,
+                    addr: self.memory_addr,
+                    active: self.memory_active,
+                    memory_addr_flags: &self.memory_addr_flags
+                };
+
+                loop {
+                    if memory_widget.is_addr_rendered(new_addr) {
+                        self.set_memory_addr(new_addr);
+                        return true;
+                    } else if new_addr < PROGRAM_MEMORY_SIZE - 1 {
+                        new_addr += 1;
+                    } else {
+                        return false;
+                    }
+                }
+            }
+            KeyCode::Up | KeyCode::Char('w') | KeyCode::Char('W') => {
+                let mut new_addr = self.memory_addr.saturating_sub(1);
+                let memory_widget = MemoryWidget {
+                    disassembler: &self.disassembler,
+                    vm,
+                    addr: self.memory_addr,
+                    active: self.memory_active,
+                    memory_addr_flags: &self.memory_addr_flags
+                };
+
+                loop {
+                    if memory_widget.is_addr_rendered(new_addr) {
+                        self.set_memory_addr(new_addr);
+                        return true;
+                    } else if new_addr > 0 {
+                        new_addr -= 1;
+                    } else {
+                        return false;
+                    }
+                }
+            }
+            _ => false,
+        }
     }
 
     pub fn pause(&mut self, vm_runner: &mut VMRunner, vm: &VM) {
@@ -230,15 +372,18 @@ impl Debugger {
 
     pub fn step(&mut self, vm: &VM) -> bool {
         let interp = vm.interpreter();
+        let old_watch_state = &self.watch_state;
+        let new_watch_state = DebugWatchState::from(interp);
+
         for &watchpoint in self.watchpoints.iter() {
             let (old_val, new_val) = match watchpoint {
                 Watchpoint::Pointer(pointer) => match pointer {
-                    MemoryPointer::Index => (self.watch_state.index, interp.index),
-                    MemoryPointer::ProgramCounter => (self.watch_state.pc, interp.pc),
+                    MemoryPointer::Index => (old_watch_state.index, new_watch_state.index),
+                    MemoryPointer::ProgramCounter => (old_watch_state.pc, old_watch_state.pc),
                 },
                 Watchpoint::Register(vx) => (
-                    self.watch_state.registers[vx as usize] as u16,
-                    interp.registers[vx as usize] as u16,
+                    old_watch_state.registers[vx as usize] as u16,
+                    new_watch_state.registers[vx as usize] as u16,
                 ),
             };
 
@@ -253,6 +398,48 @@ impl Debugger {
                 .push(DebugEvent::BreakpointReached(interp.pc));
         }
 
+        // update read write execute flags
+
+        if let Some(inst) = old_watch_state.instruction {
+            if let Some(flags) = self.memory_addr_flags.get_mut(old_watch_state.pc as usize) {
+                *flags |= AddressFlags::EXECUTE;
+            }
+
+            match inst {
+                Instruction::Display(_, _, height) => {
+                    if let Some(addr) = interp.checked_addr_add(old_watch_state.index, height.saturating_sub(1) as u16) {
+                        for flags in self.memory_addr_flags[old_watch_state.index as usize..=addr as usize].iter_mut() {
+                            *flags |= AddressFlags::DRAW
+                        }
+                    }
+                }
+                Instruction::Load(vx) => {
+                    if let Some(addr) = interp.checked_addr_add(old_watch_state.index, vx as u16) {
+                        for flags in self.memory_addr_flags[old_watch_state.index as usize..=addr as usize].iter_mut() {
+                            *flags |= AddressFlags::READ
+                        }
+                    }
+                }
+                Instruction::Store(vx) => {
+                    if let Some(addr) = interp.checked_addr_add(old_watch_state.index, vx as u16) {
+                        for flags in self.memory_addr_flags[old_watch_state.index as usize..=addr as usize].iter_mut() {
+                            *flags |= AddressFlags::WRITE
+                        }
+                    }
+                }
+                Instruction::StoreDecimal(_) => {
+                    if let Some(addr) = interp.checked_addr_add(old_watch_state.index, 2) {
+                        for flags in self.memory_addr_flags[old_watch_state.index as usize..=addr as usize].iter_mut() {
+                            *flags |= AddressFlags::WRITE
+                        }
+                    }
+                }
+                _ => ()
+            }
+        }
+
+        self.watch_state = new_watch_state;
+
         if !self.active && !self.event_queue.is_empty() {
             self.activate(vm);
         }
@@ -262,10 +449,10 @@ impl Debugger {
 
         // update memory addr
         if let Some(ptr) = self.memory_follow {
-            self.memory_addr = match ptr {
+            self.set_memory_addr(match ptr {
                 MemoryPointer::Index => interp.index,
                 MemoryPointer::ProgramCounter => interp.pc,
-            }
+            });
         }
 
         return self.event_queue.is_empty();
@@ -409,7 +596,7 @@ impl<'a> DebuggerWidget<'a> {
     }
 
     fn areas(&self, area: Rect) -> (Rect, Rect, Rect, Rect) {
-        let (region, shell) = if self.can_draw_shell(area) {
+        let (region, bottom) = {
             let rects = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -418,8 +605,6 @@ impl<'a> DebuggerWidget<'a> {
                 ])
                 .split(area);
             (rects[0], rects[1])
-        } else {
-            (area, Rect::default())
         };
 
         let (main, region) = {
@@ -456,7 +641,7 @@ impl<'a> DebuggerWidget<'a> {
             (rects[0], rects[1])
         };
 
-        (main, shell, vm, logger)
+        (main, bottom, vm, logger)
     }
 
     fn main_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect) {
@@ -503,7 +688,11 @@ impl<'a> DebuggerWidget<'a> {
 impl<'a> StatefulWidget for DebuggerWidget<'_> {
     type State = DebuggerWidgetState;
     fn render(self, area: Rect, buf: &mut tui::buffer::Buffer, state: &mut Self::State) {
-        let (main_area, shell_area, vm_area, _) = self.areas(area);
+        if area.area() == 0 {
+            return;
+        }
+
+        let (main_area, bottom_area, vm_area, _) = self.areas(area);
         let (memory_area, pointer_area, register_area, timer_area, stack_area, output_area) =
             self.main_areas(main_area);
 
@@ -536,39 +725,43 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
                     },
                 ));
         let memory_lines_area = memory_block.inner(memory_area);
+        
+        if output_text_area.area() > 0 {
+            let mut lines = self
+                .dbg
+                .shell
+                .output
+                .iter()
+                .map(|out| out.as_bytes().chunks(output_text_area.width as usize))
+                .flatten()
+                .rev()
+                .take(output_text_area.height as usize)
+                .map(|bytes| Spans::from(std::str::from_utf8(bytes).unwrap_or("**unparsable**")))
+                .collect::<Vec<_>>();
+            let line_count = lines.len() as u16;
 
-        let mut lines = self
-            .dbg
-            .shell
-            .output
-            .iter()
-            .map(|out| out.as_bytes().chunks(output_text_area.width as usize))
-            .flatten()
-            .rev()
-            .take(output_text_area.height as usize)
-            .map(|bytes| Spans::from(std::str::from_utf8(bytes).unwrap_or("**unparsable**")))
-            .collect::<Vec<_>>();
-        let line_count = lines.len() as u16;
+            lines.reverse();
 
-        lines.reverse();
+            Paragraph::new(lines).render(
+                Rect::new(
+                    output_text_area.x,
+                    output_text_area.bottom().saturating_sub(line_count),
+                    output_text_area.width,
+                    line_count,
+                ),
+                buf,
+            );
 
-        Paragraph::new(lines).render(
-            Rect::new(
-                output_text_area.x,
-                output_text_area.bottom().saturating_sub(line_count),
-                output_text_area.width,
-                line_count,
-            ),
-            buf,
-        );
-
-        output_block.render(output_area, buf);
+            output_block.render(output_area, buf);
+        }
 
         memory_block.render(memory_area, buf);
         MemoryWidget {
             vm: self.vm,
             disassembler: &self.dbg.disassembler,
             addr: self.dbg.memory_addr,
+            active: self.dbg.memory_active,
+            memory_addr_flags: &self.dbg.memory_addr_flags
         }
         .render(memory_lines_area, buf);
 
@@ -612,7 +805,13 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         .render(stack_area, buf);
 
         if self.can_draw_shell(area) {
-            ShellWidget::from(&self.dbg.shell).render(shell_area, buf, &mut state.shell)
+            ShellWidget::from(&self.dbg.shell).render(bottom_area, buf, &mut state.shell)
+        } else if self.dbg.memory_active {
+            let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
+            buf.set_style(bottom_area, bottom_area_style);
+            Paragraph::new("Esc to exit memory navigation")
+                .style(bottom_area_style)
+                .render(bottom_area, buf);
         }
     }
 }
@@ -621,6 +820,8 @@ pub struct MemoryWidget<'a> {
     disassembler: &'a Disassembler,
     vm: &'a VM,
     addr: u16,
+    active: bool,
+    memory_addr_flags: &'a [u8; PROGRAM_MEMORY_SIZE as usize],
 }
 
 impl<'a> MemoryWidget<'_> {
@@ -645,13 +846,16 @@ impl<'a> MemoryWidget<'_> {
         addr: u16,
         addr_line_width: u16,
         addr_header: &mut String,
+        addr_opcode: &mut String,
         addr_content: &mut String,
         addr_comment: &mut String,
     ) -> Spans {
         let byte = self.disassembler.memory[addr as usize];
         let tag = self.disassembler.tags[addr as usize];
+        let flags = self.memory_addr_flags[addr as usize];
 
         addr_header.clear();
+        addr_opcode.clear();
         addr_content.clear();
         addr_comment.clear();
 
@@ -659,8 +863,15 @@ impl<'a> MemoryWidget<'_> {
         addr_comment.push_str(MemoryWidget::COMMENT_DELIM);
 
         self.disassembler
-            .write_addr_disass(addr, addr_header, addr_content, addr_comment)
+            .write_addr_disass(addr, addr_header, addr_opcode, addr_content, addr_comment)
             .ok();
+
+        let (draw, read, write, exec) = AddressFlags::extract(flags);
+        addr_header.push(' ');
+        addr_header.push(if draw { 'd' } else { '-' });
+        addr_header.push(if read { 'r' } else { '-' });
+        addr_header.push(if write { 'w' } else { '-' });
+        addr_header.push(if exec { 'x' } else { '-' });
 
         let force_asm = addr == self.vm.interpreter().pc;
 
@@ -676,7 +887,7 @@ impl<'a> MemoryWidget<'_> {
             }
 
             let padding =
-                INSTRUCTION_COLUMNS.saturating_sub(addr_header.len() + addr_content.len());
+                (INSTRUCTION_COLUMNS + 4).saturating_sub(addr_header.len() + addr_opcode.len() + addr_content.len());
 
             addr_content.reserve_exact(padding);
             for _ in 0..padding {
@@ -699,6 +910,7 @@ impl<'a> MemoryWidget<'_> {
         let mut spans: Vec<Span> = Vec::with_capacity(3);
 
         spans.push(Span::raw(addr_header.clone()));
+        spans.push(Span::raw(addr_opcode.clone()));
         if show_addr_content || show_addr_comment {
             spans.push(Span::raw(addr_content.clone()));
         }
@@ -711,7 +923,7 @@ impl<'a> MemoryWidget<'_> {
 
         let is_addr_pc = addr == self.vm.interpreter().pc;
         let is_addr_index = addr == self.vm.interpreter().index;
-        let is_addr_selected = addr == self.addr;
+        let is_addr_selected = addr == self.addr && self.active;
 
         if is_addr_pc || is_addr_index || is_addr_selected {
             let line_len = spans.iter().fold(0, |len, span| len + span.width());
@@ -720,7 +932,7 @@ impl<'a> MemoryWidget<'_> {
             }
 
             let highlight_color = if is_addr_selected {
-                Color::LightCyan
+                Color::White
             } else if is_addr_pc {
                 Color::LightMagenta
             } else {
@@ -747,11 +959,13 @@ impl<'a> Widget for MemoryWidget<'_> {
         }
 
         let mut addr_header = String::new();
+        let mut addr_opcode = String::new();
         let mut addr_content = String::new();
         let mut addr_comment = String::new();
 
         let mut lines: Vec<Spans> = Vec::with_capacity(area.height as usize);
         let mut addr = self.addr;
+        let mut addr_ahead = addr;
 
         let lines_ahead = (area.height - area.height / 2) as usize;
 
@@ -761,9 +975,11 @@ impl<'a> Widget for MemoryWidget<'_> {
                     addr,
                     area.width,
                     &mut addr_header,
+                    &mut addr_opcode,
                     &mut addr_content,
                     &mut addr_comment,
                 ));
+                addr_ahead = addr;
             }
             addr += 1;
         }
@@ -778,10 +994,26 @@ impl<'a> Widget for MemoryWidget<'_> {
                         addr,
                         area.width,
                         &mut addr_header,
+                        &mut addr_opcode,
                         &mut addr_content,
                         &mut addr_comment,
                     ),
                 );
+            }
+        }
+
+        addr = addr_ahead;
+        while addr < PROGRAM_MEMORY_SIZE - 1 && lines.len() < area.height as usize {
+            addr += 1;
+            if self.is_addr_rendered(addr) {
+                lines.push(self.addr_span(
+                    addr,
+                    area.width,
+                    &mut addr_header,
+                    &mut addr_opcode,
+                    &mut addr_content,
+                    &mut addr_comment,
+                ));
             }
         }
 

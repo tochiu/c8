@@ -382,8 +382,9 @@ impl Disassembler {
     pub fn write_addr_disass(
         &self,
         addr: u16,
-        a: &mut impl std::fmt::Write,
+        h: &mut impl std::fmt::Write,
         i: &mut impl std::fmt::Write,
+        a: &mut impl std::fmt::Write,
         c: &mut impl std::fmt::Write,
     ) -> std::fmt::Result {
         let index = addr as usize;
@@ -391,16 +392,19 @@ impl Disassembler {
         let instruction = self.instructions[index];
         let tag = self.tags[index];
 
-        // address + tag symbol
-        write!(a, "{:#05X}: |{}|", addr, tag.to_symbol())?;
+        // address
+        write!(h, "{:#05X}:", addr)?;
+
+        // tag symbol
+        write!(i, " |{}|", tag.to_symbol())?;
 
         // instruction if parsable
         if tag >= InstructionTag::Parsable {
-            write!(a, " {:#06X}", params.bits)?;
+            write!(i, " {:#06X}", params.bits)?;
         }
 
         if let Some(instruction) = instruction.as_ref() {
-            write_inst_asm(instruction, i, c)?;
+            write_inst_asm(instruction, a, c)?;
         }
 
         Ok(())
@@ -410,6 +414,7 @@ impl Disassembler {
 impl Display for Disassembler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut bin_header = String::new();
+        let mut bin_opcode = String::new();
         let mut asm_content = String::new();
         let mut asm_comment = String::new();
 
@@ -433,10 +438,11 @@ impl Display for Disassembler {
             })
         {
             bin_header.clear();
+            bin_opcode.clear();
             asm_content.clear();
             asm_comment.clear();
 
-            self.write_addr_disass(addr, &mut bin_header, &mut asm_content, &mut asm_comment)?;
+            self.write_addr_disass(addr, &mut bin_header, &mut bin_opcode, &mut asm_content, &mut asm_comment)?;
 
             let show_bin_comment = tag <= InstructionTag::Valid;
             let show_asm_content = tag >= InstructionTag::Valid;
@@ -445,7 +451,8 @@ impl Display for Disassembler {
             let mut content_length = 0;
 
             f.write_str(&bin_header)?;
-            content_length += bin_header.len();
+            f.write_str(&bin_opcode)?;
+            content_length += bin_header.len() + bin_opcode.len();
 
             if show_asm_content {
                 f.write_char(' ')?;
