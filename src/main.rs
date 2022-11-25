@@ -15,7 +15,7 @@ use {
     },
     util::{Interval, IntervalAccuracy},
     disass::Disassembler,
-    render::{RenderRequest, Renderer, Screen}
+    render::Renderer
 };
 
 use config::C8VMConfig;
@@ -140,7 +140,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (render_sender, render_thread) = { // render thread
 
             let mut renderer = Renderer::setup(vm_runner.ware(), config.clone())?;
-            let (render_sender, render_receiver) = channel::<RenderRequest>();
+            let (render_sender, render_receiver) = channel::<()>();
 
             (render_sender, thread::spawn(move || -> Result<(), io::Error> {
                 let mut interval = Interval::new(
@@ -150,17 +150,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     IntervalAccuracy::Default
                 );
 
-                let mut queue = Vec::new();
+                let mut redraw = false;
 
                 loop {
-                    queue.extend(render_receiver.try_iter());
+                    if render_receiver.try_iter().last().is_some() {
+                        redraw = true;
+                    }
 
                     if let Err(TryRecvError::Disconnected) = render_receiver.try_recv() {
                         renderer.exit()?;
                         return Ok(())
                     }
-                    
-                    renderer.step(queue.drain(..).as_slice()).ok();
+
+                    renderer.step(redraw)?;
+                    redraw = false;
 
                     interval.sleep();
                 }
@@ -197,7 +200,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                                 // TODO: handle errors
                                 if dbg.handle_input_event(event.clone(), &mut vm_runner, vm) {
-                                    render_sender.send(RenderRequest::Draw(if dbg.is_active() { Screen::Debugger } else { Screen::VM })).ok();
+                                    render_sender.send(()).ok();
                                 }
 
                                 sink_vm_events = sink_vm_events || dbg.is_active();
@@ -205,7 +208,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             match event {
                                 Event::Resize(_, _) => {
-                                    render_sender.send(RenderRequest::RedrawScreen).ok();
+                                    render_sender.send(()).ok();
                                 },
                                 Event::FocusGained => {
                                     if !sink_vm_events {
@@ -254,7 +257,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // TODO attach event listener to logger instead of polling to update
                     if logger_level != LevelFilter::Off {
-                        render_sender.send(RenderRequest::RedrawScreen).ok();
+                        render_sender.send(()).ok();
                     }
 
                     // TODO: we should check state and exit if panic here maybe

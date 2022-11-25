@@ -1,6 +1,6 @@
 use crate::{
     config::C8VMConfig,
-    debug::{DebuggerWidget, DebuggerWidgetState},
+    debug::{DebuggerWidget, DebuggerWidgetState, Debugger},
     vm::{
         disp::{Display, DisplayWidget},
         run::VMWare,
@@ -26,24 +26,12 @@ use std::{
     ops::DerefMut,
 };
 
-#[derive(Clone, Copy)]
-pub enum RenderRequest {
-    RedrawScreen,
-    Draw(Screen),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Screen {
-    VM,
-    Debugger,
-}
-
 pub struct Renderer {
     config: C8VMConfig,
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     vm_disp: Display,
     vm_ware: VMWare,
-    screen: Screen,
+    drawing_dbg: bool,
     widget_state: ((), Option<DebuggerWidgetState>),
     //             ^^ first field left blank because VM currently doesn't require a screen state struct but might in the future
 }
@@ -57,11 +45,6 @@ impl Renderer {
         execute!(stdout, EnterAlternateScreen)?;
         Ok(Renderer {
             terminal: Terminal::new(CrosstermBackend::new(stdout))?,
-            screen: if config.debugging {
-                Screen::Debugger
-            } else {
-                Screen::VM
-            },
             widget_state: (
                 (),
                 if config.debugging {
@@ -70,6 +53,7 @@ impl Renderer {
                     None
                 },
             ),
+            drawing_dbg: false,
             vm_disp: Display::from(config.title.clone()),
             vm_ware,
             config,
@@ -84,91 +68,71 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn step(&mut self, requests: &[RenderRequest]) -> Result<(), io::Error> {
-        let mut render_screen: Option<Screen> = None;
+    pub fn step(&mut self, redraw: bool) -> Result<(), io::Error> {
+        let mut _guard = self.vm_ware.lock().unwrap();
+        let (vm, maybe_dbg) = _guard.deref_mut();
 
-        for &request in requests {
-            render_screen = match request {
-                RenderRequest::RedrawScreen => render_screen.or(Some(self.screen)),
-                RenderRequest::Draw(screen) => Some(screen),
-            }
-        }
-
-        // update buffer in display struct if we may potentially render vm
-        if render_screen == Some(Screen::VM) || render_screen == None && self.screen == Screen::VM {
-            if let Some(buf) = self.vm_ware.lock().unwrap().0.extract_new_frame() {
-                self.vm_disp.buffer = buf;
-                render_screen = Some(Screen::VM);
-            }
-        }
-
-        let Some(screen) = render_screen else {
-            return Ok(())
+        let vm_disp_updated = if let Some(buf) = vm.extract_new_frame() {
+            self.vm_disp.buffer = buf;
+            true
+        } else {
+            false
         };
 
-        self.screen = screen;
+        let drawing_dbg = maybe_dbg.as_ref().map_or(false, Debugger::is_active);
+        let should_draw = redraw || vm_disp_updated || drawing_dbg != self.drawing_dbg;
 
-        match screen {
-            Screen::Debugger => self.draw_dbg()?,
-            Screen::VM => self.draw_vm()?,
+        if should_draw {
+            self.drawing_dbg = drawing_dbg;
+            if drawing_dbg {
+                let Some(dbg) = maybe_dbg else {
+                    unreachable!("debugger must exist for debugger draw call to be made")
+                };
+    
+                self.terminal.draw(|f| {
+                    let Some(dbg_widget_state) = self.widget_state.1.as_mut() else {
+                        unreachable!("debugger screen state must exist for debugger draw call to be made")
+                    };
+        
+                    let dbg_area = f.size();
+                    let dbg_widget = DebuggerWidget {
+                        dbg,
+                        vm,
+                        vm_disp: &self.vm_disp,
+                        logging: self.config.logging,
+                    };
+        
+                    if self.config.logging {
+                        f.render_widget(Renderer::logger_widget(), dbg_widget.logger_area(dbg_area));
+                    }
+        
+                    if let Some((x, y)) = dbg_widget.cursor_position(dbg_area, dbg_widget_state) {
+                        f.set_cursor(x, y);
+                    }
+        
+                    f.render_stateful_widget(dbg_widget, dbg_area, dbg_widget_state);
+                })?;
+            } else {
+                drop(_guard);
+                
+                self.terminal.draw(|f| {
+                    let display_area = f.size();
+                    let display_widget = DisplayWidget {
+                        display: &self.vm_disp,
+                        logging: self.config.logging,
+                    };
+        
+                    if self.config.logging {
+                        f.render_widget(
+                            Renderer::logger_widget(),
+                            display_widget.logger_area(display_area),
+                        );
+                    }
+        
+                    f.render_widget(display_widget, display_area);
+                })?;
+            }
         }
-
-        Ok(())
-    }
-
-    fn draw_vm(&mut self) -> Result<(), io::Error> {
-        self.terminal.draw(|f| {
-            let display_area = f.size();
-            let display_widget = DisplayWidget {
-                display: &self.vm_disp,
-                logging: self.config.logging,
-            };
-
-            if self.config.logging {
-                f.render_widget(
-                    Renderer::logger_widget(),
-                    display_widget.logger_area(display_area),
-                );
-            }
-
-            f.render_widget(display_widget, display_area);
-        })?;
-
-        Ok(())
-    }
-
-    fn draw_dbg(&mut self) -> Result<(), io::Error> {
-        self.terminal.draw(|f| {
-            let mut _guard = self.vm_ware.lock().unwrap();
-            let (vm, Some(dbg)) = _guard.deref_mut() else {
-                unreachable!("debugger must exist for debugger draw call to be made")
-            };
-            let Some(dbg_widget_state) = self.widget_state.1.as_mut() else {
-                unreachable!("debugger screen state must exist for debugger draw call to be made")
-            };
-
-            if let Some(buf) = vm.extract_new_frame() {
-                self.vm_disp.buffer = buf;
-            }
-
-            let dbg_area = f.size();
-            let dbg_widget = DebuggerWidget {
-                dbg,
-                vm,
-                vm_disp: &self.vm_disp,
-                logging: self.config.logging,
-            };
-
-            if self.config.logging {
-                f.render_widget(Renderer::logger_widget(), dbg_widget.logger_area(dbg_area));
-            }
-
-            if let Some((x, y)) = dbg_widget.cursor_position(dbg_area, dbg_widget_state) {
-                f.set_cursor(x, y);
-            }
-
-            f.render_stateful_widget(dbg_widget, dbg_area, dbg_widget_state);
-        })?;
 
         Ok(())
     }
