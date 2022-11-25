@@ -67,6 +67,22 @@ impl AddressFlags {
     }
 }
 
+fn parse_addr(arg: &str) -> Option<u16> {
+    let (arg, radix) = if arg.starts_with("0x") {
+        (arg.trim_start_matches("0x"), 16)
+    } else {
+        (arg, 10)
+    };
+
+    u16::from_str_radix(arg, radix).or_else(|err| {
+        match err.kind() {
+            IntErrorKind::PosOverflow => Ok(u16::MAX),
+            IntErrorKind::NegOverflow => Ok(0),
+            _ => Err(err),
+        }
+    }).ok().map(|addr| addr.min(PROGRAM_MEMORY_SIZE - 1))
+}
+
 pub struct Debugger {
     active: bool,
 
@@ -178,8 +194,8 @@ impl Debugger {
                 match cmd {
                     "r" | "c" | "run" | "cont" | "continue" => {
                         log::info!("c8vm resume!");
-                        vm_runner.resume().unwrap();
                         self.deactivate();
+                        vm_runner.resume().unwrap();
                         render = true;
                         break;
                     }
@@ -210,6 +226,50 @@ impl Debugger {
                         }
 
                         render = true;
+                    }
+                    "w" | "watch" => {
+                        let Some(arg) = cmd_args.next() else {
+                            self.shell.output.push("Please specify a register or pointer to watch".into());
+                            continue;
+                        };
+
+                        let watchpoint_already_exists = !match arg {
+                            "pc" => self.watchpoints.insert(Watchpoint::Pointer(MemoryPointer::ProgramCounter)),
+                            "i" | "index" => self.watchpoints.insert(Watchpoint::Pointer(MemoryPointer::Index)),
+                            _ => {
+                                if arg.starts_with('v') {
+                                    if let Some(register) = u8::from_str_radix(&arg[1..], 16).ok().and_then(|x| if x < 16 { Some(x) } else { None }) {
+                                        self.watchpoints.insert(Watchpoint::Register(register))
+                                    } else {
+                                        self.shell.output.push("Please specify a valid register (v0..vf) to watch".into());
+                                        continue;
+                                    }
+                                } else {
+                                    self.shell.output.push("Please specify a register or pointer to watch".into());
+                                    continue;
+                                }
+                            }
+                        };
+
+                        self.shell.output.push(
+                            if watchpoint_already_exists {
+                                format!("Watchpoint {} already exists", arg)
+                            } else {
+                                format!("Watching {}", arg)
+                            }
+                        );
+                    }
+                    "b" | "break" | "breakpoint" => {
+                        let Some(addr) = cmd_args.next().and_then(parse_addr) else {
+                            self.shell.output.push(format!("Please specify a valid address in the range [{:#05X}, {:#05X}]", 0, PROGRAM_MEMORY_SIZE - 1));
+                            continue;
+                        };
+
+                        if self.breakpoints.insert(addr) {
+                            self.shell.output.push(format!("Breakpoint at {:#05X}", addr));
+                        } else {
+                            self.shell.output.push(format!("Breakpoint at {:#05X} already exists", addr));
+                        }
                     }
                     "show" => {
                         let Some("vm") = cmd_args.next() else {
@@ -257,25 +317,11 @@ impl Debugger {
                                 self.set_memory_addr(vm.interpreter().index);
                                 render = true;
                             }
-                            _ => {
-                                let (arg, radix) = if arg.starts_with("0x") {
-                                    (arg.trim_start_matches("0x"), 16)
-                                } else {
-                                    (arg, 10)
-                                };
-
-                                if let Ok(addr) = u16::from_str_radix(arg, radix).or_else(|err| {
-                                    match err.kind() {
-                                        IntErrorKind::PosOverflow => Ok(u16::MAX),
-                                        IntErrorKind::NegOverflow => Ok(0),
-                                        _ => Err(err),
-                                    }
-                                }) {
-                                    self.set_memory_addr(addr)
-                                } else {
-                                    self.shell.output_unrecognized_cmd();
-                                    continue;
-                                }
+                            _ => if let Some(addr) = parse_addr(arg) {
+                                self.set_memory_addr(addr);
+                            } else {
+                                self.shell.output_unrecognized_cmd();
+                                continue;
                             }
                         }
                     }
@@ -360,12 +406,20 @@ impl Debugger {
     }
 
     pub fn activate(&mut self, vm: &VM) {
+        if self.active {
+            return
+        }
+
         self.shell.output.push("Paused.".into());
         self.shell.output_pc(vm.interpreter());
         self.active = true;
     }
 
     pub fn deactivate(&mut self) {
+        if !self.active {
+            return
+        }
+
         self.shell.output.push("Continuing.".into());
         self.active = false;
     }
@@ -379,7 +433,7 @@ impl Debugger {
             let (old_val, new_val) = match watchpoint {
                 Watchpoint::Pointer(pointer) => match pointer {
                     MemoryPointer::Index => (old_watch_state.index, new_watch_state.index),
-                    MemoryPointer::ProgramCounter => (old_watch_state.pc, old_watch_state.pc),
+                    MemoryPointer::ProgramCounter => (old_watch_state.pc, new_watch_state.pc),
                 },
                 Watchpoint::Register(vx) => (
                     old_watch_state.registers[vx as usize] as u16,
@@ -440,10 +494,6 @@ impl Debugger {
 
         self.watch_state = new_watch_state;
 
-        if !self.active && !self.event_queue.is_empty() {
-            self.activate(vm);
-        }
-
         // update disassembler
         self.disassembler.update(vm.interpreter());
 
@@ -455,7 +505,38 @@ impl Debugger {
             });
         }
 
-        return self.event_queue.is_empty();
+        if self.event_queue.is_empty() {
+            return true;
+        } else {
+            self.activate(vm);
+            for debug_event in self.event_queue.drain(..) {
+                match debug_event {
+                    DebugEvent::BreakpointReached(addr) => {
+                        self.shell.output.push(format!("Breakpoint {:#05X} reached", addr));
+                    }
+                    DebugEvent::WatchpointTrigger(watchpoint, old, new) => {
+                        match watchpoint {
+                            Watchpoint::Pointer(pointer) => {
+                                let identifier = match pointer {
+                                    MemoryPointer::Index => "i",
+                                    MemoryPointer::ProgramCounter => "pc"
+                                };
+
+                                self.shell.output.push(format!("Pointer {} changed", identifier));
+                                self.shell.output.push(format!("Old value = {:#05X}", old));
+                                self.shell.output.push(format!("New value = {:#05X}", new));
+                            }
+                            Watchpoint::Register(register) => {
+                                self.shell.output.push(format!("Register v{:x} changed", register));
+                                self.shell.output.push(format!("Old value = {:0>3} ({:#05X})", old, old));
+                                self.shell.output.push(format!("New value = {:0>3} ({:#05X})", new, new));
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        }
     }
 }
 

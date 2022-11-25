@@ -262,11 +262,12 @@ impl VMRunner {
                         interpreter_duration =
                             interpreter_duration.saturating_add(timer_instant.elapsed());
 
-                        let can_continue = maybe_dbg.as_mut().map_or(true, |dbg| dbg.step(vm));
+                        continuation.try_cont();
+                        continuation.cont = continuation.cont && maybe_dbg.as_mut().map_or(true, |dbg| dbg.step(vm));
 
                         drop(_guard);
 
-                        if can_continue {
+                        if continuation.try_cont() {
                             interval.sleep();
                             continue;
                         }
