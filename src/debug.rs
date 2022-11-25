@@ -259,6 +259,7 @@ impl Debugger {
                     "r" | "c" | "run" | "cont" | "continue" => {
                         log::info!("c8vm resume!");
                         self.deactivate();
+                        vm.clear_event_queue();
                         vm_runner.resume().unwrap();
                         break;
                     }
@@ -274,6 +275,7 @@ impl Debugger {
 
                         for step in 0..amt {
                             amt_stepped = step + 1;
+                            vm.clear_event_queue();
                             vm.step(1.0 / vm_runner.config().instruction_frequency as f64)
                                 .unwrap();
                             self.shell.output_pc(vm.interpreter());
