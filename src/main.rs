@@ -2,7 +2,7 @@ extern crate log;
 
 mod vm;
 mod util;
-mod debug;
+mod dbg;
 mod disass;
 mod render;
 mod config;

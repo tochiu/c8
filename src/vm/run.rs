@@ -7,7 +7,7 @@ use super::{
 
 use crate::{
     util::{Interval, IntervalAccuracy},
-    debug::Debugger, 
+    dbg::debug::Debugger, 
     config::{C8VMConfig, GOOD_IPS_DIFF, OKAY_IPS_DIFF}
 };
 
