@@ -236,6 +236,7 @@ impl VMRunner {
                 };
 
                 let mut runtime_start = Instant::now();
+                let mut runtime_burst_duration = Duration::ZERO;
                 let mut runtime_duration = Duration::ZERO;
                 let mut interpreter_duration = Duration::ZERO;
                 let mut instructions_executed = 0;
@@ -254,13 +255,10 @@ impl VMRunner {
                         
                         let time_elapsed = timer_instant.elapsed().as_secs_f64();
                         timer_instant = Instant::now();
-
-                        instructions_executed += 1;
                         
                         vm.step(time_elapsed)?;
 
-                        interpreter_duration =
-                            interpreter_duration.saturating_add(timer_instant.elapsed());
+                        let duration = timer_instant.elapsed();
 
                         continuation.try_cont();
                         continuation.cont = continuation.cont && maybe_dbg.as_mut().map_or(true, |dbg| dbg.step(vm));
@@ -269,17 +267,22 @@ impl VMRunner {
 
                         if continuation.try_cont() {
                             interval.sleep();
+                            instructions_executed += 1;
+                            interpreter_duration = interpreter_duration.saturating_add(duration);
+                            runtime_burst_duration = runtime_start.elapsed();
                             continue;
                         }
                     } else {
                         drop(_guard);
                     }
 
+                    runtime_duration = runtime_duration.saturating_add(runtime_burst_duration);
+
                     // we yield until either we can continue or we must exit
 
-                    runtime_duration = runtime_duration.saturating_add(runtime_start.elapsed());
                     if continuation.can_cont() {
                         just_resumed = true;
+                        runtime_burst_duration = Duration::ZERO;
                         runtime_start = Instant::now();
                         timer_instant = Instant::now();
                         interval.reset();
@@ -398,17 +401,26 @@ impl Display for VMRunAnalytics {
         )?;
         write!(
             f,
-            "    {} Runner executed {:.2} inst/sec ( {} from {} inst/sec target )",
+            "    {} Runner continuously executed {:.2} inst/sec",
             format!("=").blue().bold(),
-            ips,
-            color_ips_diff(format!(
-                "{}{:.2}%",
-                if ips_diff >= 0.0 { "+" } else { "" },
-                ips_diff
-            ))
-            .bold(),
-            self.target_ips
-        )
+            if ips.is_finite() { ips } else { 0.0 }
+        )?;
+
+        if ips.is_finite() {
+            write!(
+                f,
+                " ( {} from {} inst/sec target )",
+                color_ips_diff(format!(
+                    "{}{:.2}%",
+                    if ips_diff >= 0.0 { "+" } else { "" },
+                    ips_diff
+                ))
+                .bold(),
+                self.target_ips
+            )?;
+        }
+        
+        Ok(())
     }
 }
 
