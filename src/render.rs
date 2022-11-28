@@ -1,6 +1,6 @@
 use crate::{
     config::C8VMConfig,
-    dbg::debug::{DebuggerWidget, DebuggerWidgetState, Debugger},
+    dbg::core::{DebuggerWidget, DebuggerWidgetState, Debugger},
     vm::{
         disp::{Display, DisplayWidget},
         run::VMWare,
