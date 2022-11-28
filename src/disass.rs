@@ -611,7 +611,7 @@ pub fn write_inst_asm(
         }
         Instruction::SetIndexToHexChar(vx) => {
             write!(f, "ichr  v{:x}", vx)?;
-            write!(c, "index = sprite address of hexadecimal char v{:x}", vx)
+            write!(c, "index = sprite of hex char v{:x}", vx)
         }
         Instruction::AddToIndex(value) => {
             write!(f, "iadd  {}", value)?;
