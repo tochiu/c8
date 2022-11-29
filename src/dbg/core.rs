@@ -396,18 +396,35 @@ impl Debugger {
         let interp = vm.interpreter();
 
         // update memory display read write execute flags
-        self.memory.step(self.memory_widget_state.get_mut(), interp, self.watch_state.pc, self.watch_state.index, self.watch_state.instruction);
+        self.memory.step(
+            self.memory_widget_state.get_mut(), 
+            interp, 
+            self.watch_state.pc, 
+            self.watch_state.index, 
+            self.watch_state.instruction
+        );
+
+        // update disassembler
+        match self.watch_state.instruction {
+            Some(Instruction::Store(bytes)) => {
+                self.disassembler.update(vm.interpreter(), self.watch_state.index, bytes as u16);
+            }
+            Some(Instruction::StoreDecimal(_)) => {
+                self.disassembler.update(vm.interpreter(), self.watch_state.index, 3);
+            }
+            _ => ()
+        }
         
+        // update watch state
         self.watch_state.update(interp, &self.watchpoints, &mut self.event_queue);
 
+        // update breakpoints
         if self.breakpoints.contains(&interp.pc) {
             self.event_queue
                 .push(DebugEvent::BreakpointReached(interp.pc));
         }
 
-        // update disassembler
-        self.disassembler.update(vm.interpreter());
-
+        // handle debug events emitted
         if self.event_queue.is_empty() {
             return true;
         } else {

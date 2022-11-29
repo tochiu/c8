@@ -112,16 +112,22 @@ impl Disassembler {
         addr <= PROGRAM_MEMORY_SIZE - 2
     }
 
-    pub fn update(&mut self, interp: &Interpreter) {
+    pub fn update(&mut self, interp: &Interpreter, addr: u16, bytes: u16) {
         let memory = interp.memory;
         let mut disass_required = false;
 
-        for ((((new_param_bits, byte), params), inst), tag) in memory
+        // add 1 to byte becaus we have a window iterator and want to handle the instruction formed by the last byte in range and next byte
+        let lbound = addr as usize;
+        let rbound = addr.saturating_add(bytes + 1).min(memory.len() as u16) as usize;
+
+        log::trace!("Prelim disassembly of address range [{:#05X}, {:#05X})", lbound, rbound);
+
+        for ((((new_param_bits, byte), params), inst), tag) in memory[lbound..rbound]
             .windows(2)
-            .zip(self.memory.iter_mut())
-            .zip(self.instruction_params.iter_mut())
-            .zip(self.instructions.iter_mut())
-            .zip(self.tags.iter_mut())
+            .zip(self.memory[lbound..rbound].iter_mut())
+            .zip(self.instruction_params[lbound..rbound].iter_mut())
+            .zip(self.instructions[lbound..rbound].iter_mut())
+            .zip(self.tags[lbound..rbound].iter_mut())
             .filter(|((((new_param_bits, byte), _), _), _)| new_param_bits[0] != **byte)
         {
             *byte = new_param_bits[0];
@@ -141,11 +147,11 @@ impl Disassembler {
 
         // handle edge-case of last byte because it doesn't fit into the size of an instruction
 
-        let Some(last_byte) = self.memory.last_mut() else {
+        let Some(last_byte) = self.memory[lbound..rbound].last_mut() else {
             unreachable!("disass memory size must be nonzero");
         };
 
-        let Some(new_last_byte) = memory.last() else {
+        let Some(new_last_byte) = memory[lbound..rbound].last() else {
             unreachable!("interp memory size must be nonzero");
         };
 
