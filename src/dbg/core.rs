@@ -337,9 +337,11 @@ impl Debugger {
                         match arg {
                             "pc" => {
                                 self.memory.follow = Some(MemoryPointer::ProgramCounter);
+                                self.memory_widget_state.get_mut().poke();
                             }
                             "i" | "index" => {
                                 self.memory.follow = Some(MemoryPointer::Index);
+                                self.memory_widget_state.get_mut().poke();
                             }
                             _ => {
                                 self.shell.print("Please specify a pointer (pc/i) to follow");
@@ -395,7 +397,7 @@ impl Debugger {
     pub fn step(&mut self, vm: &VM) -> bool {
         let interp = vm.interpreter();
 
-        // update memory display read write execute flags
+        // update memory draw read write execute (drwx) flags
         self.memory.step(
             self.memory_widget_state.get_mut(), 
             interp, 
@@ -548,11 +550,21 @@ impl<'a> DebuggerWidget<'a> {
     fn main_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect) {
         let mut rects = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(area.width.saturating_sub(14) / 3),
-                Constraint::Length(14),
-                Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14) / 3)),
-            ])
+            .constraints(
+                if self.dbg.shell_active {
+                    [
+                        Constraint::Length(area.width.saturating_sub(14) / 3),
+                        Constraint::Length(14),
+                        Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14) / 3)),
+                    ]
+                } else {
+                    [
+                        Constraint::Length(0),
+                        Constraint::Length(14),
+                        Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14))),
+                    ]
+                }
+            )
             .split(area);
 
         let (output_area, memory_area) = (rects[0], rects[2]);

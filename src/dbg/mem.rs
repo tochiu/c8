@@ -158,6 +158,10 @@ impl MemoryWidgetState {
         self.offset = 0;
         self.focus = addr;
     }
+
+    pub(super) fn poke(&mut self) {
+        self.follow = true;
+    }
 }
 
 pub(super) struct MemoryWidget<'a> {
