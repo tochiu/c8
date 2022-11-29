@@ -51,6 +51,7 @@ impl AddressFlags {
 }
 
 pub(super) struct Memory {
+    pub verbose: bool,
     pub follow: Option<MemoryPointer>,
     flags: [u8; PROGRAM_MEMORY_SIZE as usize],
 }
@@ -58,6 +59,7 @@ pub(super) struct Memory {
 impl Default for Memory {
     fn default() -> Self {
         Memory {
+            verbose: false,
             follow: Some(MemoryPointer::ProgramCounter),
             flags: [0; PROGRAM_MEMORY_SIZE as usize],
         }
@@ -172,11 +174,18 @@ pub(super) struct MemoryWidget<'a> {
 }
 
 impl<'a> MemoryWidget<'_> {
-    const COMMENT_DELIM: &'static str = "# ";
+    const COMMENT_DELIM: char = '#';
+    const COMMENT_STYLE: Style = Style {
+        fg: Some(Color::Yellow),
+        bg: None,
+        add_modifier: Modifier::empty(),
+        sub_modifier: Modifier::empty(),
+    };
 
     fn is_addr_drawable(&self, addr: u16) -> bool {
         let tag = self.disassembler.tags[addr as usize];
-        tag >= InstructionTag::Proven
+        self.memory.verbose
+            || tag >= InstructionTag::Proven
             || addr == 0
             || addr == self.interpreter.pc
             || addr == self.interpreter.index
@@ -221,8 +230,9 @@ impl<'a> MemoryWidget<'_> {
         addr_line_width: u16,
         addr_header: &mut String,
         addr_opcode: &mut String,
-        addr_content: &mut String,
-        addr_comment: &mut String,
+        addr_bin: &mut String,
+        addr_asm: &mut String,
+        addr_asm_desc: &mut String,
     ) -> Spans {
         let byte = self.disassembler.memory[addr as usize];
         let tag = self.disassembler.tags[addr as usize];
@@ -230,69 +240,84 @@ impl<'a> MemoryWidget<'_> {
 
         addr_header.clear();
         addr_opcode.clear();
-        addr_content.clear();
-        addr_comment.clear();
-
-        addr_content.push(' ');
-        addr_comment.push_str(MemoryWidget::COMMENT_DELIM);
+        addr_bin.clear();
+        addr_asm.clear();
+        addr_asm_desc.clear();
 
         self.disassembler
-            .write_addr_disass(addr, addr_header, addr_opcode, addr_content, addr_comment)
+            .write_addr_disass(addr, addr_header, addr_opcode, addr_asm, addr_asm_desc)
             .ok();
 
         let (draw, read, write, exec) = AddressFlags::extract(flags);
         addr_header.push(' ');
-        addr_header.push(if draw { 'd' } else { '-' });
-        addr_header.push(if read { 'r' } else { '-' });
+        addr_header.push(if draw  { 'd' } else { '-' });
+        addr_header.push(if read  { 'r' } else { '-' });
         addr_header.push(if write { 'w' } else { '-' });
-        addr_header.push(if exec { 'x' } else { '-' });
+        addr_header.push(if exec  { 'x' } else { '-' });
 
         let force_asm = addr == self.interpreter.pc;
 
-        let show_addr_content = tag >= InstructionTag::Valid || force_asm;
-        let show_bin_comment =
-            tag < InstructionTag::Proven && (tag < InstructionTag::Parsable || !force_asm);
-        let show_addr_comment = show_bin_comment
-            || show_addr_content && addr_comment.len() > MemoryWidget::COMMENT_DELIM.len();
+        let show_addr_asm = addr_asm.len() > 0
+            && (self.memory.verbose || tag >= InstructionTag::Valid || force_asm);
+        let show_addr_bin = self.memory.verbose
+            || tag < InstructionTag::Proven && (tag < InstructionTag::Parsable || !force_asm);
+        let show_addr_asm_desc = addr_asm_desc.len() > 0 && (!show_addr_bin || self.memory.verbose);
+        let show_comments = show_addr_bin || show_addr_asm_desc;
 
-        if show_addr_comment {
-            if !show_addr_content {
-                addr_content.clear();
+        if show_addr_bin {
+            write!(addr_bin, "{:#04X} ", byte).ok();
+            write_byte_str(addr_bin, byte, 1).ok();
+        }
+
+        let content_len = addr_header.len()
+            + addr_opcode.len()
+            + if show_addr_asm { addr_asm.len() + 1 } else { 0 };
+        let content_len_padded = if show_comments {
+            content_len.max(INSTRUCTION_COLUMNS + 4)
+        } else {
+            content_len
+        };
+        let comment_len = if show_comments {
+            2 + if show_addr_bin { addr_bin.len() } else { 0 }
+                + if show_addr_asm_desc {
+                    addr_asm_desc.len()
+                } else {
+                    0
+                }
+        } else {
+            0
+        };
+
+        let mut spans: Vec<Span> = Vec::with_capacity(if show_comments { 2 } else { 1 });
+
+        let mut content = String::with_capacity(content_len_padded);
+        content.push_str(&addr_header);
+        content.push_str(&addr_opcode);
+        if show_addr_asm {
+            content.push(' ');
+            content.push_str(&addr_asm);
+        }
+        if show_comments {
+            for _ in 0..content_len_padded.saturating_sub(content.len()) {
+                content.push(' ');
+            }
+        }
+
+        spans.push(Span::raw(content));
+
+        if show_comments {
+            let mut comment = String::with_capacity(comment_len);
+            comment.push(MemoryWidget::COMMENT_DELIM);
+            if show_addr_bin {
+                comment.push(' ');
+                comment.push_str(&addr_bin);
+            }
+            if show_addr_asm_desc {
+                comment.push(' ');
+                comment.push_str(&addr_asm_desc);
             }
 
-            let padding = (INSTRUCTION_COLUMNS + 4)
-                .saturating_sub(addr_header.len() + addr_opcode.len() + addr_content.len());
-
-            addr_content.reserve_exact(padding);
-            for _ in 0..padding {
-                addr_content.push(' ');
-            }
-        }
-
-        if show_bin_comment {
-            addr_comment.clear();
-            write!(
-                addr_comment,
-                "{}{:#04X} ",
-                MemoryWidget::COMMENT_DELIM,
-                byte
-            )
-            .ok();
-            write_byte_str(addr_comment, byte, 1).ok();
-        }
-
-        let mut spans: Vec<Span> = Vec::with_capacity(3);
-
-        spans.push(Span::raw(addr_header.clone()));
-        spans.push(Span::raw(addr_opcode.clone()));
-        if show_addr_content || show_addr_comment {
-            spans.push(Span::raw(addr_content.clone()));
-        }
-        if show_addr_comment {
-            spans.push(Span::styled(
-                addr_comment.clone(),
-                Style::default().fg(Color::Yellow),
-            ));
+            spans.push(Span::styled(comment, MemoryWidget::COMMENT_STYLE));
         }
 
         if addr == self.interpreter.pc {
@@ -346,7 +371,9 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
         state.follow = false;
         state.focus = state.focus.min(addr_max);
 
-        let Some(mut focus) = self.find_nearest_drawable_addr(state.focus, false).or(self.find_nearest_drawable_addr(state.focus, true)) else {
+        let Some(mut focus) = self.find_nearest_drawable_addr(state.focus, false).or(
+            self.find_nearest_drawable_addr(state.focus, true)
+        ) else {
             return
         };
 
@@ -370,8 +397,9 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
 
         let mut addr_header = String::new();
         let mut addr_opcode = String::new();
-        let mut addr_content = String::new();
-        let mut addr_comment = String::new();
+        let mut addr_bin = String::new();
+        let mut addr_asm = String::new();
+        let mut addr_asm_desc = String::new();
 
         let mut lines: Vec<Spans> = Vec::with_capacity(area.height as usize);
         let lines_ahead = (area.height - area.height / 2) as usize;
@@ -386,8 +414,9 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
                     area.width,
                     &mut addr_header,
                     &mut addr_opcode,
-                    &mut addr_content,
-                    &mut addr_comment,
+                    &mut addr_bin,
+                    &mut addr_asm,
+                    &mut addr_asm_desc,
                 );
                 if lines.len() == 0 && self.active {
                     MemoryWidget::highlight_line(
@@ -415,8 +444,9 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
                         area.width,
                         &mut addr_header,
                         &mut addr_opcode,
-                        &mut addr_content,
-                        &mut addr_comment,
+                        &mut addr_bin,
+                        &mut addr_asm,
+                        &mut addr_asm_desc,
                     ),
                 );
             }
@@ -432,8 +462,9 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
                     area.width,
                     &mut addr_header,
                     &mut addr_opcode,
-                    &mut addr_content,
-                    &mut addr_comment,
+                    &mut addr_bin,
+                    &mut addr_asm,
+                    &mut addr_asm_desc,
                 ));
             }
         }

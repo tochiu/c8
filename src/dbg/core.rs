@@ -282,20 +282,32 @@ impl Debugger {
                         }
                     }
                     "show" => {
-                        let Some("vm") = cmd_args.next() else {
+                        let Some(arg) = cmd_args.next() else {
                             self.shell.print_unrecognized_cmd();
                             continue;
                         };
 
-                        self.vm_visible = true;
+                        match arg {
+                            "vm" => self.vm_visible = true,
+                            "verbose" => self.memory.verbose = true,
+                            _ => {
+                                self.shell.print_unrecognized_cmd();
+                            }
+                        }
                     }
                     "hide" => {
-                        let Some("vm") = cmd_args.next() else {
+                        let Some(arg) = cmd_args.next() else {
                             self.shell.print_unrecognized_cmd();
                             continue;
                         };
 
-                        self.vm_visible = false;
+                        match arg {
+                            "vm" => self.vm_visible = false,
+                            "verbose" => self.memory.verbose = false,
+                            _ => {
+                                self.shell.print_unrecognized_cmd();
+                            }
+                        }
                     }
                     "m" | "mem" | "memory" => {
                         self.memory_active = true;
