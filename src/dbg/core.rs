@@ -309,6 +309,44 @@ impl Debugger {
                             }
                         }
                     }
+                    "dump" => {
+                        let Some(arg) = cmd_args.next() else {
+                            self.shell.print_unrecognized_cmd();
+                            continue;
+                        };
+
+                        let ("m" | "mem" | "memory") = arg else {
+                            self.shell.print_unrecognized_cmd();
+                            continue;
+                        };
+
+                        if cmd_args.next().is_none() {
+                            self.shell.print("Please specify a path to dump memory to");
+                            continue;
+                        }
+
+                        let path_arg = cmd_str.trim_start()[4..].trim_start()[arg.len()..].trim_start();
+                        let path = if path_arg.starts_with('"') {
+                            if let Some(end) = path_arg[1..].find('"') {
+                                &path_arg[1..end + 1]
+                            } else {
+                                self.shell.print("Please specify a valid path to dump memory to");
+                                continue;
+                            }
+                        } else {
+                            path_arg
+                        };
+
+                        match (MemoryWidget {
+                            active: self.memory_active,
+                            memory: &self.memory,
+                            interpreter: vm.interpreter(),
+                            disassembler: &self.disassembler
+                        }.write_to_file(path)) {
+                            Ok(_) => self.shell.print(format!("Dumped memory to \"{}\"", path)),
+                            Err(e) => self.shell.print(format!("Failed to dump memory to \"{}\": {}", path, e))
+                        };
+                    }
                     "m" | "mem" | "memory" => {
                         self.memory_active = true;
                         self.shell_active = false;

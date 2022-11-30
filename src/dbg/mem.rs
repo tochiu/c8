@@ -15,7 +15,7 @@ use tui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
-use std::fmt::Write;
+use std::{fmt::Write as FmtWrite, io::Write as IOWrite, fs::File, path::Path};
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub(super) enum MemoryPointer {
@@ -222,6 +222,35 @@ impl<'a> MemoryWidget<'_> {
         for span in line.iter_mut() {
             (*span).style = span.style.add_modifier(Modifier::BOLD).bg(bg).fg(fg);
         }
+    }
+
+    pub(super) fn write_to_file<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        let mut file = File::create(path)?;
+        let mut addr_header = String::new();
+        let mut addr_opcode = String::new();
+        let mut addr_bin = String::new();
+        let mut addr_asm = String::new();
+        let mut addr_asm_desc = String::new();
+        for addr in 0..self.interpreter.memory.len() as u16 {
+            if !self.is_addr_drawable(addr) {
+                continue;
+            }
+
+            let spans = self.addr_span(
+                addr,
+                0,
+                &mut addr_header,
+                &mut addr_opcode,
+                &mut addr_bin,
+                &mut addr_asm,
+                &mut addr_asm_desc,
+            );
+            for span in spans.0 {
+                write!(file, "{}", span.content)?;
+            }
+            writeln!(file, "")?;
+        }
+        Ok(())
     }
 
     fn addr_span(
