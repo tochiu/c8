@@ -84,8 +84,10 @@ impl Shell {
                 self.cursor_position = self.input.len();
             }
             KeyCode::Char(char) => {
-                self.input.insert(self.cursor_position, char);
-                self.cursor_position += 1;
+                if char.is_ascii() {
+                    self.input.insert(self.cursor_position, char);
+                    self.cursor_position += 1;
+                }
             }
             _ => {
                 sink_input = false;
