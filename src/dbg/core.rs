@@ -234,7 +234,7 @@ impl Debugger {
                             self.shell.print(format!("Stepped {} times", amt_stepped));
                         }
                     }
-                    "w" | "watch" => {
+                    "w" | "watch" | "watchpoint" => {
                         let Some(arg) = cmd_args.next() else {
                             self.shell.print("Please specify a register or pointer to watch");
                             continue;
@@ -279,6 +279,43 @@ impl Debugger {
                             self.shell.print(format!("Breakpoint at {:#05X}", addr));
                         } else {
                             self.shell.print(format!("Breakpoint at {:#05X} already exists", addr));
+                        }
+                    }
+                    "i" | "info" => {
+                        let Some(arg) = cmd_args.next() else {
+                            self.shell.print_unrecognized_cmd();
+                            continue;
+                        };
+
+                        match arg {
+                            "b" | "break" | "breakpoint" => {
+                                if self.breakpoints.is_empty() {
+                                    self.shell.print("No breakpoints set");
+                                } else {
+                                    self.shell.print("Breakpoints:");
+                                    for breakpoint in self.breakpoints.iter() {
+                                        self.shell.print(format!("    - {:#05X}", breakpoint));
+                                    }
+                                }
+                            }
+                            "w" | "watch" | "watchpoint" => {
+                                if self.watchpoints.is_empty() {
+                                    self.shell.print("No watchpoints set");
+                                } else {
+                                    self.shell.print("Watchpoints:");
+                                    for watchpoint in self.watchpoints.iter() {
+                                        self.shell.print(format!("    - {}", match watchpoint {
+                                            Watchpoint::Register(register) => format!("v{:X}", register),
+                                            Watchpoint::Pointer(pointer) => pointer.identifier().to_string(),
+                                            Watchpoint::Address(addr) => format!("{:#05X}", addr),
+                                        }));
+                                    }
+                                }
+                            }
+                            _ => {
+                                self.shell.print_unrecognized_cmd();
+                                continue;
+                            }
                         }
                     }
                     "show" => {
