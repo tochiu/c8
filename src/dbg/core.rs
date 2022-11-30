@@ -12,19 +12,23 @@ use crate::{
 
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use tui::{
+    buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::Spans,
-    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget}, buffer::Buffer,
+    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 
-use std::{collections::{HashSet, HashMap}, cell::Cell};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet},
+};
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub(super) enum Watchpoint {
     Pointer(MemoryPointer),
     Register(u8),
-    Address(u16)
+    Address(u16),
 }
 
 #[derive(Default)]
@@ -49,7 +53,12 @@ impl From<&Interpreter> for WatchState {
 }
 
 impl WatchState {
-    fn update(&mut self, interp: &Interpreter, watchpoints: &HashSet<Watchpoint>, event_queue: &mut Vec<DebugEvent>) {
+    fn update(
+        &mut self,
+        interp: &Interpreter,
+        watchpoints: &HashSet<Watchpoint>,
+        event_queue: &mut Vec<DebugEvent>,
+    ) {
         for &watchpoint in watchpoints.iter() {
             match watchpoint {
                 Watchpoint::Pointer(pointer) => match pointer {
@@ -58,24 +67,30 @@ impl WatchState {
                         let new_val = interp.index;
 
                         if old_val != new_val {
-                            event_queue.push(DebugEvent::WatchpointTrigger(watchpoint, old_val, new_val));
+                            event_queue
+                                .push(DebugEvent::WatchpointTrigger(watchpoint, old_val, new_val));
                         }
-                    },
+                    }
                     MemoryPointer::ProgramCounter => {
                         let old_val = self.pc;
                         let new_val = interp.pc;
 
                         if old_val != new_val {
-                            event_queue.push(DebugEvent::WatchpointTrigger(watchpoint, old_val, new_val));
+                            event_queue
+                                .push(DebugEvent::WatchpointTrigger(watchpoint, old_val, new_val));
                         }
-                    },
+                    }
                 },
                 Watchpoint::Register(vx) => {
                     let old_val = self.registers[vx as usize];
                     let new_val = interp.registers[vx as usize];
 
                     if old_val != new_val {
-                        event_queue.push(DebugEvent::WatchpointTrigger(watchpoint, old_val as u16, new_val as u16));
+                        event_queue.push(DebugEvent::WatchpointTrigger(
+                            watchpoint,
+                            old_val as u16,
+                            new_val as u16,
+                        ));
                     }
                 }
                 Watchpoint::Address(addr) => {
@@ -86,7 +101,11 @@ impl WatchState {
 
                     if old_val != new_val {
                         self.addresses.insert(addr, new_val);
-                        event_queue.push(DebugEvent::WatchpointTrigger(watchpoint, old_val as u16, new_val as u16));
+                        event_queue.push(DebugEvent::WatchpointTrigger(
+                            watchpoint,
+                            old_val as u16,
+                            new_val as u16,
+                        ));
                     }
                 }
             }
@@ -172,7 +191,11 @@ impl Debugger {
                         if self.shell_active {
                             sink_event = self.shell.handle_key_event(key_event);
                         } else if self.memory_active {
-                            sink_event = self.memory.handle_key_event(key_event, self.memory_widget_state.get_mut(), &mut self.memory_active);
+                            sink_event = self.memory.handle_key_event(
+                                key_event,
+                                self.memory_widget_state.get_mut(),
+                                &mut self.memory_active,
+                            );
                             if !self.memory_active {
                                 self.shell_active = true;
                             }
@@ -241,33 +264,43 @@ impl Debugger {
                         };
 
                         let watchpoint_already_exists = !match arg {
-                            "pc" => self.watchpoints.insert(Watchpoint::Pointer(MemoryPointer::ProgramCounter)),
-                            "i" | "index" => self.watchpoints.insert(Watchpoint::Pointer(MemoryPointer::Index)),
+                            "pc" => self
+                                .watchpoints
+                                .insert(Watchpoint::Pointer(MemoryPointer::ProgramCounter)),
+                            "i" | "index" => self
+                                .watchpoints
+                                .insert(Watchpoint::Pointer(MemoryPointer::Index)),
                             _ => {
                                 if arg.starts_with('v') {
-                                    if let Some(register) = u8::from_str_radix(&arg[1..], 16).ok().and_then(|x| if x < 16 { Some(x) } else { None }) {
+                                    if let Some(register) = u8::from_str_radix(&arg[1..], 16)
+                                        .ok()
+                                        .and_then(|x| if x < 16 { Some(x) } else { None })
+                                    {
                                         self.watchpoints.insert(Watchpoint::Register(register))
                                     } else {
-                                        self.shell.print("Please specify a valid register (v0..vf) to watch");
+                                        self.shell.print(
+                                            "Please specify a valid register (v0..vf) to watch",
+                                        );
                                         continue;
                                     }
                                 } else if let Some(addr) = vm.interpreter().parse_addr(arg) {
-                                    self.watch_state.addresses.insert(addr, vm.interpreter().memory[addr as usize]);
+                                    self.watch_state
+                                        .addresses
+                                        .insert(addr, vm.interpreter().memory[addr as usize]);
                                     self.watchpoints.insert(Watchpoint::Address(addr))
                                 } else {
-                                    self.shell.print("Please specify a register or pointer to watch");
+                                    self.shell
+                                        .print("Please specify a register or pointer to watch");
                                     continue;
                                 }
                             }
                         };
 
-                        self.shell.print(
-                            if watchpoint_already_exists {
-                                format!("Watchpoint {} already exists", arg)
-                            } else {
-                                format!("Watching {}", arg)
-                            }
-                        );
+                        self.shell.print(if watchpoint_already_exists {
+                            format!("Watchpoint {} already exists", arg)
+                        } else {
+                            format!("Watching {}", arg)
+                        });
                     }
                     "b" | "break" | "breakpoint" => {
                         let Some(addr) = cmd_args.next().and_then(|arg| vm.interpreter().parse_addr(arg)) else {
@@ -278,7 +311,8 @@ impl Debugger {
                         if self.breakpoints.insert(addr) {
                             self.shell.print(format!("Breakpoint at {:#05X}", addr));
                         } else {
-                            self.shell.print(format!("Breakpoint at {:#05X} already exists", addr));
+                            self.shell
+                                .print(format!("Breakpoint at {:#05X} already exists", addr));
                         }
                     }
                     "clear" => {
@@ -302,9 +336,15 @@ impl Debugger {
                                     _ => {
                                         if let Some(addr) = vm.interpreter().parse_addr(arg) {
                                             if self.breakpoints.remove(&addr) {
-                                                self.shell.print(format!("Cleared breakpoint at {:#05X}", addr));
+                                                self.shell.print(format!(
+                                                    "Cleared breakpoint at {:#05X}",
+                                                    addr
+                                                ));
                                             } else {
-                                                self.shell.print(format!("No breakpoint at {:#05X}", addr));
+                                                self.shell.print(format!(
+                                                    "No breakpoint at {:#05X}",
+                                                    addr
+                                                ));
                                             }
                                         } else {
                                             self.shell.print("Please specify a valid breakpoint (or all) to clear");
@@ -326,17 +366,33 @@ impl Debugger {
                                     }
                                     _ => {
                                         let watchpoint = match arg {
-                                            "pc" => Watchpoint::Pointer(MemoryPointer::ProgramCounter),
-                                            "i" | "index" => Watchpoint::Pointer(MemoryPointer::Index),
+                                            "pc" => {
+                                                Watchpoint::Pointer(MemoryPointer::ProgramCounter)
+                                            }
+                                            "i" | "index" => {
+                                                Watchpoint::Pointer(MemoryPointer::Index)
+                                            }
                                             _ => {
                                                 if arg.starts_with('v') {
-                                                    if let Some(register) = u8::from_str_radix(&arg[1..], 16).ok().and_then(|x| if x < 16 { Some(x) } else { None }) {
+                                                    if let Some(register) =
+                                                        u8::from_str_radix(&arg[1..], 16)
+                                                            .ok()
+                                                            .and_then(|x| {
+                                                                if x < 16 {
+                                                                    Some(x)
+                                                                } else {
+                                                                    None
+                                                                }
+                                                            })
+                                                    {
                                                         Watchpoint::Register(register)
                                                     } else {
                                                         self.shell.print("Please specify a valid register (v0..vf) to clear");
                                                         continue;
                                                     }
-                                                } else if let Some(addr) = vm.interpreter().parse_addr(arg) {
+                                                } else if let Some(addr) =
+                                                    vm.interpreter().parse_addr(arg)
+                                                {
                                                     Watchpoint::Address(addr)
                                                 } else {
                                                     self.shell.print("Please specify a valid watchpoint (or all) to clear");
@@ -348,9 +404,13 @@ impl Debugger {
                                         if self.watchpoints.remove(&watchpoint) {
                                             if let Watchpoint::Address(addr) = watchpoint {
                                                 self.watch_state.addresses.remove(&addr);
-                                                self.shell.print(format!("Cleared watchpoint {:#05X}", addr));
+                                                self.shell.print(format!(
+                                                    "Cleared watchpoint {:#05X}",
+                                                    addr
+                                                ));
                                             } else {
-                                                self.shell.print(format!("Cleared watchpoint {}", arg));
+                                                self.shell
+                                                    .print(format!("Cleared watchpoint {}", arg));
                                             }
                                         } else {
                                             self.shell.print(format!("No watchpoint {}", arg));
@@ -359,7 +419,8 @@ impl Debugger {
                                 }
                             }
                             _ => {
-                                self.shell.print("Please specify a breakpoint or watchpoint to clear");
+                                self.shell
+                                    .print("Please specify a breakpoint or watchpoint to clear");
                             }
                         }
                     }
@@ -386,11 +447,17 @@ impl Debugger {
                                 } else {
                                     self.shell.print("Watchpoints:");
                                     for watchpoint in self.watchpoints.iter() {
-                                        self.shell.print(format!("    - {}", match watchpoint {
-                                            Watchpoint::Register(register) => format!("v{:x}", register),
-                                            Watchpoint::Pointer(pointer) => pointer.identifier().to_string(),
-                                            Watchpoint::Address(addr) => format!("{:#05X}", addr),
-                                        }));
+                                        self.shell.print(format!(
+                                            "    - {}",
+                                            match watchpoint {
+                                                Watchpoint::Register(register) =>
+                                                    format!("v{:x}", register),
+                                                Watchpoint::Pointer(pointer) =>
+                                                    pointer.identifier().to_string(),
+                                                Watchpoint::Address(addr) =>
+                                                    format!("{:#05X}", addr),
+                                            }
+                                        ));
                                     }
                                 }
                             }
@@ -444,12 +511,14 @@ impl Debugger {
                             continue;
                         }
 
-                        let path_arg = cmd_str.trim_start()[4..].trim_start()[arg.len()..].trim_start();
+                        let path_arg =
+                            cmd_str.trim_start()[4..].trim_start()[arg.len()..].trim_start();
                         let path = if path_arg.starts_with('"') {
                             if let Some(end) = path_arg[1..].find('"') {
                                 &path_arg[1..end + 1]
                             } else {
-                                self.shell.print("Please specify a valid path to dump memory to");
+                                self.shell
+                                    .print("Please specify a valid path to dump memory to");
                                 continue;
                             }
                         } else {
@@ -460,10 +529,14 @@ impl Debugger {
                             active: self.memory_active,
                             memory: &self.memory,
                             interpreter: vm.interpreter(),
-                            disassembler: &self.disassembler
-                        }.write_to_file(path)) {
+                            disassembler: &self.disassembler,
+                        }
+                        .write_to_file(path))
+                        {
                             Ok(_) => self.shell.print(format!("Dumped memory to \"{}\"", path)),
-                            Err(e) => self.shell.print(format!("Failed to dump memory to \"{}\": {}", path, e))
+                            Err(e) => self
+                                .shell
+                                .print(format!("Failed to dump memory to \"{}\": {}", path, e)),
                         };
                     }
                     "m" | "mem" | "memory" => {
@@ -475,24 +548,27 @@ impl Debugger {
                             self.shell.print_unrecognized_cmd();
                             continue;
                         };
-                        
+
                         match arg {
-                            "start" => {
-                                self.memory_widget_state.get_mut().set_focus(0)
-                            },
-                            "end" => {
-                                self.memory_widget_state.get_mut().set_focus(vm.interpreter().memory.len() as u16 - 1)
-                            },
-                            "pc" => {
-                                self.memory_widget_state.get_mut().set_focus(vm.interpreter().pc)
-                            },
-                            "i" | "index" => {
-                                self.memory_widget_state.get_mut().set_focus(vm.interpreter().index)
-                            },
-                            _ => if let Some(addr) = vm.interpreter().parse_addr(arg) {
-                                self.memory_widget_state.get_mut().set_focus(addr)
-                            } else {
-                                self.shell.print_unrecognized_cmd()
+                            "start" => self.memory_widget_state.get_mut().set_focus(0),
+                            "end" => self
+                                .memory_widget_state
+                                .get_mut()
+                                .set_focus(vm.interpreter().memory.len() as u16 - 1),
+                            "pc" => self
+                                .memory_widget_state
+                                .get_mut()
+                                .set_focus(vm.interpreter().pc),
+                            "i" | "index" => self
+                                .memory_widget_state
+                                .get_mut()
+                                .set_focus(vm.interpreter().index),
+                            _ => {
+                                if let Some(addr) = vm.interpreter().parse_addr(arg) {
+                                    self.memory_widget_state.get_mut().set_focus(addr)
+                                } else {
+                                    self.shell.print_unrecognized_cmd()
+                                }
                             }
                         };
                     }
@@ -513,7 +589,8 @@ impl Debugger {
                                 self.memory_widget_state.get_mut().poke();
                             }
                             _ => {
-                                self.shell.print("Please specify a pointer (pc/i) to follow");
+                                self.shell
+                                    .print("Please specify a pointer (pc/i) to follow");
                                 continue;
                             }
                         }
@@ -523,7 +600,8 @@ impl Debugger {
                     "uf" | "unfollow" => {
                         if let Some(pointer) = self.memory.follow {
                             self.memory.follow = None;
-                            self.shell.print(format!("Unfollowing {}", pointer.identifier()));
+                            self.shell
+                                .print(format!("Unfollowing {}", pointer.identifier()));
                         } else {
                             self.shell.print("Already unfollowed");
                         }
@@ -546,7 +624,7 @@ impl Debugger {
 
     pub fn activate(&mut self, vm: &VM) {
         if self.active {
-            return
+            return;
         }
 
         self.shell.print("Paused.");
@@ -556,7 +634,7 @@ impl Debugger {
 
     pub fn deactivate(&mut self) {
         if !self.active {
-            return
+            return;
         }
 
         self.shell.print("Continuing.");
@@ -568,26 +646,29 @@ impl Debugger {
 
         // update memory draw read write execute (drwx) flags
         self.memory.step(
-            self.memory_widget_state.get_mut(), 
-            interp, 
-            self.watch_state.pc, 
-            self.watch_state.index, 
-            self.watch_state.instruction
+            self.memory_widget_state.get_mut(),
+            interp,
+            self.watch_state.pc,
+            self.watch_state.index,
+            self.watch_state.instruction,
         );
 
         // update disassembler
         match self.watch_state.instruction {
             Some(Instruction::Store(bytes)) => {
-                self.disassembler.update(vm.interpreter(), self.watch_state.index, bytes as u16);
+                self.disassembler
+                    .update(vm.interpreter(), self.watch_state.index, bytes as u16);
             }
             Some(Instruction::StoreDecimal(_)) => {
-                self.disassembler.update(vm.interpreter(), self.watch_state.index, 3);
+                self.disassembler
+                    .update(vm.interpreter(), self.watch_state.index, 3);
             }
-            _ => ()
+            _ => (),
         }
-        
+
         // update watch state
-        self.watch_state.update(interp, &self.watchpoints, &mut self.event_queue);
+        self.watch_state
+            .update(interp, &self.watchpoints, &mut self.event_queue);
 
         // update breakpoints
         if self.breakpoints.contains(&interp.pc) {
@@ -603,32 +684,36 @@ impl Debugger {
             for debug_event in self.event_queue.drain(..) {
                 match debug_event {
                     DebugEvent::BreakpointReached(addr) => {
-                        self.shell.print(format!("Breakpoint {:#05X} reached", addr));
+                        self.shell
+                            .print(format!("Breakpoint {:#05X} reached", addr));
                     }
-                    DebugEvent::WatchpointTrigger(watchpoint, old, new) => {
-                        match watchpoint {
-                            Watchpoint::Pointer(pointer) => {
-                                let identifier = match pointer {
-                                    MemoryPointer::Index => "i",
-                                    MemoryPointer::ProgramCounter => "pc"
-                                };
+                    DebugEvent::WatchpointTrigger(watchpoint, old, new) => match watchpoint {
+                        Watchpoint::Pointer(pointer) => {
+                            let identifier = match pointer {
+                                MemoryPointer::Index => "i",
+                                MemoryPointer::ProgramCounter => "pc",
+                            };
 
-                                self.shell.print(format!("Pointer {} changed", identifier));
-                                self.shell.print(format!("Old value = {:#05X}", old));
-                                self.shell.print(format!("New value = {:#05X}", new));
-                            }
-                            Watchpoint::Register(register) => {
-                                self.shell.print(format!("Register v{:x} changed", register));
-                                self.shell.print(format!("Old value = {:0>3} ({:#05X})", old, old));
-                                self.shell.print(format!("New value = {:0>3} ({:#05X})", new, new));
-                            }
-                            Watchpoint::Address(addr) => {
-                                self.shell.print(format!("Address {:#05X} changed", addr));
-                                self.shell.print(format!("Old value = {:0>3} ({:#04X})", old, old));
-                                self.shell.print(format!("New value = {:0>3} ({:#04X})", new, new));
-                            }
+                            self.shell.print(format!("Pointer {} changed", identifier));
+                            self.shell.print(format!("Old value = {:#05X}", old));
+                            self.shell.print(format!("New value = {:#05X}", new));
                         }
-                    }
+                        Watchpoint::Register(register) => {
+                            self.shell
+                                .print(format!("Register v{:x} changed", register));
+                            self.shell
+                                .print(format!("Old value = {:0>3} ({:#05X})", old, old));
+                            self.shell
+                                .print(format!("New value = {:0>3} ({:#05X})", new, new));
+                        }
+                        Watchpoint::Address(addr) => {
+                            self.shell.print(format!("Address {:#05X} changed", addr));
+                            self.shell
+                                .print(format!("Old value = {:0>3} ({:#04X})", old, old));
+                            self.shell
+                                .print(format!("New value = {:0>3} ({:#04X})", new, new));
+                        }
+                    },
                 }
             }
             return false;
@@ -719,21 +804,21 @@ impl<'a> DebuggerWidget<'a> {
     fn main_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect) {
         let mut rects = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints(
-                if self.dbg.shell_active {
-                    [
-                        Constraint::Length(area.width.saturating_sub(14) / 3),
-                        Constraint::Length(14),
-                        Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14) / 3)),
-                    ]
-                } else {
-                    [
-                        Constraint::Length(0),
-                        Constraint::Length(14),
-                        Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14))),
-                    ]
-                }
-            )
+            .constraints(if self.dbg.shell_active {
+                [
+                    Constraint::Length(area.width.saturating_sub(14) / 3),
+                    Constraint::Length(14),
+                    Constraint::Length(
+                        area.width.saturating_sub(area.width.saturating_sub(14) / 3),
+                    ),
+                ]
+            } else {
+                [
+                    Constraint::Length(0),
+                    Constraint::Length(14),
+                    Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14))),
+                ]
+            })
             .split(area);
 
         let (output_area, memory_area) = (rects[0], rects[2]);
@@ -777,7 +862,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         let (main_area, bottom_area, vm_area, _) = self.areas(area);
         let (memory_area, pointer_area, register_area, timer_area, stack_area, output_area) =
             self.main_areas(main_area);
-        
+
         let base_border = Borders::TOP.union(Borders::LEFT);
 
         // VM
@@ -788,7 +873,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             }
             .render(vm_area, buf);
         }
-        
+
         // Output
         let output_block = Block::default().title(" Output ").borders(Borders::TOP);
         OutputWidget::from(&self.dbg.shell).render(output_block.inner(output_area), buf);
@@ -810,7 +895,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             active: self.dbg.memory_active,
             memory: &self.dbg.memory,
             interpreter: self.vm.interpreter(),
-            disassembler: &self.dbg.disassembler
+            disassembler: &self.dbg.disassembler,
         }
         .render(memory_block.inner(memory_area), buf, &mut memory_state);
         memory_block.render(memory_area, buf);
@@ -856,9 +941,11 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
                 .map(|(i, addr)| Spans::from(format!("#{:0>2} {:#05X}", i, addr)))
                 .collect::<Vec<_>>(),
         )
-        .block(Block::default()
-        .title(" Stack ")
-        .borders(base_border.union(Borders::BOTTOM)))
+        .block(
+            Block::default()
+                .title(" Stack ")
+                .borders(base_border.union(Borders::BOTTOM)),
+        )
         .render(stack_area, buf);
 
         // Bottom (Command line or messages)
