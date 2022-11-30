@@ -281,6 +281,88 @@ impl Debugger {
                             self.shell.print(format!("Breakpoint at {:#05X} already exists", addr));
                         }
                     }
+                    "clear" => {
+                        let Some(arg) = cmd_args.next() else {
+                            self.shell.print("Please specify a watchpoint or breakpoint to clear");
+                            continue;
+                        };
+
+                        match arg {
+                            "b" | "break" | "breakpoint" => {
+                                let Some(arg) = cmd_args.next() else {
+                                    self.shell.print("Please specify a breakpoint (or all) to clear");
+                                    continue;
+                                };
+
+                                match arg {
+                                    "all" => {
+                                        self.breakpoints.clear();
+                                        self.shell.print("Cleared all breakpoints");
+                                    }
+                                    _ => {
+                                        if let Some(addr) = vm.interpreter().parse_addr(arg) {
+                                            if self.breakpoints.remove(&addr) {
+                                                self.shell.print(format!("Cleared breakpoint at {:#05X}", addr));
+                                            } else {
+                                                self.shell.print(format!("No breakpoint at {:#05X}", addr));
+                                            }
+                                        } else {
+                                            self.shell.print("Please specify a valid breakpoint (or all) to clear");
+                                        }
+                                    }
+                                }
+                            }
+                            "w" | "watch" | "watchpoint" => {
+                                let Some(arg) = cmd_args.next() else {
+                                    self.shell.print("Please specify a watchpoint (or all) to clear");
+                                    continue;
+                                };
+
+                                match arg {
+                                    "all" => {
+                                        self.watchpoints.clear();
+                                        self.watch_state.addresses.clear();
+                                        self.shell.print("Cleared all watchpoints");
+                                    }
+                                    _ => {
+                                        let watchpoint = match arg {
+                                            "pc" => Watchpoint::Pointer(MemoryPointer::ProgramCounter),
+                                            "i" | "index" => Watchpoint::Pointer(MemoryPointer::Index),
+                                            _ => {
+                                                if arg.starts_with('v') {
+                                                    if let Some(register) = u8::from_str_radix(&arg[1..], 16).ok().and_then(|x| if x < 16 { Some(x) } else { None }) {
+                                                        Watchpoint::Register(register)
+                                                    } else {
+                                                        self.shell.print("Please specify a valid register (v0..vf) to clear");
+                                                        continue;
+                                                    }
+                                                } else if let Some(addr) = vm.interpreter().parse_addr(arg) {
+                                                    Watchpoint::Address(addr)
+                                                } else {
+                                                    self.shell.print("Please specify a valid watchpoint (or all) to clear");
+                                                    continue;
+                                                }
+                                            }
+                                        };
+
+                                        if self.watchpoints.remove(&watchpoint) {
+                                            if let Watchpoint::Address(addr) = watchpoint {
+                                                self.watch_state.addresses.remove(&addr);
+                                                self.shell.print(format!("Cleared watchpoint {:#05X}", addr));
+                                            } else {
+                                                self.shell.print(format!("Cleared watchpoint {}", arg));
+                                            }
+                                        } else {
+                                            self.shell.print(format!("No watchpoint {}", arg));
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                self.shell.print("Please specify a breakpoint or watchpoint to clear");
+                            }
+                        }
+                    }
                     "i" | "info" => {
                         let Some(arg) = cmd_args.next() else {
                             self.shell.print_unrecognized_cmd();
@@ -305,7 +387,7 @@ impl Debugger {
                                     self.shell.print("Watchpoints:");
                                     for watchpoint in self.watchpoints.iter() {
                                         self.shell.print(format!("    - {}", match watchpoint {
-                                            Watchpoint::Register(register) => format!("v{:X}", register),
+                                            Watchpoint::Register(register) => format!("v{:x}", register),
                                             Watchpoint::Pointer(pointer) => pointer.identifier().to_string(),
                                             Watchpoint::Address(addr) => format!("{:#05X}", addr),
                                         }));
