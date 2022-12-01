@@ -247,7 +247,6 @@ impl Debugger {
                             vm.clear_event_queue();
                             vm.step(1.0 / vm_runner.config().instruction_frequency as f64)
                                 .unwrap();
-                            self.shell.output_pc(vm.interpreter());
                             if !self.step(vm) {
                                 break;
                             }
@@ -255,6 +254,8 @@ impl Debugger {
 
                         if amt_stepped > 1 {
                             self.shell.print(format!("Stepped {} times", amt_stepped));
+                        } else if amt_stepped == 1 {
+                            self.shell.output_pc(vm.interpreter());
                         }
                     }
                     "w" | "watch" | "watchpoint" => {
