@@ -475,7 +475,7 @@ impl Display for Disassembler {
             }
 
             if show_bin_comment {
-                write!(f, "{:08b} 2X GRAHPHIC ", byte)?;
+                write!(f, "{:#04X} 2X GRAPHIC ", byte)?;
                 write_byte_str(f, byte, 2)?;
             } else if show_asm_comment {
                 f.write_str(&asm_comment)?;
@@ -515,116 +515,116 @@ pub fn write_inst_asm(
 ) -> std::fmt::Result {
     match inst {
         Instruction::ClearScreen => {
-            write!(f, "clear")?;
+            write!(f, "cls")?;
             write!(c, "clear display")
         }
 
         // side effect of discontinuity instructions having no comments is it highlights a clear break in execution
-        Instruction::Jump(addr) => write!(f, "jump  {:#05X}", addr),
-        Instruction::JumpWithOffset(addr, _) => write!(f, "jumpo {:#05X}", addr),
-        Instruction::CallSubroutine(addr) => write!(f, "call  {:#05X}", addr),
+        Instruction::Jump(addr) => write!(f, "jp   {:#05X}", addr),
+        Instruction::JumpWithOffset(addr, _) => write!(f, "jp   v0 {:#05X}", addr),
+        Instruction::CallSubroutine(addr) => write!(f, "call {:#05X}", addr),
         Instruction::SubroutineReturn => write!(f, "ret"),
 
         Instruction::SkipIfEqualsConstant(vx, value) => {
-            write!(f, "seq   v{:x} {}", vx, value)?;
+            write!(f, "se   v{:x} {}", vx, value)?;
             write!(c, "skip next if v{:x} == {}", vx, value)
         }
         Instruction::SkipIfNotEqualsConstant(vx, value) => {
-            write!(f, "sne   v{:x} {}", vx, value)?;
+            write!(f, "sne  v{:x} {}", vx, value)?;
             write!(c, "skip next if v{:x} != {}", vx, value)
         }
         Instruction::SkipIfEquals(vx, vy) => {
-            write!(f, "seq   v{:x} v{:x}", vx, vy)?;
+            write!(f, "se   v{:x} v{:x}", vx, vy)?;
             write!(c, "skip next if v{:x} == v{:x}", vx, vy)
         }
         Instruction::SkipIfNotEquals(vx, vy) => {
-            write!(f, "sne   v{:x} v{:x}", vx, vy)?;
+            write!(f, "sne  v{:x} v{:x}", vx, vy)?;
             write!(c, "skip next if v{:x} != v{:x}", vx, vy)
         }
         Instruction::SkipIfKeyDown(vx) => {
-            write!(f, "skd   v{:x}", vx)?;
+            write!(f, "skp  v{:x}", vx)?;
             write!(c, "skip next if v{:x} key is down", vx)
         }
         Instruction::SkipIfKeyNotDown(vx) => {
-            write!(f, "sku   v{:x}", vx)?;
+            write!(f, "sknp v{:x}", vx)?;
             write!(c, "skip next if v{:x} key is up", vx)
         }
         Instruction::GetKey(vx) => {
-            write!(f, "lnkp  v{:x}", vx)?;
-            write!(c, "v{:x} = load next key press", vx)
+            write!(f, "ld   v{:x} k", vx)?;
+            write!(c, "v{:x} = next key press", vx)
         }
         Instruction::SetConstant(vx, value) => {
-            write!(f, "mov   v{:x} {}", vx, value)?;
+            write!(f, "ld   v{:x} {}", vx, value)?;
             write!(c, "v{:x} = {}", vx, value)
         }
         Instruction::AddConstant(vx, value) => {
-            write!(f, "add   v{:x} {}", vx, value)?;
+            write!(f, "add  v{:x} {}", vx, value)?;
             write!(c, "v{:x} += {}", vx, value)
         }
         Instruction::Set(vx, vy) => {
-            write!(f, "mov   v{:x} v{:x}", vx, vy)?;
+            write!(f, "ld   v{:x} v{:x}", vx, vy)?;
             write!(c, "v{:x} = v{:x}", vx, vy)
         }
         Instruction::Or(vx, vy) => {
-            write!(f, "or    v{:x} v{:x}", vx, vy)?;
+            write!(f, "or   v{:x} v{:x}", vx, vy)?;
             write!(c, "v{:x} |= v{:x}", vx, vy)
         }
         Instruction::And(vx, vy) => {
-            write!(f, "and   v{:x} v{:x}", vx, vy)?;
+            write!(f, "and  v{:x} v{:x}", vx, vy)?;
             write!(c, "v{:x} &= v{:x}", vx, vy)
         }
         Instruction::Xor(vx, vy) => {
-            write!(f, "xor   v{:x} v{:x}", vx, vy)?;
+            write!(f, "xor  v{:x} v{:x}", vx, vy)?;
             write!(c, "v{:x} ^= v{:x}", vx, vy)
         }
         Instruction::Add(vx, vy) => {
-            write!(f, "add   v{:x} v{:x}", vx, vy)?;
+            write!(f, "add  v{:x} v{:x}", vx, vy)?;
             write!(c, "v{:x} += v{:x}", vx, vy)
         }
         Instruction::Sub(vx, vy, vx_minus_vy) => {
             if *vx_minus_vy {
-                write!(f, "sub   v{:x} v{:x}", vx, vy)?;
+                write!(f, "sub  v{:x} v{:x}", vx, vy)?;
                 write!(c, "v{:x} -= v{:x}", vx, vy)
             } else {
-                write!(f, "subn  v{:x} v{:x}", vx, vy)?;
+                write!(f, "subn v{:x} v{:x}", vx, vy)?;
                 write!(c, "v{:x} = v{:x} - v{:x}", vx, vy, vx)
             }
         }
         Instruction::Shift(vx, vy, right) => {
             if *right {
-                write!(f, "srl   v{:x} v{:x}", vx, vy)?;
+                write!(f, "shr  v{:x} v{:x}", vx, vy)?;
                 write!(c, "v{:x} = v{:x} >> 1", vx, vy)
             } else {
-                write!(f, "sll   v{:x} v{:x}", vx, vy)?;
+                write!(f, "shl  v{:x} v{:x}", vx, vy)?;
                 write!(c, "v{:x} = v{:x} << 1", vx, vy)
             }
         }
         Instruction::GetDelayTimer(vx) => {
-            write!(f, "ldly  v{:x}", vx)?;
+            write!(f, "ld   v{:x} dt", vx)?;
             write!(c, "v{:x} = delay timer", vx)
         }
         Instruction::SetDelayTimer(vx) => {
-            write!(f, "sdly  v{:x}", vx)?;
+            write!(f, "ld   dt v{:x}", vx)?;
             write!(c, "delay timer = v{:x}", vx)
         }
         Instruction::SetSoundTimer(vx) => {
-            write!(f, "sound v{:x}", vx)?;
+            write!(f, "ld   st v{:x}", vx)?;
             write!(c, "sound timer = v{:x}", vx)
         }
         Instruction::SetIndex(value) => {
-            write!(f, "iset  {:#05X}", value)?;
+            write!(f, "ld   i {:#05X}", value)?;
             write!(c, "index = {:#05X}", value)
         }
         Instruction::SetIndexToHexChar(vx) => {
-            write!(f, "ichr  v{:x}", vx)?;
+            write!(f, "ld   f v{:x}", vx)?;
             write!(c, "index = sprite of hex char v{:x}", vx)
         }
         Instruction::AddToIndex(value) => {
-            write!(f, "iadd  {}", value)?;
+            write!(f, "add  i {}", value)?;
             write!(c, "index += {} ({:#05X})", value, value)
         }
         Instruction::Load(vx) => {
-            write!(f, "load  {}", vx + 1)?;
+            write!(f, "ld   v{:x} i", vx)?;
             write!(
                 c,
                 "load {} byte{} into v(0..={})",
@@ -634,7 +634,7 @@ pub fn write_inst_asm(
             )
         }
         Instruction::Store(vx) => {
-            write!(f, "save  {}", vx + 1)?;
+            write!(f, "ld   i v{:x}", vx)?;
             write!(
                 c,
                 "save {} byte{} from v(0..={})",
@@ -644,15 +644,15 @@ pub fn write_inst_asm(
             )
         }
         Instruction::StoreDecimal(vx) => {
-            write!(f, "sbcd  v{:x}", vx)?;
+            write!(f, "ld   b v{:x}", vx)?;
             write!(c, "save binary-coded decimal v{:x}", vx)
         }
         Instruction::GenerateRandom(vx, bound) => {
-            write!(f, "rand  v{:x} {}", vx, bound)?;
+            write!(f, "rnd  v{:x} {}", vx, bound)?;
             write!(c, "v{:x} = rand in range [0, {}]", vx, bound)
         }
         Instruction::Display(vx, vy, height) => {
-            write!(f, "disp  v{:x} v{:x} {}", vx, vy, height)?;
+            write!(f, "drw  v{:x} v{:x} {}", vx, vy, height)?;
             write!(
                 c,
                 "draw {} byte{} at pos (v{:x}, v{:x})",
