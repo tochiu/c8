@@ -315,7 +315,7 @@ impl<'a> MemoryWidget<'_> {
         let show_comments = show_addr_bin || show_addr_asm_desc;
 
         if show_addr_bin {
-            write!(addr_bin, "{:#04X} ", byte).ok();
+            addr_bin.push(' ');
             write_byte_str(addr_bin, byte, 1).ok();
         }
 

@@ -395,7 +395,6 @@ impl Disassembler {
     ) -> std::fmt::Result {
         let index = addr as usize;
         let params = self.instruction_params[index];
-        let instruction = self.instructions[index];
         let tag = self.tags[index];
 
         // address
@@ -407,9 +406,11 @@ impl Disassembler {
         // instruction if parsable
         if tag >= InstructionTag::Parsable {
             write!(i, " {:#06X}", params.bits)?;
+        } else {
+            write!(i, " {:#04X}", self.memory[index])?;
         }
 
-        if let Some(instruction) = instruction.as_ref() {
+        if let Some(instruction) = self.instructions[index].as_ref() {
             write_inst_asm(instruction, a, c)?;
         }
 
@@ -475,7 +476,7 @@ impl Display for Disassembler {
             }
 
             if show_bin_comment {
-                write!(f, "{:#04X} 2X GRAPHIC ", byte)?;
+                write!(f, "2X GRAPHIC ")?;
                 write_byte_str(f, byte, 2)?;
             } else if show_asm_comment {
                 f.write_str(&asm_comment)?;
