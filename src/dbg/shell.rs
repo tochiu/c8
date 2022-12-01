@@ -6,7 +6,7 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent};
 use tui::{buffer::Buffer, layout::Rect, style::Style, widgets::{StatefulWidget, Widget, Paragraph}, text::Spans};
 
-use std::fmt::Write;
+use std::{fmt::Write, cell::Cell};
 
 #[derive(Default)]
 pub(super) struct Shell {
@@ -14,6 +14,7 @@ pub(super) struct Shell {
 
     input: String,
     output: Vec<String>,
+    output_line_buffer: Cell<String>,
     cursor_position: usize,
     cmd_queue: Vec<String>,
     history: Vec<String>,
@@ -140,39 +141,86 @@ impl Shell {
 
 pub(super) struct OutputWidget<'a> {
     output: &'a [String],
+    output_draw_buffer: &'a Cell<String>,
 }
 
 impl<'a> From<&'a Shell> for OutputWidget<'a> {
     fn from(shell: &'a Shell) -> Self {
-        OutputWidget { output: &shell.output }
+        OutputWidget { output: &shell.output, output_draw_buffer: &shell.output_line_buffer }
     }
 }
 
-impl<'a> Widget for OutputWidget<'a> {
+impl<'a> OutputWidget<'_> {
+    fn flush_line_buf(line_buf: &mut String, lines: &mut Vec<Spans>) {
+        if !line_buf.is_empty() {
+            lines.push(Spans::from(line_buf.clone()));
+            line_buf.clear();
+        }
+    }
+}
+
+impl<'a> Widget for OutputWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.area() == 0 {
             return
         }
+
+        let mut lines: Vec<Spans> = Vec::with_capacity(area.height as usize + 4);
+        let mut line_buf = self.output_draw_buffer.take();
+        let max_line_width = area.width as usize;
         
-        let mut lines = self
-            .output
-            .iter()
-            .map(|out| out.as_bytes().chunks(area.width as usize))
-            .flatten()
-            .rev()
-            .take(area.height as usize)
-            .map(|bytes| Spans::from(std::str::from_utf8(bytes).unwrap_or("**unparsable**")))
-            .collect::<Vec<_>>();
-        let line_count = lines.len() as u16;
+        for mut entry in self.output.iter().rev().map(String::as_str) {
+            let start = lines.len();
+            while let Some(whitespace_len) = entry.find(|c: char| !c.is_whitespace()) {
+                let rest = &entry[whitespace_len..];
+
+                let token_len = rest.find(char::is_whitespace).unwrap_or(entry.len() - whitespace_len);
+                let token = &rest[..token_len];
+
+                if line_buf.len() + whitespace_len + token_len > max_line_width {
+                    if token_len > max_line_width {
+                        for token_chunk in token.as_bytes().chunks(max_line_width) {
+                            OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
+                            line_buf.push_str(std::str::from_utf8(token_chunk).unwrap_or_default());
+                        }
+                    } else {
+                        OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
+                        line_buf.push_str(token);
+                    }
+                } else {
+                    line_buf.push_str(&entry[..whitespace_len + token_len]);
+                }
+
+                if whitespace_len + token_len < entry.len() {
+                    entry = &entry[whitespace_len + token_len..];
+                } else {
+                    break;
+                }
+            }
+
+            OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
+
+            if lines.len() > start {
+                lines[start..].reverse();
+            }
+
+            if lines.len() >= area.height as usize {
+                if lines.len() > area.height as usize {
+                    lines.truncate(area.height as usize);
+                }
+                break;
+            }
+        }
 
         lines.reverse();
+        let line_count = lines.len();
 
         Paragraph::new(lines).render(
             Rect::new(
                 area.x,
-                area.bottom().saturating_sub(line_count),
+                area.bottom().saturating_sub(line_count as u16),
                 area.width,
-                line_count,
+                line_count as u16
             ),
             buf,
         );
