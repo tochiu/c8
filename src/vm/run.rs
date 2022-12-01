@@ -58,6 +58,10 @@ impl VM {
         &self.keyboard
     }
 
+    pub fn keyboard_mut(&mut self) -> &mut Keyboard {
+        &mut self.keyboard
+    }
+
     pub fn sound_timer(&self) -> f64 {
         self.sound_timer
     }

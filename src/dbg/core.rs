@@ -5,8 +5,8 @@ use crate::{
     vm::{
         disp::{Display, DisplayWidget, DISPLAY_WINDOW_HEIGHT, DISPLAY_WINDOW_WIDTH},
         interp::{Instruction, Interpreter},
-        prog::PROGRAM_MEMORY_SIZE,
-        run::{VMRunner, VM},
+        prog::{PROGRAM_MEMORY_SIZE, ProgramKind},
+        run::{VMRunner, VM}, input::{KEY_ORDERING, Key},
     },
 };
 
@@ -15,7 +15,7 @@ use tui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::Spans,
+    text::{Spans, Span},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 
@@ -137,6 +137,8 @@ pub struct Debugger {
     memory_active: bool,
     memory_widget_state: Cell<MemoryWidgetState>,
 
+    keyboard_shows_qwerty: bool,
+
     shell: Shell,
     shell_active: bool,
 
@@ -157,6 +159,8 @@ impl Debugger {
             memory: Default::default(),
             memory_active: false,
             memory_widget_state: Default::default(),
+
+            keyboard_shows_qwerty: true,
 
             shell: Default::default(),
             shell_active: false,
@@ -229,6 +233,7 @@ impl Debugger {
                         log::info!("c8vm resume!");
                         self.deactivate();
                         vm.clear_event_queue();
+                        vm.keyboard_mut().clear();
                         vm_runner.resume().unwrap();
                         break;
                     }
@@ -256,6 +261,21 @@ impl Debugger {
                             self.shell.print(format!("Stepped {} times", amt_stepped));
                         } else if amt_stepped == 1 {
                             self.shell.output_pc(vm.interpreter());
+                        }
+                    }
+                    "kd" | "ku" | "keydown" | "keyup" => {
+                        let Some(key) = cmd_args.next().and_then(|arg| Key::try_from(arg).ok()) else {
+                            self.shell.print("Please specify a valid key");
+                            continue;
+                        };
+                        
+                        if let "kd" | "keydown" = cmd {
+                            vm.keyboard_mut().handle_focus();
+                            vm.keyboard_mut().handle_key_down(key);
+                            self.shell.print(format!("Key \"{:X}\" ({}) down", key.to_code(), key.to_str()));
+                        } else {
+                            vm.keyboard_mut().handle_key_up(key);
+                            self.shell.print(format!("Key \"{:X}\" ({}) up", key.to_code(), key.to_str()));
                         }
                     }
                     "w" | "watch" | "watchpoint" => {
@@ -316,6 +336,12 @@ impl Debugger {
                                 .print(format!("Breakpoint at {:#05X} already exists", addr));
                         }
                     }
+                    "switch" => {
+                        let Some("k" | "keys" | "keyboard") = cmd_args.next() else {
+                            self.shell.print("Please specify a valid widget to switch to");
+                            continue;
+                        };
+                    }
                     "clear" => {
                         let Some(arg) = cmd_args.next() else {
                             self.shell.print("Please specify a watchpoint or breakpoint to clear");
@@ -323,6 +349,10 @@ impl Debugger {
                         };
 
                         match arg {
+                            "k" | "keys" | "keyboard" => {
+                                vm.keyboard_mut().clear();
+                                self.shell.print("Cleared keyboard");
+                            }
                             "b" | "break" | "breakpoint" => {
                                 let Some(arg) = cmd_args.next() else {
                                     self.shell.print("Please specify a breakpoint (or all) to clear");
@@ -804,7 +834,7 @@ impl<'a> DebuggerWidget<'a> {
         (main, bottom, vm, logger)
     }
 
-    fn main_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect) {
+    fn main_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
         let mut rects = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(if self.dbg.shell_active {
@@ -830,6 +860,7 @@ impl<'a> DebuggerWidget<'a> {
         rects = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(10),
                 Constraint::Length(3),
                 Constraint::Length(17),
                 Constraint::Length(4),
@@ -837,11 +868,12 @@ impl<'a> DebuggerWidget<'a> {
             ])
             .split(area);
 
-        let (pointer_area, register_area, timer_area, stack_area) =
-            (rects[0], rects[1], rects[2], rects[3]);
+        let (keyboard_area, pointer_area, register_area, timer_area, stack_area) =
+            (rects[0], rects[1], rects[2], rects[3], rects[4]);
 
         (
             memory_area,
+            keyboard_area,
             pointer_area,
             register_area,
             timer_area,
@@ -863,7 +895,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         }
 
         let (main_area, bottom_area, vm_area, _) = self.areas(area);
-        let (memory_area, pointer_area, register_area, timer_area, stack_area, output_area) =
+        let (memory_area, keyboard_area, pointer_area, register_area, timer_area, stack_area, output_area) =
             self.main_areas(main_area);
 
         let base_border = Borders::TOP.union(Borders::LEFT);
@@ -907,6 +939,40 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         self.dbg.memory_widget_state.set(memory_state);
 
         let interp = self.vm.interpreter();
+
+        //Keyboard
+        let (key_down_state, key_just_down, key_just_up) = self.vm.keyboard().state();
+        let just_key = match self.vm.interpreter().program.kind {
+            ProgramKind::COSMACVIP => key_just_up,
+            _ => key_just_down,
+        };
+
+        let mut keyboard_span_iter = KEY_ORDERING
+            .iter()
+            .map(|key| {
+                Span::styled(format!(" {} ", key.to_str()),
+                    if key_down_state >> key.to_code() as u16 & 1 == 1 {
+                        Style::default().fg(Color::Black).bg(if just_key == Some(key.to_code()) { Color::Yellow } else { Color::White })
+                    } else {
+                        Style::default().fg(if just_key == Some(key.to_code()) { Color::Yellow } else { Color::Reset })
+                    }
+                )
+            });
+
+        let mut keyboard_row_spans: Vec<Spans> = Vec::with_capacity(4);
+        let mut keyboard_row: Vec<Span> = Vec::with_capacity(5);
+        keyboard_row.push(Span::raw(" "));
+        while let Some(span) = keyboard_span_iter.next() {
+            keyboard_row.push(span);
+            if keyboard_row.len() == 5 {
+                keyboard_row_spans.push(Spans::from(""));
+                keyboard_row_spans.push(Spans::from(keyboard_row.clone()));
+                keyboard_row.clear();
+                keyboard_row.push(Span::raw(" "));
+            }
+        }
+
+        Paragraph::new(keyboard_row_spans).block(Block::default().title(" Keyboard ").borders(base_border)).render(keyboard_area, buf);
 
         // Pointers
         Paragraph::new(vec![

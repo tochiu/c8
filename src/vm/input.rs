@@ -23,9 +23,28 @@ pub enum Key {
     V,
 }
 
+pub const KEY_ORDERING: [Key; 16] = [
+    Key::One,
+    Key::Two,
+    Key::Three,
+    Key::Four,
+    Key::Q,
+    Key::W,
+    Key::E,
+    Key::R,
+    Key::A,
+    Key::S,
+    Key::D,
+    Key::F,
+    Key::Z,
+    Key::X,
+    Key::C,
+    Key::V,
+];
+
 impl Key {
     // Key enum to byte key code specified by CHIP-8 interpreters
-    fn to_code(self) -> u8 {
+    pub fn to_code(self) -> u8 {
         match self {
             Key::One => 0x1,
             Key::Two => 0x2,
@@ -43,6 +62,59 @@ impl Key {
             Key::X => 0x0,
             Key::C => 0xB,
             Key::V => 0xF,
+        }
+    }
+
+    pub fn to_str(self) -> &'static str {
+        match self {
+            Key::One => "1",
+            Key::Two => "2",
+            Key::Three => "3",
+            Key::Four => "4",
+            Key::Q => "Q",
+            Key::W => "W",
+            Key::E => "E",
+            Key::R => "R",
+            Key::A => "A",
+            Key::S => "S",
+            Key::D => "D",
+            Key::F => "F",
+            Key::Z => "Z",
+            Key::X => "X",
+            Key::C => "C",
+            Key::V => "V",
+        }
+    }
+}
+
+impl From<Key> for &'static str {
+    fn from(key: Key) -> Self {
+        key.to_str()
+    }
+}
+
+impl TryFrom<&str> for Key {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "1" => Ok(Key::One),
+            "2" => Ok(Key::Two),
+            "3" => Ok(Key::Three),
+            "4" => Ok(Key::Four),
+            "Q" | "q" => Ok(Key::Q),
+            "W" | "w" => Ok(Key::W),
+            "E" | "e" => Ok(Key::E),
+            "R" | "r" => Ok(Key::R),
+            "A" | "a" => Ok(Key::A),
+            "S" | "s" => Ok(Key::S),
+            "D" | "d" => Ok(Key::D),
+            "F" | "f" => Ok(Key::F),
+            "Z" | "z" => Ok(Key::Z),
+            "X" | "x" => Ok(Key::X),
+            "C" | "c" => Ok(Key::C),
+            "V" | "v" => Ok(Key::V),
+            _ => Err(format!("Invalid key: {}", s)),
         }
     }
 }
@@ -143,6 +215,15 @@ pub struct Keyboard {
 }
 
 impl Keyboard {
+
+    pub fn clear(&mut self) {
+        *self = Keyboard::default();
+    }
+    
+    pub fn state(&self) -> (u16, Option<u8>, Option<u8>) {
+        (self.focused_down_keys, self.key_down_change, self.key_up_change)
+    }
+
     // on terminal focus
     pub fn handle_focus(&mut self) {
         if !self.focused {
