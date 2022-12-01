@@ -529,6 +529,8 @@ impl Debugger {
                         match (MemoryWidget {
                             active: self.memory_active,
                             memory: &self.memory,
+                            watchpoints: &self.watchpoints,
+                            breakpoints: &self.breakpoints,
                             interpreter: vm.interpreter(),
                             disassembler: &self.disassembler,
                         }
@@ -807,17 +809,17 @@ impl<'a> DebuggerWidget<'a> {
             .direction(Direction::Horizontal)
             .constraints(if self.dbg.shell_active {
                 [
-                    Constraint::Length(area.width.saturating_sub(14) / 3),
-                    Constraint::Length(14),
+                    Constraint::Length(area.width.saturating_sub(15) / 3),
+                    Constraint::Length(15),
                     Constraint::Length(
-                        area.width.saturating_sub(area.width.saturating_sub(14) / 3),
+                        area.width.saturating_sub(area.width.saturating_sub(15) / 3),
                     ),
                 ]
             } else {
                 [
                     Constraint::Length(0),
-                    Constraint::Length(14),
-                    Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(14))),
+                    Constraint::Length(15),
+                    Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(15))),
                 ]
             })
             .split(area);
@@ -895,6 +897,8 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         MemoryWidget {
             active: self.dbg.memory_active,
             memory: &self.dbg.memory,
+            watchpoints: &self.dbg.watchpoints,
+            breakpoints: &self.dbg.breakpoints,
             interpreter: self.vm.interpreter(),
             disassembler: &self.dbg.disassembler,
         }
@@ -906,8 +910,32 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         // Pointers
         Paragraph::new(vec![
-            Spans::from(format!("pc {:#05X}", interp.pc)),
-            Spans::from(format!("i  {:#05X}", interp.index)),
+            Spans::from(format!(
+                "{}pc {:#05X}",
+                if self
+                    .dbg
+                    .watchpoints
+                    .contains(&Watchpoint::Pointer(MemoryPointer::ProgramCounter))
+                {
+                    "*"
+                } else {
+                    "-"
+                },
+                interp.pc
+            )),
+            Spans::from(format!(
+                "{}i  {:#05X}",
+                if self
+                    .dbg
+                    .watchpoints
+                    .contains(&Watchpoint::Pointer(MemoryPointer::Index))
+                {
+                    "*"
+                } else {
+                    "-"
+                },
+                interp.index
+            )),
         ])
         .block(Block::default().title(" Pointers ").borders(base_border))
         .render(pointer_area, buf);
@@ -918,7 +946,23 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
                 .registers
                 .iter()
                 .enumerate()
-                .map(|(i, val)| Spans::from(format!("v{:x} {:0>3} ({:#04X})", i, val, val)))
+                .map(|(i, val)| {
+                    Spans::from(format!(
+                        "{}v{:x} {:0>3} ({:#04X})",
+                        if self
+                            .dbg
+                            .watchpoints
+                            .contains(&Watchpoint::Register(i as u8))
+                        {
+                            "*"
+                        } else {
+                            "-"
+                        },
+                        i,
+                        val,
+                        val
+                    ))
+                })
                 .collect::<Vec<_>>(),
         )
         .block(Block::default().title(" Registers ").borders(base_border))
@@ -926,9 +970,9 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         // Timers
         Paragraph::new(vec![
-            Spans::from(format!("sound {:0>7.3}", self.vm.sound_timer())),
-            Spans::from(format!("delay {:0>7.3}", self.vm.delay_timer())),
-            Spans::from(format!("  |-> {:0>3}", interp.input.delay_timer)),
+            Spans::from(format!("-sound {:0>7.3}", self.vm.sound_timer())),
+            Spans::from(format!("-delay {:0>7.3}", self.vm.delay_timer())),
+            Spans::from(format!("   |-> {:0>3}", interp.input.delay_timer)),
         ])
         .block(Block::default().title(" Timers ").borders(base_border))
         .render(timer_area, buf);

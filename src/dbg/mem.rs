@@ -15,7 +15,9 @@ use tui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
-use std::{fmt::Write as FmtWrite, io::Write as IOWrite, fs::File, path::Path};
+use std::{fmt::Write as FmtWrite, io::Write as IOWrite, fs::File, path::Path, collections::HashSet};
+
+use super::core::Watchpoint;
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub(super) enum MemoryPointer {
@@ -169,6 +171,8 @@ impl MemoryWidgetState {
 pub(super) struct MemoryWidget<'a> {
     pub active: bool,
     pub memory: &'a Memory,
+    pub watchpoints: &'a HashSet<Watchpoint>,
+    pub breakpoints: &'a HashSet<u16>,
     pub interpreter: &'a Interpreter,
     pub disassembler: &'a Disassembler,
 }
@@ -239,11 +243,12 @@ impl<'a> MemoryWidget<'_> {
             let spans = self.addr_span(
                 addr,
                 0,
+                false,
                 &mut addr_header,
                 &mut addr_opcode,
                 &mut addr_bin,
                 &mut addr_asm,
-                &mut addr_asm_desc,
+                &mut addr_asm_desc
             );
             for span in spans.0 {
                 write!(file, "{}", span.content)?;
@@ -257,6 +262,7 @@ impl<'a> MemoryWidget<'_> {
         &self,
         addr: u16,
         addr_line_width: u16,
+        addr_is_selected: bool,
         addr_header: &mut String,
         addr_opcode: &mut String,
         addr_bin: &mut String,
@@ -272,6 +278,21 @@ impl<'a> MemoryWidget<'_> {
         addr_bin.clear();
         addr_asm.clear();
         addr_asm_desc.clear();
+
+        let is_breakpoint = self.breakpoints.contains(&addr);
+        let is_watchpoint = self.watchpoints.contains(&Watchpoint::Address(addr));
+
+        addr_header.push(if is_breakpoint {
+            '@'
+        } else {
+            ' '
+        });
+
+        addr_header.push(if is_watchpoint {
+            '*'
+        } else {
+            ' '
+        });
 
         self.disassembler
             .write_addr_disass(addr, addr_header, addr_opcode, addr_asm, addr_asm_desc)
@@ -317,6 +338,16 @@ impl<'a> MemoryWidget<'_> {
             0
         };
 
+        let highlight = if is_breakpoint {
+            Color::Red
+        } else if self.watchpoints.contains(&Watchpoint::Address(addr)) {
+            Color::Blue
+        } else if addr_is_selected || addr == self.interpreter.pc || addr == self.interpreter.index {
+            Color::Black
+        } else {
+            Color::Reset
+        };
+
         let mut spans: Vec<Span> = Vec::with_capacity(if show_comments { 2 } else { 1 });
 
         let mut content = String::with_capacity(content_len_padded);
@@ -332,7 +363,7 @@ impl<'a> MemoryWidget<'_> {
             }
         }
 
-        spans.push(Span::raw(content));
+        spans.push(Span::styled(content, Style::default().fg(highlight)));
 
         if show_comments {
             let mut comment = String::with_capacity(comment_len);
@@ -349,18 +380,25 @@ impl<'a> MemoryWidget<'_> {
             spans.push(Span::styled(comment, MemoryWidget::COMMENT_STYLE));
         }
 
-        if addr == self.interpreter.pc {
+        if addr_is_selected {
             MemoryWidget::highlight_line(
                 &mut spans,
-                Color::LightMagenta,
-                Color::Black,
+                Color::White,
+                highlight,
+                addr_line_width,
+            );
+        } else if addr == self.interpreter.pc {
+            MemoryWidget::highlight_line(
+                &mut spans,
+                Color::LightGreen,
+                highlight,
                 addr_line_width,
             );
         } else if addr == self.interpreter.index {
             MemoryWidget::highlight_line(
                 &mut spans,
                 Color::LightYellow,
-                Color::Black,
+                highlight,
                 addr_line_width,
             );
         }
@@ -438,24 +476,16 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
 
         while lines.len() < lines_ahead && addr <= addr_max {
             if self.is_addr_drawable(addr) {
-                let mut line = self.addr_span(
+                lines.push(self.addr_span(
                     addr,
                     area.width,
+                    self.active && lines.len() == 0,
                     &mut addr_header,
                     &mut addr_opcode,
                     &mut addr_bin,
                     &mut addr_asm,
                     &mut addr_asm_desc,
-                );
-                if lines.len() == 0 && self.active {
-                    MemoryWidget::highlight_line(
-                        &mut line.0,
-                        Color::White,
-                        Color::Black,
-                        area.width,
-                    );
-                }
-                lines.push(line);
+                ));
             }
             addr += 1;
         }
@@ -471,6 +501,7 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
                     self.addr_span(
                         addr,
                         area.width,
+                        self.active && lines.len() == 0,
                         &mut addr_header,
                         &mut addr_opcode,
                         &mut addr_bin,
@@ -489,6 +520,7 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
                 lines.push(self.addr_span(
                     addr,
                     area.width,
+                    self.active && lines.len() == 0,
                     &mut addr_header,
                     &mut addr_opcode,
                     &mut addr_bin,
