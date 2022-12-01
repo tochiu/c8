@@ -15,7 +15,7 @@ use tui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
-use std::{fmt::Write as FmtWrite, io::Write as IOWrite, fs::File, path::Path, collections::HashSet};
+use std::{io::Write, fs::File, path::Path, collections::HashSet};
 
 use super::core::Watchpoint;
 
@@ -135,6 +135,18 @@ impl Memory {
             KeyCode::Up | KeyCode::Char('w') | KeyCode::Char('W') => {
                 widget_state.offset = widget_state.offset.saturating_sub(1);
             }
+            KeyCode::PageDown => {
+                widget_state.offset_scale = widget_state.offset_scale.saturating_sub(1);
+            }
+            KeyCode::PageUp => {
+                widget_state.offset_scale = widget_state.offset_scale.saturating_add(1);
+            }
+            KeyCode::Home => {
+                widget_state.set_focus(0);
+            }
+            KeyCode::End => {
+                widget_state.set_focus(u16::MAX);
+            }
             _ => return false,
         }
         true
@@ -143,6 +155,7 @@ impl Memory {
 
 pub(super) struct MemoryWidgetState {
     offset: i32,
+    offset_scale: i32,
     focus: u16,
     follow: bool,
 }
@@ -151,6 +164,7 @@ impl Default for MemoryWidgetState {
     fn default() -> Self {
         MemoryWidgetState {
             offset: 0,
+            offset_scale: 0,
             focus: 0,
             follow: true,
         }
@@ -160,6 +174,7 @@ impl Default for MemoryWidgetState {
 impl MemoryWidgetState {
     pub(super) fn set_focus(&mut self, addr: u16) {
         self.offset = 0;
+        self.offset_scale = 0;
         self.focus = addr;
     }
 
@@ -413,14 +428,17 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let addr_max = self.interpreter.memory.len() as u16 - 1;
 
-        let is_offset_pos = state.offset > 0;
-        let mut offset_abs = if self.active {
-            state.offset.abs() as u32
-        } else {
-            0
+        let (is_offset_pos, mut offset_abs) = {
+            let offset = state.offset.saturating_sub(state.offset_scale*area.height as i32);
+            (offset > 0, if self.active {
+                offset.abs() as u32
+            } else {
+                0
+            })
         };
 
         state.offset = 0;
+        state.offset_scale = 0;
 
         if !self.active && state.follow {
             if let Some(pointer) = self.memory.follow {
