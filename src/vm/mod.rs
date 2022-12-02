@@ -1,4 +1,4 @@
-pub mod run;
+pub mod core;
 pub mod prog;
 pub mod disp;
 pub mod input;

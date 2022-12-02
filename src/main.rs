@@ -1,24 +1,24 @@
 extern crate log;
 
 mod vm;
-mod util;
+mod run;
 mod dbg;
 mod disass;
 mod render;
 mod config;
 
 use {
+    run::{Runner, RunResult},
     vm::{
         input::Key,
         prog::{Program, ProgramKind},
-        run::{VMRunner, VMEvent, VMRunResult}
+        core::VMEvent
     },
-    util::{Interval, IntervalAccuracy},
     disass::Disassembler,
-    render::Renderer
+    render::spawn_render_thread
 };
 
-use config::C8VMConfig;
+use config::C8Config;
 use device_query::DeviceQuery;
 use crossterm::{event::{
     poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers, KeyEventKind,
@@ -26,15 +26,12 @@ use crossterm::{event::{
 use log::LevelFilter;
 
 use std::{
-    io,
-    sync::mpsc::{channel, TryRecvError},
     thread,
     time::Duration, ops::DerefMut, collections::HashSet,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // arg parsing
-
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
 
     // parse arguments for a log level
@@ -111,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let program_name = args.first().ok_or("expected program name")?;
     let program = Program::read(format!("roms/{}.ch8", program_name), program_kind)?;
 
-    let config = C8VMConfig {
+    let config = C8Config {
         title: format!(" {} Virtual Machine ({}) ", program_kind, program_name),
         logging: logger_level != LevelFilter::Off,
         debugging,
@@ -135,53 +132,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // virtual machine runner
-        let mut vm_runner = VMRunner::spawn(config.clone(), program);
+        let mut runner = Runner::spawn(config.clone(), program);
 
-        let (render_sender, render_thread) = { // render thread
-
-            let mut renderer = Renderer::setup(vm_runner.ware(), config.clone())?;
-            let (render_sender, render_receiver) = channel::<()>();
-
-            (render_sender, thread::spawn(move || -> Result<(), io::Error> {
-                let mut interval = Interval::new(
-                    "render",
-                    Duration::from_millis(16),
-                    Duration::from_millis(16),
-                    IntervalAccuracy::Default
-                );
-
-                let mut redraw = false;
-
-                loop {
-                    if render_receiver.try_iter().last().is_some() {
-                        redraw = true;
-                    }
-
-                    if let Err(TryRecvError::Disconnected) = render_receiver.try_recv() {
-                        renderer.exit()?;
-                        return Ok(())
-                    }
-
-                    renderer.step(redraw)?;
-                    redraw = false;
-
-                    interval.sleep();
-                }
-            }))
-        };
+        let (render_sender, render_thread) = spawn_render_thread(runner.c8(), config.clone());
 
         let main_thread = { // main thread
-            let vm_ware = vm_runner.ware();
-            let vm_event_sender = vm_runner.vm_event_sender();
+            let c8 = runner.c8();
+            let vm_event_sender = runner.vm_event_sender();
 
-            thread::spawn(move || -> VMRunResult {
+            thread::spawn(move || -> RunResult {
 
                 let device_state = device_query::DeviceState::new();
                 let mut last_keys = HashSet::new();
 
                 // start vm
                 if !debugging {
-                    vm_runner.resume().unwrap();
+                    runner.resume().expect("Initial resume should always be a success");
                 }
 
                 loop { // event loop
@@ -191,7 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let mut sink_vm_events = false;
 
                             if debugging {
-                                let mut _guard = vm_ware.lock().unwrap();
+                                let mut _guard = c8.lock().unwrap();
                                 let (vm, Some(dbg)) = _guard.deref_mut() else {
                                     unreachable!("debug runs should contain a debugger");
                                 };
@@ -199,7 +165,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 sink_vm_events = sink_vm_events || dbg.is_active();
 
                                 // TODO: handle errors
-                                if dbg.handle_input_event(event.clone(), &mut vm_runner, vm) {
+                                if dbg.handle_input_event(event.clone(), &mut runner, vm) {
                                     render_sender.send(()).ok();
                                 }
 
@@ -227,7 +193,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 || key_event.code == CrosstermKey::Char('C'))
                                     {
                                         // exit virtual machine
-                                        return vm_runner.exit()
+                                        return runner.exit()
                                     } else if !sink_vm_events {
                                         // kinda expecting a crossterm key event to mean renderer is in focus
                                         if let KeyEventKind::Repeat | KeyEventKind::Press = key_event.kind {

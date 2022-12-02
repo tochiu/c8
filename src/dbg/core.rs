@@ -2,11 +2,12 @@ use super::{mem::*, shell::*};
 
 use crate::{
     disass::Disassembler,
+    run::Runner,
     vm::{
         disp::{Display, DisplayWidget, DISPLAY_WINDOW_HEIGHT, DISPLAY_WINDOW_WIDTH},
         interp::{Instruction, Interpreter},
         prog::{PROGRAM_MEMORY_SIZE, ProgramKind},
-        run::{VMRunner, VM}, input::{KEY_ORDERING, Key},
+        core::VM, input::{KEY_ORDERING, Key},
     },
 };
 
@@ -183,7 +184,7 @@ impl Debugger {
     pub fn handle_input_event(
         &mut self,
         event: Event,
-        vm_runner: &mut VMRunner,
+        runner: &mut Runner,
         vm: &mut VM,
     ) -> bool {
         let mut sink_event = false;
@@ -205,7 +206,7 @@ impl Debugger {
                             }
                         }
                     } else if key_event.code == KeyCode::Esc {
-                        self.pause(vm_runner, vm);
+                        self.pause(runner, vm);
                         sink_event = true;
                     }
                 }
@@ -234,7 +235,7 @@ impl Debugger {
                         self.deactivate();
                         vm.clear_event_queue();
                         vm.keyboard_mut().clear();
-                        vm_runner.resume().unwrap();
+                        runner.resume().unwrap();
                         break;
                     }
                     "s" | "step" => {
@@ -250,7 +251,7 @@ impl Debugger {
                         for step in 0..amt {
                             amt_stepped = step + 1;
                             vm.clear_event_queue();
-                            vm.step(1.0 / vm_runner.config().instruction_frequency as f64)
+                            vm.step(1.0 / runner.config().instruction_frequency as f64)
                                 .unwrap();
                             if !self.step(vm) {
                                 break;
@@ -649,9 +650,9 @@ impl Debugger {
         sink_event
     }
 
-    pub fn pause(&mut self, vm_runner: &mut VMRunner, vm: &VM) {
+    pub fn pause(&mut self, runner: &mut Runner, vm: &VM) {
         log::info!("c8vm interrupt!");
-        vm_runner.pause().unwrap();
+        runner.pause().unwrap();
         self.activate(vm);
     }
 
