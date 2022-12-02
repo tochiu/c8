@@ -4,11 +4,11 @@ use tui::{
     widgets::{Block, Borders, Widget},
 };
 
-pub const DISPLAY_WIDTH: u8 = 64;
-pub const DISPLAY_HEIGHT: u8 = 32;
-
 pub const DISPLAY_WINDOW_WIDTH: u16 = DISPLAY_WIDTH as u16 + 2;
 pub const DISPLAY_WINDOW_HEIGHT: u16 = DISPLAY_HEIGHT as u16 + 2;
+
+const DISPLAY_WIDTH: u8 = 64;
+const DISPLAY_HEIGHT: u8 = 32;
 
 const CLEAR_DISPLAY: DisplayBuffer = [0; DISPLAY_HEIGHT as usize];
 
@@ -17,6 +17,41 @@ const CLEAR_DISPLAY: DisplayBuffer = [0; DISPLAY_HEIGHT as usize];
 // NOTE: The most signficant bit corresponds to the left-most pixel on the row
 pub type DisplayBuffer = [u64; DISPLAY_HEIGHT as usize];
 
+pub fn write_to_display(
+    buf: &mut DisplayBuffer,
+    sprite: &[u8],
+    mut pos_x: u8,
+    mut pos_y: u8,
+    height: u8,
+) -> bool {
+    pos_x %= DISPLAY_WIDTH;
+    pos_y %= DISPLAY_HEIGHT;
+
+    let mut flag = false;
+
+    // iterate over rows that aren't clipped by the display height
+    //     and map row index to mutable ref of row in display buffer
+    //     and expanding 8-bit row data to 64 bits by padding (64 - 8) zeros to the right and then shifting everything to the right by pos_x amount
+    //     now we have built a dst &mut u64 (display_row) and src u64 (sprite_row) that we can xor
+    for (display_row, sprite_row) in buf[pos_y as usize..]
+        .iter_mut()
+        .zip(sprite[..(height.min(DISPLAY_HEIGHT - pos_y) as usize)].iter())
+        .map(|(display_row, sprite_row)| {
+            (
+                display_row,
+                (*sprite_row as u64) << (u64::BITS - u8::BITS) >> pos_x,
+            )
+        })
+    {
+        // if any 2 bits are both 1 then we need to set register VF (VFLAG) to 1
+        flag = flag || *display_row & sprite_row != 0;
+        *display_row ^= sprite_row;
+        //log::trace!("Display Row: {:064b}", display_row);
+    }
+
+    flag
+}
+
 pub struct Display {
     pub title: String,
     pub buffer: DisplayBuffer,
@@ -24,7 +59,10 @@ pub struct Display {
 
 impl From<String> for Display {
     fn from(title: String) -> Self {
-        Display { title, buffer: CLEAR_DISPLAY }
+        Display {
+            title,
+            buffer: CLEAR_DISPLAY,
+        }
     }
 }
 

@@ -1,5 +1,5 @@
-use super::disp::{DisplayBuffer, DISPLAY_HEIGHT, DISPLAY_WIDTH};
-use super::prog::{Program, ProgramKind, PROGRAM_STARTING_ADDRESS, PROGRAM_MEMORY_SIZE};
+use super::disp::{write_to_display, DisplayBuffer};
+use super::prog::{Program, ProgramKind, PROGRAM_MEMORY_SIZE, PROGRAM_STARTING_ADDRESS};
 
 use std::fmt::Display;
 use std::num::IntErrorKind;
@@ -43,11 +43,11 @@ impl From<u16> for InstructionParameters {
     fn from(bits: u16) -> Self {
         InstructionParameters {
             bits,
-            op:  ((bits & 0xF000) >> 4 * 3) as u8,
-            x:   ((bits & 0x0F00) >> 4 * 2) as u8,
-            y:   ((bits & 0x00F0) >> 4 * 1) as u8,
-            n:   ((bits & 0x000F) >> 4 * 0) as u8,
-            nn:  ((bits & 0x00FF) >> 4 * 0) as u8,
+            op: ((bits & 0xF000) >> 4 * 3) as u8,
+            x: ((bits & 0x0F00) >> 4 * 2) as u8,
+            y: ((bits & 0x00F0) >> 4 * 1) as u8,
+            n: ((bits & 0x000F) >> 4 * 0) as u8,
+            nn: ((bits & 0x00FF) >> 4 * 0) as u8,
             nnn: ((bits & 0x0FFF) >> 4 * 0) as u16,
         }
     }
@@ -199,7 +199,7 @@ pub enum InterpreterError {
     BadInstruction(String),
     OutOfBoundsPC,
     OutOfBoundsRead,
-    OutOfBoundsWrite
+    OutOfBoundsWrite,
 }
 
 pub type InterpreterMemory = [u8; PROGRAM_MEMORY_SIZE as usize];
@@ -213,7 +213,7 @@ pub struct Interpreter {
     pub registers: [u8; 16],
     pub input: InterpreterInput,
     pub output: InterpreterOutput,
-    pub program: Program
+    pub program: Program,
 }
 
 impl<'a> From<Program> for Interpreter {
@@ -227,7 +227,7 @@ impl<'a> From<Program> for Interpreter {
             registers: [0; 16],
             input: Default::default(),
             output: InterpreterOutput {
-                display: [0; DISPLAY_HEIGHT as usize],
+                display: Default::default(),
                 awaiting_input: false,
                 request: None,
             },
@@ -242,8 +242,9 @@ impl Default for Interpreter {
 }
 
 impl Interpreter {
-
-    pub fn instruction_parameters(binary: &[u8]) -> impl Iterator<Item = InstructionParameters> + '_ {
+    pub fn instruction_parameters(
+        binary: &[u8],
+    ) -> impl Iterator<Item = InstructionParameters> + '_ {
         binary
             .windows(2)
             .map(|slice| InstructionParameters::from([slice[0], slice[1]]))
@@ -254,37 +255,41 @@ impl Interpreter {
 
         memory[FONT_STARTING_ADDRESS as usize..FONT_STARTING_ADDRESS as usize + FONT.len()]
             .copy_from_slice(&FONT);
-        
+
         memory[PROGRAM_STARTING_ADDRESS as usize
             ..PROGRAM_STARTING_ADDRESS as usize + program.data.len()]
             .copy_from_slice(&program.data);
-        
+
         memory
     }
 
     pub fn checked_addr_add(&self, addr: u16, amt: u16) -> Option<u16> {
         let (result_addr, result_overflow) = addr.overflowing_add(amt);
-        if (addr as usize) < self.memory.len() && (result_addr as usize) < self.memory.len() && !result_overflow {
+        if (addr as usize) < self.memory.len()
+            && (result_addr as usize) < self.memory.len()
+            && !result_overflow
+        {
             Some(result_addr)
         } else {
             None
         }
     }
-    
+
     pub fn parse_addr(&self, arg: &str) -> Option<u16> {
         let (arg, radix) = if arg.starts_with("0x") {
             (arg.trim_start_matches("0x"), 16)
         } else {
             (arg, 10)
         };
-    
-        u16::from_str_radix(arg, radix).or_else(|err| {
-            match err.kind() {
+
+        u16::from_str_radix(arg, radix)
+            .or_else(|err| match err.kind() {
                 IntErrorKind::PosOverflow => Ok(self.memory.len() as u16),
                 IntErrorKind::NegOverflow => Ok(0),
                 _ => Err(err),
-            }
-        }).ok().map(|addr| addr.min(self.memory.len().saturating_sub(1) as u16))
+            })
+            .ok()
+            .map(|addr| addr.min(self.memory.len().saturating_sub(1) as u16))
     }
 
     pub fn input_mut(&mut self) -> &mut InterpreterInput {
@@ -312,15 +317,21 @@ impl Interpreter {
                 }
             }
         } else {
-            log::error!("Program counter address is out of bounds ({:#06X?})", self.pc);
+            log::error!(
+                "Program counter address is out of bounds ({:#06X?})",
+                self.pc
+            );
             Err(InterpreterError::OutOfBoundsPC)
         }
     }
 
     pub fn fetch(&self) -> InstructionParameters {
-        InstructionParameters::from([self.memory[self.pc as usize], self.memory[self.pc as usize + 1]])
+        InstructionParameters::from([
+            self.memory[self.pc as usize],
+            self.memory[self.pc as usize + 1],
+        ])
     }
-    
+
     pub fn exec(&mut self, inst: Instruction) -> Result<&InterpreterOutput, InterpreterError> {
         match inst {
             Instruction::ClearScreen => {
@@ -381,19 +392,16 @@ impl Interpreter {
             }
 
             Instruction::SkipIfKeyNotDown(vx) => {
-                // log::debug!("skip if {:?} key up", Key::try_from(self.registers[vx as usize]));
                 if self.input.down_keys >> self.registers[vx as usize] & 1 == 0 {
                     self.pc += 2
                 }
             }
 
             Instruction::GetKey(vx) => {
-                if let Some(key_code) = 
-                    match self.program.kind {
-                        ProgramKind::COSMACVIP => self.input.just_released_key,
-                        _ => self.input.just_pressed_key,
-                    } 
-                {
+                if let Some(key_code) = match self.program.kind {
+                    ProgramKind::COSMACVIP => self.input.just_released_key,
+                    _ => self.input.just_pressed_key,
+                } {
                     self.registers[vx as usize] = key_code;
                 } else {
                     self.pc -= 2;
@@ -470,19 +478,21 @@ impl Interpreter {
 
             // TODO: maybe make optional behavior (register vf set on overflow) configurable
             Instruction::AddToIndex(vx) => {
-                self.index = self.index.overflowing_add(self.registers[vx as usize] as u16).0;
+                self.index = self
+                    .index
+                    .overflowing_add(self.registers[vx as usize] as u16)
+                    .0;
             }
 
             Instruction::Load(vx) => {
                 if let Some(addr) = self.checked_addr_add(self.index, vx as u16) {
-                    self.registers[..=vx as usize].copy_from_slice(
-                        &self.memory[self.index as usize..=addr as usize],
-                    );
+                    self.registers[..=vx as usize]
+                        .copy_from_slice(&self.memory[self.index as usize..=addr as usize]);
                     if self.program.kind == ProgramKind::COSMACVIP {
                         self.index = addr.overflowing_add(1).0;
                     }
                 } else {
-                    return Err(InterpreterError::OutOfBoundsRead); 
+                    return Err(InterpreterError::OutOfBoundsRead);
                 }
             }
 
@@ -501,7 +511,11 @@ impl Interpreter {
             Instruction::StoreDecimal(vx) => {
                 if let Some(addr) = self.checked_addr_add(self.index, 2) {
                     let number = self.registers[vx as usize];
-                    for (i, val) in self.memory[self.index as usize..=addr as usize].iter_mut().rev().enumerate() {
+                    for (i, val) in self.memory[self.index as usize..=addr as usize]
+                        .iter_mut()
+                        .rev()
+                        .enumerate()
+                    {
                         *val = number / 10u8.pow(i as u32) % 10;
                     }
                 } else {
@@ -514,37 +528,20 @@ impl Interpreter {
             }
 
             Instruction::Display(vx, vy, height) => {
-                if self.checked_addr_add(self.index, height.saturating_sub(1) as u16).is_none() {
+                if self
+                    .checked_addr_add(self.index, height.saturating_sub(1) as u16)
+                    .is_none()
+                {
                     return Err(InterpreterError::OutOfBoundsRead);
                 }
 
-                let pos_x = self.registers[vx as usize] % DISPLAY_WIDTH;
-                let pos_y = self.registers[vy as usize] % DISPLAY_HEIGHT;
-
-                self.registers[VFLAG] = 0;
-
-                for (y, sprite_row) in (0..height.min(DISPLAY_HEIGHT - pos_y)) // row indicies that aren't clipped by the display height
-                    .into_iter()
-                    .map(|row_i| { // mapping row index to 2-tuple of...
-                        (
-                            // y-coord of row index in display buffer
-                            (pos_y + row_i) as usize, 
-
-                            // 8-bit row data expanded to 64 bits by padding (64 - 8) zeros to the right and then shifting everything to the right by pos_x amount
-                            (self.memory[self.index as usize + row_i as usize] as u64)
-                                << (u64::BITS - u8::BITS)
-                                >> pos_x,
-                        )
-                    })
-                {
-                    let display_row = self.output.display[y];
-                    if display_row & sprite_row != 0 {
-                        // if any 2 bits are both 1 then we need to set register VF (VFLAG) to 1
-                        self.registers[VFLAG] = 1;
-                    }
-
-                    self.output.display[y] = display_row ^ sprite_row; // bitwise xor with the current display row
-                }
+                self.registers[VFLAG] = write_to_display(
+                    &mut self.output.display,
+                    &self.memory[self.index as usize..],
+                    self.registers[vx as usize],
+                    self.registers[vy as usize],
+                    height,
+                ) as u8;
 
                 self.output.request = Some(InterpreterRequest::Display);
             }
