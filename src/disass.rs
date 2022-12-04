@@ -388,30 +388,30 @@ impl Disassembler {
     pub fn write_addr_disass(
         &self,
         addr: u16,
-        h: &mut impl std::fmt::Write,
-        i: &mut impl std::fmt::Write,
-        a: &mut impl std::fmt::Write,
-        c: &mut impl std::fmt::Write,
+        addr_header: &mut impl std::fmt::Write,
+        addr_bin: &mut impl std::fmt::Write,
+        addr_asm: &mut impl std::fmt::Write,
+        addr_asm_desc: &mut impl std::fmt::Write,
     ) -> std::fmt::Result {
         let index = addr as usize;
         let params = self.instruction_params[index];
         let tag = self.tags[index];
 
         // address
-        write!(h, "{:#05X}:", addr)?;
+        write!(addr_header, "{:#05X}:", addr)?;
 
-        // tag symbol
-        write!(i, " |{}|", tag.to_symbol())?;
+        // instruction tag symbol
+        write!(addr_bin, " |{}|", tag.to_symbol())?;
 
         // instruction if parsable
         if tag >= InstructionTag::Parsable {
-            write!(i, " {:#06X}", params.bits)?;
+            write!(addr_bin, " {:#06X}", params.bits)?;
         } else {
-            write!(i, " {:#04X}", self.memory[index])?;
+            write!(addr_bin, " {:#04X}", self.memory[index])?;
         }
 
         if let Some(instruction) = self.instructions[index].as_ref() {
-            write_inst_asm(instruction, a, c)?;
+            write_inst_asm(instruction, addr_asm, addr_asm_desc)?;
         }
 
         Ok(())
