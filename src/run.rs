@@ -1,23 +1,24 @@
 use crate::{
-    dbg::core::Debugger, 
-    config::{C8Config, GOOD_INSTRUCTION_FREQUENCY_DIFF, OKAY_INSTRUCTION_FREQUENCY_DIFF}, 
+    config::{C8Config, GOOD_INSTRUCTION_FREQUENCY_DIFF, OKAY_INSTRUCTION_FREQUENCY_DIFF},
+    dbg::core::Debugger,
     vm::{
         core::{VMEvent, VM},
         interp::InterpreterError,
         prog::Program,
-    }
+    },
 };
 
 use crossterm::style::Stylize;
 
 use std::{
     fmt::Display,
+    ops::DerefMut,
     sync::{
         mpsc::{channel, Receiver, Sender, TryRecvError},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant}, ops::DerefMut,
+    time::{Duration, Instant},
 };
 
 pub type C8 = (VM, Option<Debugger>);
@@ -27,7 +28,6 @@ pub type RunResult = Result<RunAnalytics, InterpreterError>;
 pub type RunControlResult = Result<(), &'static str>;
 
 pub struct Runner {
-
     config: C8Config,
 
     c8: Arc<Mutex<C8>>,
@@ -72,7 +72,7 @@ impl Runner {
         let c8 = Arc::new(Mutex::new({
             let vm = VM::new(program, vm_event_receiver);
             let dbg = if config.debugging {
-                Some(Debugger::init(&vm))
+                Some(Debugger::new(&vm))
             } else {
                 None
             };
@@ -83,7 +83,6 @@ impl Runner {
         let thread_handle = {
             let c8 = Arc::clone(&c8);
             thread::spawn(move || -> RunResult {
-                
                 // this thread updates state the interpreter relies on,
                 // calls the next instruction with said state,
                 // and handles the output of said instruction
@@ -93,7 +92,7 @@ impl Runner {
                     "interp",
                     Duration::from_secs_f64(1.0 / config.instruction_frequency as f64),
                     Duration::from_millis(8),
-                    IntervalAccuracy::High
+                    IntervalAccuracy::High,
                 );
 
                 let mut continuation = RunContinuation {
@@ -104,37 +103,49 @@ impl Runner {
                 let mut runtime_start = Instant::now();
                 let mut runtime_burst_duration = Duration::ZERO;
                 let mut runtime_duration = Duration::ZERO;
-                let mut interpreter_duration = Duration::ZERO;
                 let mut instructions_executed = 0;
                 let mut just_resumed = false;
 
                 loop {
+                    // vm runner step
                     let mut _guard = c8.lock().unwrap();
                     let (vm, maybe_dbg) = _guard.deref_mut();
 
-                    if continuation.try_cont() { // we can step synchronously
+                    if continuation.try_cont() {
+                        // we can step synchronously
 
                         if just_resumed {
                             just_resumed = false;
                             vm.clear_events();
                         }
-                        
-                        let time_elapsed = timer_instant.elapsed().as_secs_f64();
+
+                        let time_elapsed = timer_instant.elapsed().as_secs_f32();
                         timer_instant = Instant::now();
-                        
-                        vm.step(time_elapsed)?;
+                        vm.time_step = time_elapsed;
 
-                        let duration = timer_instant.elapsed();
+                        // dbg.step will never return an Err variant because if the vm steps into an invalid
+                        // state then the debugger step will return false which will pause the thread
 
-                        continuation.try_cont();
-                        continuation.cont = continuation.cont && maybe_dbg.as_mut().map_or(true, |dbg| dbg.step(vm));
+                        // because dbg is what continues the thread it is assumed that it will never
+                        // send the signal to resume the thread from an invalid state.. if it ever resumes
+                        // then it must be from a rolled-back state
+
+                        let step_cont = if let Some(dbg) = maybe_dbg {
+                            dbg.step(vm)
+                        } else {
+                            vm.handle_inputs();
+                            vm.step()?;
+                            true
+                        };
 
                         drop(_guard);
+
+                        continuation.try_cont();
+                        continuation.cont = continuation.cont && step_cont;
 
                         if continuation.try_cont() {
                             interval.sleep();
                             instructions_executed += 1;
-                            interpreter_duration = interpreter_duration.saturating_add(duration);
                             runtime_burst_duration = runtime_start.elapsed();
                             continue;
                         }
@@ -155,7 +166,6 @@ impl Runner {
                     } else {
                         return Ok(RunAnalytics {
                             runtime_duration,
-                            interpreter_duration,
                             instructions_executed,
                             target_ips: config.instruction_frequency,
                             program_name,
@@ -177,7 +187,8 @@ impl Runner {
     pub fn exit(self) -> RunResult {
         let Runner {
             thread_continue_sender,
-            thread_handle, ..
+            thread_handle,
+            ..
         } = self;
         drop(thread_continue_sender); // vm thread should detect sender was dropped (we are the only one) and exit thread if still alive
         thread_handle.join().expect("Runner exited without result")
@@ -187,7 +198,9 @@ impl Runner {
         if self.is_finished() {
             return Err("VM has already exited");
         }
-        self.thread_continue_sender.send(can_continue).map_err(|_| "Unable to send VM continue signal")
+        self.thread_continue_sender
+            .send(can_continue)
+            .map_err(|_| "Unable to send VM continue signal")
     }
 }
 
@@ -241,7 +254,6 @@ impl RunContinuation {
 
 pub struct RunAnalytics {
     runtime_duration: Duration,
-    interpreter_duration: Duration,
     instructions_executed: u64,
     target_ips: u32,
     program_name: String,
@@ -263,12 +275,6 @@ impl Display for RunAnalytics {
             "{} \"{}\" runtime",
             format!("Analyzing").green().bold(),
             self.program_name
-        )?;
-        writeln!(
-            f,
-            "    {} Interp: {:.3}s",
-            format!("|").blue().bold(),
-            self.interpreter_duration.as_secs_f64()
         )?;
         writeln!(
             f,
@@ -296,7 +302,7 @@ impl Display for RunAnalytics {
                 self.target_ips
             )?;
         }
-        
+
         Ok(())
     }
 }
@@ -321,10 +327,10 @@ impl Display for RunAnalytics {
  * Anyway having this gives me peace of mind and also I already wrote it and could probably use it somewhere else later
  */
 
- #[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub enum IntervalAccuracy {
     Default,
-    High
+    High,
 }
 
 pub struct Interval {
@@ -349,11 +355,16 @@ pub struct Interval {
     // how long weve gone since an actual sleep
     quantum_duration: Duration,
 
-    accuracy: IntervalAccuracy
+    accuracy: IntervalAccuracy,
 }
 
 impl Interval {
-    pub fn new(name: &'static str, interval: Duration, max_quantum: Duration, accuracy: IntervalAccuracy) -> Self {
+    pub fn new(
+        name: &'static str,
+        interval: Duration,
+        max_quantum: Duration,
+        accuracy: IntervalAccuracy,
+    ) -> Self {
         Interval {
             name,
             interval,
@@ -361,7 +372,7 @@ impl Interval {
             task_start: Instant::now(),
             oversleep_duration: Duration::ZERO,
             quantum_duration: Duration::ZERO,
-            accuracy
+            accuracy,
         }
     }
 
@@ -400,7 +411,6 @@ impl Interval {
             } else {
                 thread::sleep(sleep_duration);
             }
-            
 
             // store how much we overslept by and reset our quantum duration since we slept for a nonzero duration
             self.oversleep_duration = now.elapsed().saturating_sub(sleep_duration);

@@ -196,9 +196,8 @@ impl TryFrom<CrosstermKey> for Key {
         }
     }
 }
-
 // Keyboard holds state necessary for providing keyboard state to CHIP-8 interpeters
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Keyboard {
     focused: bool,
 
@@ -215,13 +214,16 @@ pub struct Keyboard {
 }
 
 impl Keyboard {
-
     pub fn clear(&mut self) {
         *self = Keyboard::default();
     }
-    
-    pub fn state(&self) -> (u16, Option<u8>, Option<u8>) {
-        (self.focused_down_keys, self.key_down_change, self.key_up_change)
+
+    pub fn state(&self) -> (&u16, &Option<u8>, &Option<u8>) {
+        (
+            &self.focused_down_keys,
+            &self.key_down_change,
+            &self.key_up_change,
+        )
     }
 
     // on terminal focus
@@ -301,7 +303,9 @@ impl Keyboard {
         input.down_keys = self.focused_down_keys;
         input.just_pressed_key = self.key_down_change;
         input.just_released_key = self.key_up_change;
+    }
 
+    pub fn clear_ephemeral_state(&mut self) {
         self.key_down_change = None;
         self.key_up_change = None;
     }

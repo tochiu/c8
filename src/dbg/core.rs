@@ -4,10 +4,11 @@ use crate::{
     disass::Disassembler,
     run::Runner,
     vm::{
+        core::{VMHistoryFragment, VM},
         disp::{Display, DisplayWidget, DISPLAY_WINDOW_HEIGHT, DISPLAY_WINDOW_WIDTH},
+        input::{Key, KEY_ORDERING},
         interp::{Instruction, Interpreter},
-        prog::{PROGRAM_MEMORY_SIZE, ProgramKind},
-        core::VM, input::{KEY_ORDERING, Key},
+        prog::{ProgramKind, PROGRAM_MEMORY_SIZE},
     },
 };
 
@@ -16,14 +17,16 @@ use tui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::{Spans, Span},
+    text::{Span, Spans},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 
 use std::{
     cell::Cell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
 };
+
+const HISTORY_CAPACITY: usize = 250_000;
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub(super) enum Watchpoint {
@@ -126,6 +129,11 @@ pub(super) enum DebugEvent {
 
 pub struct Debugger {
     active: bool,
+    recording: bool,
+    vm_state_is_valid: bool,
+
+    history: VecDeque<VMHistoryFragment>,
+    history_cursor: usize,
 
     breakpoints: HashSet<u16>,
     watchpoints: HashSet<Watchpoint>,
@@ -147,9 +155,15 @@ pub struct Debugger {
 }
 
 impl Debugger {
-    pub fn init(vm: &VM) -> Self {
+    pub fn new(vm: &VM) -> Self {
         let mut dbg = Debugger {
             active: false,
+            recording: false,
+            vm_state_is_valid: true,
+
+            history: VecDeque::new(),
+            history_cursor: 0,
+
             breakpoints: Default::default(),
             watchpoints: Default::default(),
             watch_state: WatchState::from(vm.interpreter()),
@@ -181,12 +195,7 @@ impl Debugger {
         self.active
     }
 
-    pub fn handle_input_event(
-        &mut self,
-        event: Event,
-        runner: &mut Runner,
-        vm: &mut VM,
-    ) -> bool {
+    pub fn handle_input_event(&mut self, event: Event, runner: &mut Runner, vm: &mut VM) -> bool {
         let mut sink_event = false;
 
         match event {
@@ -231,6 +240,11 @@ impl Debugger {
                 // TODO: add more commands here
                 match cmd {
                     "r" | "c" | "run" | "cont" | "continue" => {
+                        if !self.vm_state_is_valid {
+                            // if vm stepped into an invalid state we cannot further it
+                            self.shell.print("Cannot continue c8vm from invalid state!");
+                            continue;
+                        }
                         log::info!("c8vm resume!");
                         self.deactivate();
                         vm.clear_event_queue();
@@ -239,6 +253,9 @@ impl Debugger {
                         break;
                     }
                     "s" | "step" => {
+                        if !self.vm_state_is_valid {
+                            self.shell.print("Cannot continue c8vm from invalid state!")
+                        }
                         let amt = cmd_args
                             .next()
                             .and_then(|arg| arg.parse::<u128>().ok())
@@ -250,9 +267,8 @@ impl Debugger {
 
                         for step in 0..amt {
                             amt_stepped = step + 1;
+                            vm.time_step = 1.0 / runner.config().instruction_frequency as f32;
                             vm.clear_event_queue();
-                            vm.step(1.0 / runner.config().instruction_frequency as f64)
-                                .unwrap();
                             if !self.step(vm) {
                                 break;
                             }
@@ -264,19 +280,88 @@ impl Debugger {
                             self.shell.output_pc(vm.interpreter());
                         }
                     }
+                    "rec" | "record" => {
+                        if self.recording {
+                            self.shell.print("Already recording VM state");
+                            continue;
+                        }
+                        self.shell.print("Recording VM state");
+                        if self.history.capacity() < HISTORY_CAPACITY {
+                            self.history.reserve_exact(HISTORY_CAPACITY - self.history.capacity());
+                        }
+                        self.recording = true;
+                    }
+                    "un" | "undo" | "rw" | "rewind" | "<<" => {
+                        let Some(amt) = cmd_args
+                            .next()
+                            .unwrap_or("1")
+                            .parse::<usize>().ok()
+                            .map(|amt| amt.min(self.history_cursor))
+                        else {
+                            self.shell.print("Please enter a valid amount to rewind");
+                            continue;
+                        };
+
+                        let mut amt_rewinded = 0;
+
+                        for _ in 0..amt {
+                            if self.history_cursor == 0 {
+                                break;
+                            }
+                            if &VMHistoryFragment::from(&*vm) == &self.history[self.history_cursor - 1] {
+                                log::trace!("Skipping identical VM state at history index {}", self.history_cursor - 1);
+                                self.history_cursor -= 1;
+                                if self.history_cursor == 0 {
+                                    break
+                                }
+                            }
+                            self.history_cursor -= 1;
+                            log::trace!("keyboard: {:?}", self.history[self.history_cursor].keyboard);
+                            vm.undo(&self.history[self.history_cursor]);
+                            amt_rewinded += 1;
+                        }
+
+                        
+                        if amt_rewinded > 0 {
+                            self.memory_widget_state.get_mut().poke();
+                            if amt_rewinded > 1 {
+                                self.shell.print(format!("Rewound {} times", amt));
+                            } else {
+                                self.shell.output_pc(vm.interpreter());
+                            }
+                        } else {
+                            self.shell.print("Nothing to rewind");
+                        }
+                    }
+                    "stop" => {
+                        if self.recording {
+                            self.shell.print("Stopped recording VM state");
+                            self.recording = false;
+                        } else {
+                            self.shell.print("Already not recording VM state");
+                        }
+                    }
                     "kd" | "ku" | "keydown" | "keyup" => {
                         let Some(key) = cmd_args.next().and_then(|arg| Key::try_from(arg).ok()) else {
                             self.shell.print("Please specify a valid key");
                             continue;
                         };
-                        
+
                         if let "kd" | "keydown" = cmd {
                             vm.keyboard_mut().handle_focus();
                             vm.keyboard_mut().handle_key_down(key);
-                            self.shell.print(format!("Key \"{:X}\" ({}) down", key.to_code(), key.to_str()));
+                            self.shell.print(format!(
+                                "Key \"{:X}\" ({}) down",
+                                key.to_code(),
+                                key.to_str()
+                            ));
                         } else {
                             vm.keyboard_mut().handle_key_up(key);
-                            self.shell.print(format!("Key \"{:X}\" ({}) up", key.to_code(), key.to_str()));
+                            self.shell.print(format!(
+                                "Key \"{:X}\" ({}) up",
+                                key.to_code(),
+                                key.to_str()
+                            ));
                         }
                     }
                     "w" | "watch" | "watchpoint" => {
@@ -650,13 +735,13 @@ impl Debugger {
         sink_event
     }
 
-    pub fn pause(&mut self, runner: &mut Runner, vm: &VM) {
+    fn pause(&mut self, runner: &mut Runner, vm: &VM) {
         log::info!("c8vm interrupt!");
         runner.pause().unwrap();
         self.activate(vm);
     }
 
-    pub fn activate(&mut self, vm: &VM) {
+    fn activate(&mut self, vm: &VM) {
         if self.active {
             return;
         }
@@ -666,7 +751,7 @@ impl Debugger {
         self.active = true;
     }
 
-    pub fn deactivate(&mut self) {
+    fn deactivate(&mut self) {
         if !self.active {
             return;
         }
@@ -675,7 +760,46 @@ impl Debugger {
         self.active = false;
     }
 
-    pub fn step(&mut self, vm: &VM) -> bool {
+    pub fn step(&mut self, vm: &mut VM) -> bool {
+
+        vm.handle_inputs();
+
+        if self.recording {
+            if self.history.len() == HISTORY_CAPACITY {
+                self.history.pop_front();
+            }
+    
+            let state = VMHistoryFragment::from(&*vm); // get state of vm
+    
+            // if cursor is at the start or the new state is different from the previous one
+            // we know we might advance the history cursor
+            let amt_clearing = self.history.len() - self.history_cursor;
+            if amt_clearing == 0 || &self.history[self.history_cursor] != &state {
+                if amt_clearing > 0 {
+                    log::info!("Clearing {} history checkpoints equal or ahead of cursor", amt_clearing);
+                    self.history.truncate(self.history_cursor);
+                } else if self.history_cursor > 0 && state.can_replace(&self.history[self.history_cursor - 1], vm.interpreter()) {
+                    log::debug!("Replacing history checkpoint at cursor");
+                    self.history_cursor -= 1;
+                    self.history.pop_back();
+                }
+                self.history.push_back(state);
+            }
+            self.history_cursor = (self.history_cursor + 1).min(self.history.len());
+        } else if self.history.capacity() > 0 {
+            log::info!("Clearing history");
+            self.history = VecDeque::new();
+            self.history_cursor = 0;
+        }
+
+        let mut should_continue = vm.step().is_ok();
+
+        // edge case: keyboard contains ephemeral state so we must manually restore it
+        // before each step if we are seeking through recorded history
+        if self.history_cursor < self.history.len() {
+            self.history[self.history_cursor].restore_keyboard(&mut *vm);
+        }
+
         let interp = vm.interpreter();
 
         // update memory draw read write execute (drwx) flags
@@ -711,9 +835,8 @@ impl Debugger {
         }
 
         // handle debug events emitted
-        if self.event_queue.is_empty() {
-            return true;
-        } else {
+        if !self.event_queue.is_empty() {
+            should_continue = false;
             self.activate(vm);
             for debug_event in self.event_queue.drain(..) {
                 match debug_event {
@@ -750,8 +873,9 @@ impl Debugger {
                     },
                 }
             }
-            return false;
         }
+
+        should_continue
     }
 }
 
@@ -896,8 +1020,15 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         }
 
         let (main_area, bottom_area, vm_area, _) = self.areas(area);
-        let (memory_area, keyboard_area, pointer_area, register_area, timer_area, stack_area, output_area) =
-            self.main_areas(main_area);
+        let (
+            memory_area,
+            keyboard_area,
+            pointer_area,
+            register_area,
+            timer_area,
+            stack_area,
+            output_area,
+        ) = self.main_areas(main_area);
 
         let base_border = Borders::TOP.union(Borders::LEFT);
 
@@ -948,17 +1079,26 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             _ => key_just_down,
         };
 
-        let mut keyboard_span_iter = KEY_ORDERING
-            .iter()
-            .map(|key| {
-                Span::styled(format!(" {} ", key.to_str()),
-                    if key_down_state >> key.to_code() as u16 & 1 == 1 {
-                        Style::default().fg(Color::Black).bg(if just_key == Some(key.to_code()) { Color::Yellow } else { Color::White })
+        let mut keyboard_span_iter = KEY_ORDERING.iter().map(|key| {
+            Span::styled(
+                format!(" {} ", key.to_str()),
+                if key_down_state >> key.to_code() as u16 & 1 == 1 {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(if just_key == &Some(key.to_code()) {
+                            Color::Yellow
+                        } else {
+                            Color::White
+                        })
+                } else {
+                    Style::default().fg(if just_key == &Some(key.to_code()) {
+                        Color::Yellow
                     } else {
-                        Style::default().fg(if just_key == Some(key.to_code()) { Color::Yellow } else { Color::Reset })
-                    }
-                )
-            });
+                        Color::Reset
+                    })
+                },
+            )
+        });
 
         let mut keyboard_row_spans: Vec<Spans> = Vec::with_capacity(4);
         let mut keyboard_row: Vec<Span> = Vec::with_capacity(5);
@@ -973,7 +1113,9 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             }
         }
 
-        Paragraph::new(keyboard_row_spans).block(Block::default().title(" Keyboard ").borders(base_border)).render(keyboard_area, buf);
+        Paragraph::new(keyboard_row_spans)
+            .block(Block::default().title(" Keyboard ").borders(base_border))
+            .render(keyboard_area, buf);
 
         // Pointers
         Paragraph::new(vec![

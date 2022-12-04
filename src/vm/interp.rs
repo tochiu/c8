@@ -1,4 +1,8 @@
+use rand::rngs::StdRng;
+use rand::{RngCore, SeedableRng};
+
 use super::disp::{write_to_display, DisplayBuffer};
+use super::input::Key;
 use super::prog::{Program, ProgramKind, PROGRAM_MEMORY_SIZE, PROGRAM_STARTING_ADDRESS};
 
 use std::fmt::Display;
@@ -43,11 +47,11 @@ impl From<u16> for InstructionParameters {
     fn from(bits: u16) -> Self {
         InstructionParameters {
             bits,
-            op: ((bits & 0xF000) >> 4 * 3) as u8,
-            x: ((bits & 0x0F00) >> 4 * 2) as u8,
-            y: ((bits & 0x00F0) >> 4 * 1) as u8,
-            n: ((bits & 0x000F) >> 4 * 0) as u8,
-            nn: ((bits & 0x00FF) >> 4 * 0) as u8,
+            op:  ((bits & 0xF000) >> 4 * 3) as u8,
+            x:   ((bits & 0x0F00) >> 4 * 2) as u8,
+            y:   ((bits & 0x00F0) >> 4 * 1) as u8,
+            n:   ((bits & 0x000F) >> 4 * 0) as u8,
+            nn:  ((bits & 0x00FF) >> 4 * 0) as u8,
             nnn: ((bits & 0x0FFF) >> 4 * 0) as u16,
         }
     }
@@ -69,7 +73,7 @@ impl Display for InstructionParameters {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Instruction {
     ClearScreen,
     Jump(u16),
@@ -204,6 +208,72 @@ pub enum InterpreterError {
 
 pub type InterpreterMemory = [u8; PROGRAM_MEMORY_SIZE as usize];
 
+#[derive(Eq, PartialEq)]
+pub enum PartialInterpreterStatePayload {
+    Rng(StdRng),
+    Display(DisplayBuffer),
+}
+
+#[derive(PartialEq, Eq)]
+pub struct InterpreterHistoryFragment {
+    instruction: Option<Instruction>,
+    pc: u16,
+    return_address: u16,
+    index: u16,
+    index_memory: [u8; 16],
+    registers: [u8; 16],
+    payload: Option<Box<PartialInterpreterStatePayload>>,
+}
+
+impl From<&Interpreter> for InterpreterHistoryFragment {
+    fn from(interp: &Interpreter) -> Self {
+        let mut index_memory = [0; 16];
+        let index = interp.index as usize;
+        if index < interp.memory.len() {
+            let n = (index + 16).min(interp.memory.len()) - index;
+            index_memory.copy_from_slice(&interp.memory[index..index + n]);
+        }
+
+        let instruction = Instruction::try_from(interp.fetch()).ok();
+
+        InterpreterHistoryFragment {
+            payload: match instruction.as_ref() {
+                Some(&Instruction::GenerateRandom(_, _)) => Some(Box::new(
+                    PartialInterpreterStatePayload::Rng(interp.rng.clone()),
+                )),
+                Some(&Instruction::ClearScreen) => Some(Box::new(
+                    PartialInterpreterStatePayload::Display(interp.output.display.clone()),
+                )),
+                _ => None,
+            },
+
+            pc: interp.pc,
+            instruction,
+            return_address: interp.stack.last().cloned().unwrap_or_default(),
+            index: interp.index,
+            index_memory,
+            registers: interp.registers,
+        }
+    }
+}
+
+impl InterpreterHistoryFragment {
+    pub(super) fn are_get_key_forms(&self, rhs: &Self) -> bool {
+        if let Some(&Instruction::GetKey(_)) = self.instruction.as_ref() {
+            self == rhs
+        } else {
+            false
+        }
+    }
+
+    pub(super) fn does_modify_display(&self) -> bool {
+        match self.instruction.as_ref() {
+            Some(&Instruction::ClearScreen | &Instruction::Display(_, _, _)) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Interpreter {
     pub memory: InterpreterMemory,
@@ -214,6 +284,7 @@ pub struct Interpreter {
     pub input: InterpreterInput,
     pub output: InterpreterOutput,
     pub program: Program,
+    pub rng: StdRng,
 }
 
 impl<'a> From<Program> for Interpreter {
@@ -223,8 +294,9 @@ impl<'a> From<Program> for Interpreter {
             program,
             pc: PROGRAM_STARTING_ADDRESS,
             index: 0,
-            stack: Vec::new(),
+            stack: Vec::with_capacity(16),
             registers: [0; 16],
+            rng: StdRng::from_entropy(),
             input: Default::default(),
             output: InterpreterOutput {
                 display: Default::default(),
@@ -292,6 +364,49 @@ impl Interpreter {
             .map(|addr| addr.min(self.memory.len().saturating_sub(1) as u16))
     }
 
+    pub fn undo(&mut self, prior_state: &InterpreterHistoryFragment) {
+        self.pc = prior_state.pc;
+        self.index = prior_state.index;
+        self.registers = prior_state.registers;
+
+        let index = self.index as usize;
+        let n = (index + 16).min(self.memory.len()) - index;
+
+        self.memory[index..index + n].copy_from_slice(&prior_state.index_memory);
+        let Some(inst) = prior_state.instruction.as_ref() else {
+            unreachable!("cannot undo to a state without an instruction")
+        };
+        log::trace!("Undoing instruction: {:?}", inst);
+
+        match inst {
+            Instruction::CallSubroutine(_) => {
+                self.stack.pop();
+            }
+            Instruction::SubroutineReturn => {
+                self.stack.push(prior_state.return_address);
+            }
+            Instruction::Display(vx, vy, height) => {
+                self.exec_display_instruction(*vx, *vy, *height);
+                self.registers[VFLAG] = prior_state.registers[VFLAG];
+            }
+            Instruction::ClearScreen => {
+                let Some(PartialInterpreterStatePayload::Display(display)) = prior_state.payload.as_deref() else {
+                    unreachable!("clear screen instruction should have display payload");
+                };
+
+                self.output.display = *display;
+            }
+            Instruction::GenerateRandom(_, _) => {
+                let Some(PartialInterpreterStatePayload::Rng(rng)) = prior_state.payload.as_deref() else {
+                    unreachable!("generate random instruction should have rng payload");
+                };
+
+                self.rng = rng.clone();
+            }
+            _ => (),
+        }
+    }
+
     pub fn input_mut(&mut self) -> &mut InterpreterInput {
         &mut self.input
     }
@@ -322,6 +437,13 @@ impl Interpreter {
                 self.pc
             );
             Err(InterpreterError::OutOfBoundsPC)
+        }
+    }
+
+    pub fn pick_key<'a, 'b, T: TryInto<Key>>(&'a self, key_down: &'b Option<T>, key_up: &'b Option<T>) -> &'b Option<T> {
+        match self.program.kind {
+            ProgramKind::COSMACVIP => key_up,
+            _ => key_down,
         }
     }
 
@@ -398,11 +520,10 @@ impl Interpreter {
             }
 
             Instruction::GetKey(vx) => {
-                if let Some(key_code) = match self.program.kind {
-                    ProgramKind::COSMACVIP => self.input.just_released_key,
-                    _ => self.input.just_pressed_key,
-                } {
-                    self.registers[vx as usize] = key_code;
+                if let Some(key_code) =
+                    self.pick_key(&self.input.just_pressed_key, &self.input.just_released_key)
+                {
+                    self.registers[vx as usize] = *key_code;
                 } else {
                     self.pc -= 2;
                 }
@@ -524,7 +645,7 @@ impl Interpreter {
             }
 
             Instruction::GenerateRandom(vx, bound) => {
-                self.registers[vx as usize] = rand::random::<u8>() & bound
+                self.registers[vx as usize] = (self.rng.next_u32() & bound as u32) as u8;
             }
 
             Instruction::Display(vx, vy, height) => {
@@ -535,18 +656,22 @@ impl Interpreter {
                     return Err(InterpreterError::OutOfBoundsRead);
                 }
 
-                self.registers[VFLAG] = write_to_display(
-                    &mut self.output.display,
-                    &self.memory[self.index as usize..],
-                    self.registers[vx as usize],
-                    self.registers[vy as usize],
-                    height,
-                ) as u8;
+                self.exec_display_instruction(vx, vy, height);
 
                 self.output.request = Some(InterpreterRequest::Display);
             }
         }
 
         Ok(&self.output)
+    }
+
+    fn exec_display_instruction(&mut self, vx: u8, vy: u8, height: u8) {
+        self.registers[VFLAG] = write_to_display(
+            &mut self.output.display,
+            &self.memory[self.index as usize..],
+            self.registers[vx as usize],
+            self.registers[vy as usize],
+            height,
+        ) as u8;
     }
 }

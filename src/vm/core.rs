@@ -1,15 +1,15 @@
 use super::{
+    disp::DisplayBuffer,
     input::{Key, Keyboard},
-    interp::{Interpreter, InterpreterError, InterpreterRequest},
+    interp::{Interpreter, InterpreterError, InterpreterHistoryFragment, InterpreterRequest},
     prog::Program,
-    disp::DisplayBuffer
 };
 
 use std::sync::mpsc::Receiver;
 
 // TODO: maybe support sound (right now the sound timer does nothing external)
 
-const TIMER_TICKS_PER_SECOND: f64 = 60.0;
+const TIMER_TICKS_PER_SECOND: f32 = 60.0;
 
 #[derive(Debug)]
 pub enum VMEvent {
@@ -20,26 +20,73 @@ pub enum VMEvent {
     FocusingKeyDown(Key),
 }
 
+pub struct VMHistoryFragment {
+    pub time_step: f32,
+    pub keyboard: Keyboard,
+    pub sound_timer: f32,
+    pub delay_timer: f32,
+    pub interp_state: InterpreterHistoryFragment,
+}
+
+impl PartialEq for VMHistoryFragment {
+    fn eq(&self, other: &Self) -> bool {
+        self.keyboard == other.keyboard
+            && self.sound_timer == other.sound_timer
+            && self.delay_timer == other.delay_timer
+            && self.interp_state == other.interp_state
+    }
+}
+
+impl From<&VM> for VMHistoryFragment {
+    fn from(vm: &VM) -> Self {
+        VMHistoryFragment {
+            time_step: vm.time_step,
+            keyboard: vm.keyboard,
+            sound_timer: vm.sound_timer,
+            delay_timer: vm.delay_timer,
+            interp_state: (&vm.interp).into(),
+        }
+    }
+}
+
+impl VMHistoryFragment {
+    pub fn can_replace(&self, other: &Self, interp: &Interpreter) -> bool {
+        if self.interp_state.are_get_key_forms(&other.interp_state) {
+            let (_, kd2, ku2) = other.keyboard.state();
+            interp.pick_key(kd2, ku2).is_none()
+        } else {
+            false
+        }
+    }
+
+    pub fn restore_keyboard(&self, vm: &mut VM) {
+        *vm.keyboard_mut() = self.keyboard;
+    }
+}
+
 pub struct VM {
+    pub time_step: f32,
+
     interp: Interpreter,
 
     event: Receiver<VMEvent>,
     event_queue: Vec<VMEvent>,
 
     // Virtualized IO
-
     display: bool,
     keyboard: Keyboard,
 
     // these precise external timers will be mapped
     // to a byte range when executing interpreter instructions
-    sound_timer: f64,
-    delay_timer: f64,
+    sound_timer: f32,
+    delay_timer: f32,
 }
 
 impl VM {
     pub fn new(program: Program, recv: Receiver<VMEvent>) -> Self {
         VM {
+            time_step: 0.0,
+
             interp: Interpreter::from(program),
 
             event: recv,
@@ -56,6 +103,16 @@ impl VM {
         }
     }
 
+    pub fn undo(&mut self, state: &VMHistoryFragment) {
+        self.keyboard = state.keyboard;
+        self.sound_timer = state.sound_timer;
+        self.delay_timer = state.delay_timer;
+        if state.interp_state.does_modify_display() {
+            self.display = true;
+        }
+        self.interp.undo(&state.interp_state);
+    }
+
     pub fn interpreter(&self) -> &Interpreter {
         &self.interp
     }
@@ -68,12 +125,16 @@ impl VM {
         &mut self.keyboard
     }
 
-    pub fn sound_timer(&self) -> f64 {
+    pub fn sound_timer(&self) -> f32 {
         self.sound_timer
     }
 
-    pub fn delay_timer(&self) -> f64 {
+    pub fn delay_timer(&self) -> f32 {
         self.delay_timer
+    }
+
+    pub fn truncated_delay_timer(&self) -> u8 {
+        self.delay_timer.ceil() as u8
     }
 
     pub fn queue_events(&mut self) {
@@ -114,30 +175,35 @@ impl VM {
         }
     }
 
-    pub fn step(&mut self, time_elapsed: f64) -> Result<(), InterpreterError> {
+    pub fn handle_inputs(&mut self) {
         self.drain_event_queue();
 
         // update timers and clamp between the bounds of a byte because that is the data type
-        self.sound_timer = (self.sound_timer - time_elapsed * TIMER_TICKS_PER_SECOND)
-            .clamp(u8::MIN as f64, u8::MAX as f64);
-        self.delay_timer = (self.delay_timer - time_elapsed * TIMER_TICKS_PER_SECOND)
-            .clamp(u8::MIN as f64, u8::MAX as f64);
+        self.sound_timer = (self.sound_timer - self.time_step * TIMER_TICKS_PER_SECOND)
+            .clamp(u8::MIN as f32, u8::MAX as f32);
+        self.delay_timer = (self.delay_timer - self.time_step * TIMER_TICKS_PER_SECOND)
+            .clamp(u8::MIN as f32, u8::MAX as f32);
 
         // update interpreter input
+        let delay_timer = self.truncated_delay_timer();
         let mut input = self.interp.input_mut();
 
         self.keyboard.flush(input); // the keyboard will write its state to the input
-        input.delay_timer = self.delay_timer.ceil() as u8; // delay timer is ceiled to the nearest 8-bit number
+        input.delay_timer = delay_timer; // delay timer is ceiled to the nearest 8-bit number
+    }
 
+    pub fn step(&mut self) -> Result<(), InterpreterError> {
         // interpret next instruction
         let output = self.interp.step()?;
+
+        self.keyboard.clear_ephemeral_state();
 
         // handle any external request by the executed instruction
         if let Some(request) = output.request {
             match request {
                 InterpreterRequest::Display => self.display = true,
-                InterpreterRequest::SetDelayTimer(time) => self.delay_timer = time as f64,
-                InterpreterRequest::SetSoundTimer(time) => self.sound_timer = time as f64,
+                InterpreterRequest::SetDelayTimer(time) => self.delay_timer = time as f32,
+                InterpreterRequest::SetSoundTimer(time) => self.sound_timer = time as f32,
             }
         }
 
