@@ -28,6 +28,10 @@ pub type RunResult = Result<RunAnalytics, InterpreterError>;
 pub type RunControlResult = Result<(), &'static str>;
 
 fn update_frequency_stats(stats: &mut BTreeMap<u32, (Duration, u64)>, freq: u32, duration: Duration, instructions: u64) {
+    if instructions == 0 {
+        return;
+    }
+    
     let (total_duration, count) = stats.entry(freq).or_insert((Duration::ZERO, 0));
     *total_duration = total_duration.saturating_add(duration);
     *count += instructions;
