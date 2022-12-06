@@ -9,7 +9,7 @@ use crate::{
         input::{Key, KEY_ORDERING},
         interp::{Instruction, Interpreter},
         prog::PROGRAM_MEMORY_SIZE,
-    },
+    }, config::C8Config,
 };
 
 use crossterm::event::{Event, KeyCode, KeyEventKind};
@@ -23,7 +23,7 @@ use tui::{
 
 use std::{
     cell::Cell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet}, str::FromStr, num::{ParseIntError, IntErrorKind},
 };
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
@@ -146,6 +146,8 @@ pub struct Debugger {
 
     keyboard_shows_qwerty: bool,
 
+    runner_frequency: u32,
+
     shell: Shell,
     shell_active: bool,
 
@@ -153,7 +155,7 @@ pub struct Debugger {
 }
 
 impl Debugger {
-    pub fn new(vm: &VM) -> Self {
+    pub fn new(vm: &VM, config: &C8Config) -> Self {
         let mut dbg = Debugger {
             active: false,
 
@@ -173,6 +175,8 @@ impl Debugger {
 
             keyboard_shows_qwerty: true,
 
+            runner_frequency: config.instruction_frequency,
+
             shell: Default::default(),
             shell_active: false,
 
@@ -190,6 +194,10 @@ impl Debugger {
 
     pub fn is_active(&self) -> bool {
         self.active
+    }
+
+    pub fn frequency(&self) -> u32 {
+        self.runner_frequency
     }
 
     fn pause(&mut self, runner: &mut Runner, vm: &VM) {
@@ -461,6 +469,19 @@ impl Debugger {
                         }
                         self.history_active = true;
                         self.shell_active = false;
+                    }
+                    "hz" | "hertz" | "rate" | "freq" | "frequency" => {
+                        let Some(freq) = cmd_args
+                            .next()
+                            .and_then(|arg| saturated_num_parse(arg, 1, u32::MAX).ok())
+                        else {
+                            self.shell.print("Please enter a valid frequency");
+                            continue;
+                        };
+
+                        runner.set_instruction_frequency(freq);
+                        self.runner_frequency = freq;
+                        self.shell.print(format!("Set frequency to {}Hz", freq));
                     }
                     "kd" | "ku" | "keydown" | "keyup" => {
                         let Some(key) = cmd_args.next().and_then(|arg| Key::try_from(arg).ok()) else {
@@ -1220,6 +1241,21 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             Paragraph::new("Esc to exit history navigation")
                 .style(bottom_area_style)
                 .render(bottom_area, buf);
+        }
+    }
+}
+
+fn saturated_num_parse<F>(s: &str, min: F, max: F) -> Result<F, F::Err> 
+    where F: FromStr<Err = ParseIntError> + Ord
+{
+    match s.parse::<F>() {
+        Ok(num) => Ok(num.max(min).min(max)),
+        Err(e) => {
+            match e.kind() {
+                IntErrorKind::PosOverflow => Ok(max),
+                IntErrorKind::NegOverflow => Ok(min),
+                _ => Err(e),
+            }
         }
     }
 }

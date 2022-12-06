@@ -11,14 +11,14 @@ use crate::{
 use crossterm::style::Stylize;
 
 use std::{
-    fmt::Display,
+    fmt::{Display, Write},
     ops::DerefMut,
     sync::{
         mpsc::{channel, Receiver, Sender, TryRecvError},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::{Duration, Instant}, collections::BTreeMap,
 };
 
 pub type C8 = (VM, Option<Debugger>);
@@ -27,6 +27,12 @@ pub type C8Lock = Arc<Mutex<C8>>;
 pub type RunResult = Result<RunAnalytics, InterpreterError>;
 pub type RunControlResult = Result<(), &'static str>;
 
+fn update_frequency_stats(stats: &mut BTreeMap<u32, (Duration, u64)>, freq: u32, duration: Duration, instructions: u64) {
+    let (total_duration, count) = stats.entry(freq).or_insert((Duration::ZERO, 0));
+    *total_duration = total_duration.saturating_add(duration);
+    *count += instructions;
+}
+
 pub struct Runner {
     config: C8Config,
 
@@ -34,6 +40,7 @@ pub struct Runner {
 
     thread_handle: JoinHandle<RunResult>,
     thread_continue_sender: Sender<bool>,
+    thread_frequency_sender: Sender<u32>,
 
     vm_event_sender: Sender<VMEvent>,
 }
@@ -63,22 +70,31 @@ impl Runner {
         self.thread_handle.is_finished()
     }
 
+    pub fn set_instruction_frequency(&mut self, frequency: u32) {
+        self.config.instruction_frequency = frequency;
+        self.thread_frequency_sender.send(frequency).ok();
+    }
+
     pub fn spawn(config: C8Config, program: Program) -> Self {
         let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
         let (thread_continue_sender, thread_continue_receiver) = channel::<bool>();
+        let (thread_frequency_sender, thread_frequency_receiver) = channel::<u32>();
 
         let program_name = program.name.clone();
 
         let c8 = Arc::new(Mutex::new({
             let vm = VM::new(program, vm_event_receiver);
             let dbg = if config.debugging {
-                Some(Debugger::new(&vm))
+                Some(Debugger::new(&vm, &config))
             } else {
                 None
             };
 
             (vm, dbg)
         }));
+
+        let mut frequency = config.instruction_frequency;
+        let mut frequency_stats: BTreeMap<u32, (Duration, u64)> = BTreeMap::new();
 
         let thread_handle = {
             let c8 = Arc::clone(&c8);
@@ -90,7 +106,7 @@ impl Runner {
                 let mut timer_instant = Instant::now();
                 let mut interval = Interval::new(
                     "interp",
-                    Duration::from_secs_f64(1.0 / config.instruction_frequency as f64),
+                    Duration::from_secs_f64(1.0 / frequency as f64),
                     Duration::from_millis(8),
                     IntervalAccuracy::High,
                 );
@@ -110,6 +126,7 @@ impl Runner {
                     // vm runner step
                     let mut _guard = c8.lock().unwrap();
                     let (vm, maybe_dbg) = _guard.deref_mut();
+                    
 
                     if continuation.try_cont() {
                         // we can step synchronously
@@ -162,12 +179,18 @@ impl Runner {
                         runtime_burst_duration = Duration::ZERO;
                         runtime_start = Instant::now();
                         timer_instant = Instant::now();
+                        if let Some(freq) = thread_frequency_receiver.try_iter().last() {
+                            update_frequency_stats(&mut frequency_stats, frequency, runtime_duration, instructions_executed);
+                            interval.interval = Duration::from_secs_f64(1.0 / freq as f64);
+                            frequency = freq;
+                            runtime_duration = Duration::ZERO;
+                            instructions_executed = 0;
+                        }
                         interval.reset();
                     } else {
+                        update_frequency_stats(&mut frequency_stats, frequency, runtime_duration, instructions_executed);
                         return Ok(RunAnalytics {
-                            runtime_duration,
-                            instructions_executed,
-                            target_ips: config.instruction_frequency,
+                            frequency_stats,
                             program_name,
                         });
                     }
@@ -181,6 +204,7 @@ impl Runner {
             thread_handle,
             vm_event_sender,
             thread_continue_sender,
+            thread_frequency_sender
         }
     }
 
@@ -253,55 +277,60 @@ impl RunContinuation {
 }
 
 pub struct RunAnalytics {
-    runtime_duration: Duration,
-    instructions_executed: u64,
-    target_ips: u32,
+    frequency_stats: BTreeMap<u32, (Duration, u64)>,
     program_name: String,
 }
 
 impl Display for RunAnalytics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ips = self.instructions_executed as f64 / self.runtime_duration.as_secs_f64();
-        let ips_diff = (ips - self.target_ips as f64) / self.target_ips as f64 * 100.0;
-        let color_ips_diff = if ips_diff.abs() > OKAY_INSTRUCTION_FREQUENCY_DIFF {
-            Stylize::red
-        } else if ips_diff.abs() > GOOD_INSTRUCTION_FREQUENCY_DIFF {
-            Stylize::yellow
-        } else {
-            Stylize::green
-        };
-        writeln!(
+        write!(
             f,
             "{} \"{}\" runtime",
             format!("Analyzing").green().bold(),
             self.program_name
         )?;
-        writeln!(
-            f,
-            "    {} Runner: {:.3}s",
-            format!("|").blue().bold(),
-            self.runtime_duration.as_secs_f64()
-        )?;
-        write!(
-            f,
-            "    {} Runner continuously executed {:.2} inst/sec",
-            format!("=").blue().bold(),
-            if ips.is_finite() { ips } else { 0.0 }
-        )?;
 
-        if ips.is_finite() {
+        for (&target_ips, &(runtime_duration, instructions_executed)) in self.frequency_stats.iter() {
+            let ips = instructions_executed as f64 / runtime_duration.as_secs_f64();
+            let ips_diff = (ips - target_ips as f64) / target_ips as f64 * 100.0;
+            let color_ips_diff = if ips_diff.abs() > OKAY_INSTRUCTION_FREQUENCY_DIFF {
+                Stylize::red
+            } else if ips_diff.abs() > GOOD_INSTRUCTION_FREQUENCY_DIFF {
+                Stylize::yellow
+            } else {
+                Stylize::green
+            };
+            
+            writeln!(
+                f,
+                "\n    {} Runner ({:#04}Hz): {:.3}s",
+                format!("|").blue().bold(),
+                target_ips,
+                runtime_duration.as_secs_f64()
+            )?;
             write!(
                 f,
-                " ( {} from {} inst/sec target )",
-                color_ips_diff(format!(
-                    "{}{:.2}%",
-                    if ips_diff >= 0.0 { "+" } else { "" },
-                    ips_diff
-                ))
-                .bold(),
-                self.target_ips
+                "    {} Runner continuously executed at {:#07.2}Hz",
+                format!("=").blue().bold(),
+                if ips.is_finite() { ips } else { 0.0 }
             )?;
+
+            if ips.is_finite() {
+                write!(
+                    f,
+                    " ( {} from {:#04}Hz target )",
+                    color_ips_diff(format!(
+                        "{}{:.2}%",
+                        if ips_diff >= 0.0 { "+" } else { "" },
+                        ips_diff
+                    ))
+                    .bold(),
+                    target_ips
+                )?;
+            }
         }
+
+        
 
         Ok(())
     }

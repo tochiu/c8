@@ -55,13 +55,15 @@ pub fn write_to_display(
 pub struct Display {
     pub title: String,
     pub buffer: DisplayBuffer,
+    pub instruction_frequency: u32
 }
 
-impl From<String> for Display {
-    fn from(title: String) -> Self {
-        Display {
+impl Display {
+    pub fn new(title: String, instruction_frequency: u32) -> Self {
+        Self {
             title,
             buffer: CLEAR_DISPLAY,
+            instruction_frequency
         }
     }
 }
@@ -105,7 +107,7 @@ impl<'a> Widget for DisplayWidget<'_> {
     fn render(self, area: Rect, buf: &mut tui::buffer::Buffer) {
         // prepare display window
         let window = Block::default()
-            .title(self.display.title.as_str())
+            .title(format!("{}{}Hz ", self.display.title.as_str(), self.display.instruction_frequency))
             .border_style(Style::default().fg(Color::White))
             .borders(Borders::ALL);
         let window_area = self.areas(area).0;

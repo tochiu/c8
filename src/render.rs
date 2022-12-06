@@ -42,7 +42,7 @@ pub fn spawn_render_thread(c8: C8Lock, config: C8Config) -> (Sender<()>, JoinHan
         let mut renderer = Renderer {
             dbg_widget_state: Default::default(),
             dbg_visible: false,
-            vm_disp: Display::from(config.title.clone()),
+            vm_disp: Display::new(config.title.clone(), config.instruction_frequency),
             config,
         };
 
@@ -106,6 +106,8 @@ impl Renderer {
                 let Some(dbg) = maybe_dbg else {
                     unreachable!("debugger must exist for debugger draw call to be made")
                 };
+
+                self.vm_disp.instruction_frequency = dbg.frequency();
 
                 terminal.draw(|f| {
                     self.render_debugger(f, dbg, vm);
