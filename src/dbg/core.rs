@@ -1,14 +1,14 @@
-use super::{mem::*, shell::*};
+use super::{mem::*, shell::*, hist::{History, HistoryWidget}};
 
 use crate::{
     disass::Disassembler,
     run::Runner,
     vm::{
-        core::{VMHistoryFragment, VM},
+        core::VM,
         disp::{Display, DisplayWidget, DISPLAY_WINDOW_HEIGHT, DISPLAY_WINDOW_WIDTH},
         input::{Key, KEY_ORDERING},
         interp::{Instruction, Interpreter},
-        prog::{ProgramKind, PROGRAM_MEMORY_SIZE},
+        prog::PROGRAM_MEMORY_SIZE,
     },
 };
 
@@ -23,10 +23,8 @@ use tui::{
 
 use std::{
     cell::Cell,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
 };
-
-const HISTORY_CAPACITY: usize = 250_000;
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub(super) enum Watchpoint {
@@ -129,11 +127,11 @@ pub(super) enum DebugEvent {
 
 pub struct Debugger {
     active: bool,
-    recording: bool,
+    // recording: bool,
     vm_state_is_valid: bool,
 
-    history: VecDeque<VMHistoryFragment>,
-    history_cursor: usize,
+    history: History,
+    history_active: bool,
 
     breakpoints: HashSet<u16>,
     watchpoints: HashSet<Watchpoint>,
@@ -158,11 +156,9 @@ impl Debugger {
     pub fn new(vm: &VM) -> Self {
         let mut dbg = Debugger {
             active: false,
-            recording: false,
-            vm_state_is_valid: true,
 
-            history: VecDeque::new(),
-            history_cursor: 0,
+            history: Default::default(),
+            history_active: false,
 
             breakpoints: Default::default(),
             watchpoints: Default::default(),
@@ -181,6 +177,7 @@ impl Debugger {
             shell_active: false,
 
             vm_visible: false,
+            vm_state_is_valid: true,
         };
 
         dbg.vm_visible = true;
@@ -193,6 +190,135 @@ impl Debugger {
 
     pub fn is_active(&self) -> bool {
         self.active
+    }
+
+    fn pause(&mut self, runner: &mut Runner, vm: &VM) {
+        log::info!("c8vm interrupt!");
+        runner.pause().unwrap();
+        self.activate(vm);
+    }
+
+    fn activate(&mut self, vm: &VM) {
+        if self.active {
+            return;
+        }
+
+        self.shell.print("Paused.");
+        self.shell.output_pc(vm.interpreter());
+        self.active = true;
+    }
+
+    fn deactivate(&mut self) {
+        if !self.active {
+            return;
+        }
+
+        self.shell.print("Continuing.");
+        self.active = false;
+    }
+
+    fn stepn(&mut self, vm: &mut VM, amt: usize, time_step: f32) -> usize {
+        let mut amt_stepped = 0;
+
+        vm.time_step = time_step;
+        for step in 0..amt {
+            amt_stepped = step + 1;
+            vm.clear_event_queue();
+            if !self.step(vm) {
+                break;
+            }
+        }
+
+        amt_stepped
+    }
+
+    pub fn step(&mut self, vm: &mut VM) -> bool {
+
+        
+
+        let mut should_continue = if self.history.is_recording() {
+            self.history.step(vm)
+        } else {
+            vm.handle_inputs();
+            vm.step()
+        }.is_ok();
+
+        let interp = vm.interpreter();
+
+        // update memory draw read write execute (drwx) flags
+        self.memory.step(
+            self.memory_widget_state.get_mut(),
+            interp,
+            self.watch_state.pc,
+            self.watch_state.index,
+            self.watch_state.instruction,
+        );
+
+        // update disassembler
+        match self.watch_state.instruction {
+            Some(Instruction::Store(bytes)) => {
+                self.disassembler
+                    .update(vm.interpreter(), self.watch_state.index, bytes as u16);
+            }
+            Some(Instruction::StoreDecimal(_)) => {
+                self.disassembler
+                    .update(vm.interpreter(), self.watch_state.index, 3);
+            }
+            _ => (),
+        }
+
+        // update watch state
+        self.watch_state
+            .update(interp, &self.watchpoints, &mut self.event_queue);
+
+        // update breakpoints
+        if self.breakpoints.contains(&interp.pc) {
+            self.event_queue
+                .push(DebugEvent::BreakpointReached(interp.pc));
+        }
+
+        // handle debug events emitted
+        if !self.event_queue.is_empty() {
+            should_continue = false;
+            self.activate(vm);
+            for debug_event in self.event_queue.drain(..) {
+                match debug_event {
+                    DebugEvent::BreakpointReached(addr) => {
+                        self.shell
+                            .print(format!("Breakpoint {:#05X} reached", addr));
+                    }
+                    DebugEvent::WatchpointTrigger(watchpoint, old, new) => match watchpoint {
+                        Watchpoint::Pointer(pointer) => {
+                            let identifier = match pointer {
+                                MemoryPointer::Index => "i",
+                                MemoryPointer::ProgramCounter => "pc",
+                            };
+
+                            self.shell.print(format!("Pointer {} changed", identifier));
+                            self.shell.print(format!("Old value = {:#05X}", old));
+                            self.shell.print(format!("New value = {:#05X}", new));
+                        }
+                        Watchpoint::Register(register) => {
+                            self.shell
+                                .print(format!("Register v{:x} changed", register));
+                            self.shell
+                                .print(format!("Old value = {:0>3} ({:#05X})", old, old));
+                            self.shell
+                                .print(format!("New value = {:0>3} ({:#05X})", new, new));
+                        }
+                        Watchpoint::Address(addr) => {
+                            self.shell.print(format!("Address {:#05X} changed", addr));
+                            self.shell
+                                .print(format!("Old value = {:0>3} ({:#04X})", old, old));
+                            self.shell
+                                .print(format!("New value = {:0>3} ({:#04X})", new, new));
+                        }
+                    },
+                }
+            }
+        }
+
+        should_continue
     }
 
     pub fn handle_input_event(&mut self, event: Event, runner: &mut Runner, vm: &mut VM) -> bool {
@@ -212,6 +338,21 @@ impl Debugger {
                             );
                             if !self.memory_active {
                                 self.shell_active = true;
+                            }
+                        } else if self.history_active {
+                            let mut payload = (0, false);
+                            sink_event = self.history.handle_key_event(key_event, &mut self.history_active, &mut payload);
+                            if !self.history_active {
+                                self.shell_active = true;
+                            }
+                            let (seek_amt, seek_forwards) = payload;
+                            if seek_amt > 0 {
+                                if seek_forwards {
+                                    self.stepn(vm, seek_amt, 1.0 / runner.config().instruction_frequency as f32);
+                                } else {
+                                    self.history.undo(vm, seek_amt);
+                                    self.memory_widget_state.get_mut().poke();
+                                }
                             }
                         }
                     } else if key_event.code == KeyCode::Esc {
@@ -245,8 +386,8 @@ impl Debugger {
                             self.shell.print("Cannot continue c8vm from invalid state!");
                             continue;
                         }
-                        log::info!("c8vm resume!");
                         self.deactivate();
+                        self.history.clear_forward_history();
                         vm.clear_event_queue();
                         vm.keyboard_mut().clear();
                         runner.resume().unwrap();
@@ -260,19 +401,9 @@ impl Debugger {
                             .next()
                             .and_then(|arg| arg.parse::<u128>().ok())
                             .unwrap_or(1)
-                            .min(u16::MAX as u128) as usize;
-                        log::info!("stepping {}!", amt);
+                            .min(u32::MAX as u128) as usize;
 
-                        let mut amt_stepped = 0;
-
-                        for step in 0..amt {
-                            amt_stepped = step + 1;
-                            vm.time_step = 1.0 / runner.config().instruction_frequency as f32;
-                            vm.clear_event_queue();
-                            if !self.step(vm) {
-                                break;
-                            }
-                        }
+                        let amt_stepped = self.stepn(vm, amt, 1.0 / runner.config().instruction_frequency as f32);
 
                         if amt_stepped > 1 {
                             self.shell.print(format!("Stepped {} times", amt_stepped));
@@ -281,51 +412,29 @@ impl Debugger {
                         }
                     }
                     "rec" | "record" => {
-                        if self.recording {
+                        if self.history.is_recording() {
                             self.shell.print("Already recording VM state");
                             continue;
                         }
+                        self.history.start_recording();
                         self.shell.print("Recording VM state");
-                        if self.history.capacity() < HISTORY_CAPACITY {
-                            self.history.reserve_exact(HISTORY_CAPACITY - self.history.capacity());
-                        }
-                        self.recording = true;
                     }
                     "un" | "undo" | "rw" | "rewind" | "<<" => {
                         let Some(amt) = cmd_args
                             .next()
                             .unwrap_or("1")
                             .parse::<usize>().ok()
-                            .map(|amt| amt.min(self.history_cursor))
                         else {
                             self.shell.print("Please enter a valid amount to rewind");
                             continue;
                         };
 
-                        let mut amt_rewinded = 0;
+                        let amt_rewinded = self.history.undo(vm, amt);
 
-                        for _ in 0..amt {
-                            if self.history_cursor == 0 {
-                                break;
-                            }
-                            if &VMHistoryFragment::from(&*vm) == &self.history[self.history_cursor - 1] {
-                                log::trace!("Skipping identical VM state at history index {}", self.history_cursor - 1);
-                                self.history_cursor -= 1;
-                                if self.history_cursor == 0 {
-                                    break
-                                }
-                            }
-                            self.history_cursor -= 1;
-                            log::trace!("keyboard: {:?}", self.history[self.history_cursor].keyboard);
-                            vm.undo(&self.history[self.history_cursor]);
-                            amt_rewinded += 1;
-                        }
-
-                        
                         if amt_rewinded > 0 {
                             self.memory_widget_state.get_mut().poke();
                             if amt_rewinded > 1 {
-                                self.shell.print(format!("Rewound {} times", amt));
+                                self.shell.print(format!("Rewound {} times", amt_rewinded));
                             } else {
                                 self.shell.output_pc(vm.interpreter());
                             }
@@ -334,12 +443,20 @@ impl Debugger {
                         }
                     }
                     "stop" => {
-                        if self.recording {
+                        let Some("r" | "rec" | "record" | "recording") = cmd_args.next() else {
+                            self.shell.print("Please specify what to stop (record)");
+                            continue;
+                        };
+                        if self.history.is_recording() {
+                            self.history.stop_recording();
                             self.shell.print("Stopped recording VM state");
-                            self.recording = false;
                         } else {
                             self.shell.print("Already not recording VM state");
                         }
+                    }
+                    "h" | "hist" | "history" => {
+                        self.history_active = true;
+                        self.shell_active = false;
                     }
                     "kd" | "ku" | "keydown" | "keyup" => {
                         let Some(key) = cmd_args.next().and_then(|arg| Key::try_from(arg).ok()) else {
@@ -734,149 +851,6 @@ impl Debugger {
 
         sink_event
     }
-
-    fn pause(&mut self, runner: &mut Runner, vm: &VM) {
-        log::info!("c8vm interrupt!");
-        runner.pause().unwrap();
-        self.activate(vm);
-    }
-
-    fn activate(&mut self, vm: &VM) {
-        if self.active {
-            return;
-        }
-
-        self.shell.print("Paused.");
-        self.shell.output_pc(vm.interpreter());
-        self.active = true;
-    }
-
-    fn deactivate(&mut self) {
-        if !self.active {
-            return;
-        }
-
-        self.shell.print("Continuing.");
-        self.active = false;
-    }
-
-    pub fn step(&mut self, vm: &mut VM) -> bool {
-
-        vm.handle_inputs();
-
-        if self.recording {
-            if self.history.len() == HISTORY_CAPACITY {
-                self.history.pop_front();
-            }
-    
-            let state = VMHistoryFragment::from(&*vm); // get state of vm
-    
-            // if cursor is at the start or the new state is different from the previous one
-            // we know we might advance the history cursor
-            let amt_clearing = self.history.len() - self.history_cursor;
-            if amt_clearing == 0 || &self.history[self.history_cursor] != &state {
-                if amt_clearing > 0 {
-                    log::info!("Clearing {} history checkpoints equal or ahead of cursor", amt_clearing);
-                    self.history.truncate(self.history_cursor);
-                } else if self.history_cursor > 0 && state.can_replace(&self.history[self.history_cursor - 1], vm.interpreter()) {
-                    log::debug!("Replacing history checkpoint at cursor");
-                    self.history_cursor -= 1;
-                    self.history.pop_back();
-                }
-                self.history.push_back(state);
-            }
-            self.history_cursor = (self.history_cursor + 1).min(self.history.len());
-        } else if self.history.capacity() > 0 {
-            log::info!("Clearing history");
-            self.history = VecDeque::new();
-            self.history_cursor = 0;
-        }
-
-        let mut should_continue = vm.step().is_ok();
-
-        // edge case: keyboard contains ephemeral state so we must manually restore it
-        // before each step if we are seeking through recorded history
-        if self.history_cursor < self.history.len() {
-            self.history[self.history_cursor].restore_keyboard(&mut *vm);
-        }
-
-        let interp = vm.interpreter();
-
-        // update memory draw read write execute (drwx) flags
-        self.memory.step(
-            self.memory_widget_state.get_mut(),
-            interp,
-            self.watch_state.pc,
-            self.watch_state.index,
-            self.watch_state.instruction,
-        );
-
-        // update disassembler
-        match self.watch_state.instruction {
-            Some(Instruction::Store(bytes)) => {
-                self.disassembler
-                    .update(vm.interpreter(), self.watch_state.index, bytes as u16);
-            }
-            Some(Instruction::StoreDecimal(_)) => {
-                self.disassembler
-                    .update(vm.interpreter(), self.watch_state.index, 3);
-            }
-            _ => (),
-        }
-
-        // update watch state
-        self.watch_state
-            .update(interp, &self.watchpoints, &mut self.event_queue);
-
-        // update breakpoints
-        if self.breakpoints.contains(&interp.pc) {
-            self.event_queue
-                .push(DebugEvent::BreakpointReached(interp.pc));
-        }
-
-        // handle debug events emitted
-        if !self.event_queue.is_empty() {
-            should_continue = false;
-            self.activate(vm);
-            for debug_event in self.event_queue.drain(..) {
-                match debug_event {
-                    DebugEvent::BreakpointReached(addr) => {
-                        self.shell
-                            .print(format!("Breakpoint {:#05X} reached", addr));
-                    }
-                    DebugEvent::WatchpointTrigger(watchpoint, old, new) => match watchpoint {
-                        Watchpoint::Pointer(pointer) => {
-                            let identifier = match pointer {
-                                MemoryPointer::Index => "i",
-                                MemoryPointer::ProgramCounter => "pc",
-                            };
-
-                            self.shell.print(format!("Pointer {} changed", identifier));
-                            self.shell.print(format!("Old value = {:#05X}", old));
-                            self.shell.print(format!("New value = {:#05X}", new));
-                        }
-                        Watchpoint::Register(register) => {
-                            self.shell
-                                .print(format!("Register v{:x} changed", register));
-                            self.shell
-                                .print(format!("Old value = {:0>3} ({:#05X})", old, old));
-                            self.shell
-                                .print(format!("New value = {:0>3} ({:#05X})", new, new));
-                        }
-                        Watchpoint::Address(addr) => {
-                            self.shell.print(format!("Address {:#05X} changed", addr));
-                            self.shell
-                                .print(format!("Old value = {:0>3} ({:#04X})", old, old));
-                            self.shell
-                                .print(format!("New value = {:0>3} ({:#04X})", new, new));
-                        }
-                    },
-                }
-            }
-        }
-
-        should_continue
-    }
 }
 
 #[derive(Default)]
@@ -959,10 +933,10 @@ impl<'a> DebuggerWidget<'a> {
         (main, bottom, vm, logger)
     }
 
-    fn main_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
+    fn dbg_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
         let mut rects = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints(if self.dbg.shell_active {
+            .constraints(if self.dbg.shell_active || self.dbg.history.is_recording() {
                 [
                     Constraint::Length(area.width.saturating_sub(15) / 3),
                     Constraint::Length(15),
@@ -979,7 +953,26 @@ impl<'a> DebuggerWidget<'a> {
             })
             .split(area);
 
-        let (output_area, memory_area) = (rects[0], rects[2]);
+        let (left_area, memory_area) = (rects[0], rects[2]);
+
+        let (history_area, output_area) = {
+            if self.dbg.history_active {
+                (left_area, Rect::default())
+            } else if self.dbg.history.is_recording() && self.dbg.shell_active {
+                let rects = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(50),
+                        Constraint::Percentage(50)
+                    ])
+                    .split(left_area);
+                (rects[0], rects[1])
+            } else if self.dbg.shell_active {
+                (Rect::default(), left_area)
+            } else {
+                (Rect::default(), Rect::default())
+            }
+        };
 
         area = rects[1];
         rects = Layout::default()
@@ -1004,6 +997,7 @@ impl<'a> DebuggerWidget<'a> {
             timer_area,
             stack_area,
             output_area,
+            history_area,
         )
     }
 
@@ -1028,7 +1022,8 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             timer_area,
             stack_area,
             output_area,
-        ) = self.main_areas(main_area);
+            history_area
+        ) = self.dbg_areas(main_area);
 
         let base_border = Borders::TOP.union(Borders::LEFT);
 
@@ -1045,6 +1040,13 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         let output_block = Block::default().title(" Output ").borders(Borders::TOP);
         OutputWidget::from(&self.dbg.shell).render(output_block.inner(output_area), buf);
         output_block.render(output_area, buf);
+
+        // History
+        HistoryWidget {
+            history: &self.dbg.history,
+            active: self.dbg.history_active,
+            border: if self.dbg.shell_active { Borders::TOP } else { Borders::TOP.union(Borders::BOTTOM) },
+        }.render(history_area, buf);
 
         // Memory
         let memory_block =
@@ -1074,10 +1076,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         //Keyboard
         let (key_down_state, key_just_down, key_just_up) = self.vm.keyboard().state();
-        let just_key = match self.vm.interpreter().program.kind {
-            ProgramKind::COSMACVIP => key_just_up,
-            _ => key_just_down,
-        };
+        let just_key = self.vm.interpreter().pick_key(key_just_down, key_just_up);
 
         let mut keyboard_span_iter = KEY_ORDERING.iter().map(|key| {
             Span::styled(
@@ -1209,6 +1208,12 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
             buf.set_style(bottom_area, bottom_area_style);
             Paragraph::new("Esc to exit memory navigation")
+                .style(bottom_area_style)
+                .render(bottom_area, buf);
+        } else if self.dbg.history_active {
+            let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
+            buf.set_style(bottom_area, bottom_area_style);
+            Paragraph::new("Esc to exit history navigation")
                 .style(bottom_area_style)
                 .render(bottom_area, buf);
         }

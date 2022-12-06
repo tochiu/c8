@@ -9,6 +9,8 @@ use std::{
 };
 
 pub const INSTRUCTION_COLUMNS: usize = 36;
+pub const INSTRUCTION_MAX_LENGTH: usize = 13;
+pub const ADDRESS_COMMENT_TOKEN: &'static str = "#";
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub enum InstructionTag {
@@ -470,8 +472,9 @@ impl Display for Disassembler {
             if show_bin_comment || show_asm_comment {
                 write!(
                     f,
-                    "{}# ",
-                    " ".repeat(INSTRUCTION_COLUMNS.saturating_sub(content_length))
+                    "{}{} ",
+                    " ".repeat(INSTRUCTION_COLUMNS.saturating_sub(content_length)),
+                    ADDRESS_COMMENT_TOKEN
                 )?;
             }
 

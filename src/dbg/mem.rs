@@ -1,5 +1,7 @@
 use crate::{
-    disass::{write_byte_str, Disassembler, InstructionTag, INSTRUCTION_COLUMNS},
+    disass::{
+        write_byte_str, Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS,
+    },
     vm::{
         interp::{Instruction, Interpreter},
         prog::PROGRAM_MEMORY_SIZE,
@@ -15,7 +17,7 @@ use tui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
-use std::{io::Write, fs::File, path::Path, collections::HashSet};
+use std::{collections::HashSet, fs::File, io::Write, path::Path};
 
 use super::core::Watchpoint;
 
@@ -193,7 +195,6 @@ pub(super) struct MemoryWidget<'a> {
 }
 
 impl<'a> MemoryWidget<'_> {
-    const COMMENT_DELIM: char = '#';
     const COMMENT_STYLE: Style = Style {
         fg: Some(Color::Yellow),
         bg: None,
@@ -263,7 +264,7 @@ impl<'a> MemoryWidget<'_> {
                 &mut addr_opcode,
                 &mut addr_bin,
                 &mut addr_asm,
-                &mut addr_asm_desc
+                &mut addr_asm_desc,
             );
             for span in spans.0 {
                 write!(file, "{}", span.content)?;
@@ -297,17 +298,9 @@ impl<'a> MemoryWidget<'_> {
         let is_breakpoint = self.breakpoints.contains(&addr);
         let is_watchpoint = self.watchpoints.contains(&Watchpoint::Address(addr));
 
-        addr_header.push(if is_breakpoint {
-            '@'
-        } else {
-            ' '
-        });
+        addr_header.push(if is_breakpoint { '@' } else { ' ' });
 
-        addr_header.push(if is_watchpoint {
-            '*'
-        } else {
-            ' '
-        });
+        addr_header.push(if is_watchpoint { '*' } else { ' ' });
 
         self.disassembler
             .write_addr_disass(addr, addr_header, addr_opcode, addr_asm, addr_asm_desc)
@@ -357,7 +350,8 @@ impl<'a> MemoryWidget<'_> {
             Color::Red
         } else if self.watchpoints.contains(&Watchpoint::Address(addr)) {
             Color::Blue
-        } else if addr_is_selected || addr == self.interpreter.pc || addr == self.interpreter.index {
+        } else if addr_is_selected || addr == self.interpreter.pc || addr == self.interpreter.index
+        {
             Color::Black
         } else {
             Color::Reset
@@ -382,7 +376,7 @@ impl<'a> MemoryWidget<'_> {
 
         if show_comments {
             let mut comment = String::with_capacity(comment_len);
-            comment.push(MemoryWidget::COMMENT_DELIM);
+            comment.push_str(ADDRESS_COMMENT_TOKEN);
             if show_addr_bin {
                 comment.push(' ');
                 comment.push_str(&addr_bin);
@@ -396,19 +390,9 @@ impl<'a> MemoryWidget<'_> {
         }
 
         if addr_is_selected {
-            MemoryWidget::highlight_line(
-                &mut spans,
-                Color::White,
-                highlight,
-                addr_line_width,
-            );
+            MemoryWidget::highlight_line(&mut spans, Color::White, highlight, addr_line_width);
         } else if addr == self.interpreter.pc {
-            MemoryWidget::highlight_line(
-                &mut spans,
-                Color::LightGreen,
-                highlight,
-                addr_line_width,
-            );
+            MemoryWidget::highlight_line(&mut spans, Color::LightGreen, highlight, addr_line_width);
         } else if addr == self.interpreter.index {
             MemoryWidget::highlight_line(
                 &mut spans,
@@ -429,12 +413,13 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
         let addr_max = self.interpreter.memory.len() as u16 - 1;
 
         let (is_offset_pos, mut offset_abs) = {
-            let offset = state.offset.saturating_sub(state.offset_scale*area.height as i32);
-            (offset > 0, if self.active {
-                offset.abs() as u32
-            } else {
-                0
-            })
+            let offset = state
+                .offset
+                .saturating_sub(state.offset_scale * area.height as i32);
+            (
+                offset > 0,
+                if self.active { offset.abs() as u32 } else { 0 },
+            )
         };
 
         state.offset = 0;

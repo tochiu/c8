@@ -20,6 +20,7 @@ pub enum VMEvent {
     FocusingKeyDown(Key),
 }
 
+#[derive(Debug)]
 pub struct VMHistoryFragment {
     pub time_step: f32,
     pub keyboard: Keyboard,
@@ -104,6 +105,7 @@ impl VM {
     }
 
     pub fn undo(&mut self, state: &VMHistoryFragment) {
+        self.time_step = state.time_step;
         self.keyboard = state.keyboard;
         self.sound_timer = state.sound_timer;
         self.delay_timer = state.delay_timer;

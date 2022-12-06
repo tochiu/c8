@@ -208,21 +208,21 @@ pub enum InterpreterError {
 
 pub type InterpreterMemory = [u8; PROGRAM_MEMORY_SIZE as usize];
 
-#[derive(Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum PartialInterpreterStatePayload {
     Rng(StdRng),
     Display(DisplayBuffer),
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct InterpreterHistoryFragment {
-    instruction: Option<Instruction>,
-    pc: u16,
-    return_address: u16,
-    index: u16,
-    index_memory: [u8; 16],
-    registers: [u8; 16],
-    payload: Option<Box<PartialInterpreterStatePayload>>,
+    pub instruction: Option<Instruction>,
+    pub pc: u16,
+    pub return_address: u16,
+    pub index: u16,
+    pub index_memory: [u8; 16],
+    pub registers: [u8; 16],
+    pub payload: Option<Box<PartialInterpreterStatePayload>>,
 }
 
 impl From<&Interpreter> for InterpreterHistoryFragment {
