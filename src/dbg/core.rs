@@ -455,6 +455,10 @@ impl Debugger {
                         }
                     }
                     "h" | "hist" | "history" => {
+                        if !self.history.is_recording() {
+                            self.shell.print("Not recording VM state");
+                            continue;
+                        }
                         self.history_active = true;
                         self.shell_active = false;
                     }
