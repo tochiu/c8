@@ -936,7 +936,7 @@ impl<'a> DebuggerWidget<'a> {
     fn dbg_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
         let mut rects = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints(if self.dbg.shell_active || self.dbg.history.is_recording() {
+            .constraints(if !self.dbg.memory_active {
                 [
                     Constraint::Length(area.width.saturating_sub(15) / 3),
                     Constraint::Length(15),
