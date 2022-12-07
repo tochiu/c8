@@ -486,7 +486,13 @@ impl Debugger {
                         self.shell.print(format!("Set frequency to {}Hz", freq));
                     }
                     "kd" | "ku" | "keydown" | "keyup" => {
-                        let Some(key) = cmd_args.next().and_then(|arg| Key::try_from(arg).ok()) else {
+                        let Some(key) = cmd_args.next().and_then(|arg| {
+                            if arg.starts_with("0x") {
+                                u8::from_str_radix(&arg[2..], 16).ok().and_then(|code| Key::try_from(code).ok())
+                            } else {
+                                Key::try_from(arg).ok()
+                            }
+                        }) else {
                             self.shell.print("Please specify a valid key");
                             continue;
                         };
@@ -507,6 +513,17 @@ impl Debugger {
                                 key.to_str()
                             ));
                         }
+                    }
+                    "ks" | "keyswitch" | "keyswap" => {
+                        self.keyboard_shows_qwerty = !self.keyboard_shows_qwerty;
+                        self.shell.print(format!(
+                            "Keyboard layout switched to {}",
+                            if self.keyboard_shows_qwerty {
+                                "QWERTY"
+                            } else {
+                                "CHIP-8"
+                            }
+                        ));
                     }
                     "w" | "watch" | "watchpoint" => {
                         let Some(arg) = cmd_args.next() else {
@@ -1115,7 +1132,11 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         let mut keyboard_span_iter = KEY_ORDERING.iter().map(|key| {
             Span::styled(
-                format!(" {} ", key.to_str()),
+                if self.dbg.keyboard_shows_qwerty {
+                    format!(" {} ", key.to_str())
+                } else {
+                    format!(" {:X} ", key.to_code())
+                },
                 if key_down_state >> key.to_code() as u16 & 1 == 1 {
                     Style::default()
                         .fg(Color::Black)
