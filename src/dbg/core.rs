@@ -485,7 +485,7 @@ impl Debugger {
                         self.runner_frequency = freq;
                         self.shell.print(format!("Set frequency to {}Hz", freq));
                     }
-                    "kd" | "ku" | "keydown" | "keyup" => {
+                    "kd" | "ku" | "kp" | "keydown" | "keyup" | "keypress" => {
                         let Some(key) = cmd_args.next().and_then(|arg| {
                             if arg.starts_with("0x") {
                                 u8::from_str_radix(&arg[2..], 16).ok().and_then(|code| Key::try_from(code).ok())
@@ -505,10 +505,20 @@ impl Debugger {
                                 key.to_code(),
                                 key.to_str()
                             ));
-                        } else {
+                        } else if let "ku" | "keyup" = cmd {
                             vm.keyboard_mut().handle_key_up(key);
                             self.shell.print(format!(
                                 "Key \"{:X}\" ({}) up",
+                                key.to_code(),
+                                key.to_str()
+                            ));
+                        } else {
+                            vm.keyboard_mut().handle_key_up(key);
+                            vm.keyboard_mut().handle_focus();
+                            vm.keyboard_mut().handle_key_down(key);
+                            vm.keyboard_mut().handle_key_up(key);
+                            self.shell.print(format!(
+                                "Key \"{:X}\" ({}) pressed",
                                 key.to_code(),
                                 key.to_str()
                             ));
