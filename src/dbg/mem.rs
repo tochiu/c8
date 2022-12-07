@@ -1,3 +1,5 @@
+use super::core::Watchpoint;
+
 use crate::{
     disass::{
         write_byte_str, Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS,
@@ -18,8 +20,6 @@ use tui::{
 };
 
 use std::{collections::HashSet, fs::File, io::Write, path::Path};
-
-use super::core::Watchpoint;
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub(super) enum MemoryPointer {

@@ -1,34 +1,35 @@
 extern crate log;
 
-mod vm;
-mod run;
+mod config;
 mod dbg;
 mod disass;
 mod render;
-mod config;
+mod run;
+mod vm;
 
 use {
-    run::{Runner, RunResult},
+    disass::Disassembler,
+    render::spawn_render_thread,
+    run::{RunResult, Runner},
     vm::{
+        core::VMEvent,
         input::Key,
         prog::{Program, ProgramKind},
-        core::VMEvent
     },
-    disass::Disassembler,
-    render::spawn_render_thread
 };
 
 use config::C8Config;
+use crossterm::{
+    event::{
+        poll, read, Event, KeyCode as CrosstermKey, KeyEventKind,
+        KeyModifiers as CrosstermKeyModifiers,
+    },
+    style::Stylize,
+};
 use device_query::DeviceQuery;
-use crossterm::{event::{
-    poll, read, Event, KeyCode as CrosstermKey, KeyModifiers as CrosstermKeyModifiers, KeyEventKind,
-}, style::Stylize};
 use log::LevelFilter;
 
-use std::{
-    thread,
-    time::Duration, ops::DerefMut, collections::HashSet,
-};
+use std::{collections::HashSet, ops::DerefMut, thread, time::Duration};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // arg parsing
@@ -67,8 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // parse arguments for a CHIP48 or COSMACVIP interpreter flag
-    let program_kind: ProgramKind = if let Some(i) = args.iter().position(|arg| arg == "--kind")
-    {
+    let program_kind: ProgramKind = if let Some(i) = args.iter().position(|arg| arg == "--kind") {
         let kind = match args
             .iter()
             .nth(i + 1)
@@ -136,24 +136,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let (render_sender, render_thread) = spawn_render_thread(runner.c8(), config.clone());
 
-        let main_thread = { // main thread
+        let main_thread = {
+            // main thread
             let c8 = runner.c8();
             let vm_event_sender = runner.vm_event_sender();
 
             thread::spawn(move || -> RunResult {
-
                 let device_state = device_query::DeviceState::new();
                 let mut last_keys = HashSet::new();
 
                 // start vm
                 if !debugging {
-                    runner.resume().expect("Initial resume should always be a success");
+                    runner
+                        .resume()
+                        .expect("Initial resume should always be a success");
                 }
 
-                loop { // event loop
+                loop {
+                    // event loop
                     if poll(Duration::from_millis(15)).unwrap_or(false) {
                         if let Some(event) = read().ok() {
-
                             let mut sink_vm_events = false;
 
                             if debugging {
@@ -175,41 +177,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             match event {
                                 Event::Resize(_, _) => {
                                     render_sender.send(()).ok();
-                                },
+                                }
                                 Event::FocusGained => {
                                     if !sink_vm_events {
                                         vm_event_sender.send(VMEvent::Focus).ok();
                                     }
-                                },
+                                }
                                 Event::FocusLost => {
                                     if !sink_vm_events {
                                         vm_event_sender.send(VMEvent::Unfocus).ok();
                                     }
-                                },
-                                Event::Key(key_event) => { // Esc or Crtl+C interrupt handler
+                                }
+                                Event::Key(key_event) => {
+                                    // Esc or Crtl+C interrupt handler
                                     if (key_event.code == CrosstermKey::Esc && !sink_vm_events) // Esc is an exit if debugger isnt sinking keys
                                         || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL) // Ctrl+C is a hard exit
                                             && (key_event.code == CrosstermKey::Char('c')
                                                 || key_event.code == CrosstermKey::Char('C'))
                                     {
                                         // exit virtual machine
-                                        return runner.exit()
+                                        return runner.exit();
                                     } else if !sink_vm_events {
                                         // kinda expecting a crossterm key event to mean renderer is in focus
-                                        if let KeyEventKind::Repeat | KeyEventKind::Press = key_event.kind {
+                                        if let KeyEventKind::Repeat | KeyEventKind::Press =
+                                            key_event.kind
+                                        {
                                             if let Ok(key) = Key::try_from(key_event.code) {
-                                                vm_event_sender.send(VMEvent::FocusingKeyDown(key)).ok();
+                                                vm_event_sender
+                                                    .send(VMEvent::FocusingKeyDown(key))
+                                                    .ok();
                                             }
                                         }
                                     }
-                                },
+                                }
                                 _ => (),
                             };
                         }
                     }
 
                     // execute device query step
-                    let keys = HashSet::from_iter(device_state.get_keys().into_iter().filter_map(|keycode| Key::try_from(keycode).ok()));
+                    let keys = HashSet::from_iter(
+                        device_state
+                            .get_keys()
+                            .into_iter()
+                            .filter_map(|keycode| Key::try_from(keycode).ok()),
+                    );
 
                     for &key in keys.difference(&last_keys) {
                         vm_event_sender.send(VMEvent::KeyDown(key)).ok();
@@ -233,7 +245,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // wait for threads
         render_thread.join().unwrap()?;
-        println!("\n  {} for {} thread", format!("Waiting").green().bold(), program_kind);
+        println!(
+            "\n  {} for {} thread",
+            format!("Waiting").green().bold(),
+            program_kind
+        );
         println!("{}", main_thread.join().unwrap().unwrap());
     }
 

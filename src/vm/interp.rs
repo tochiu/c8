@@ -1,9 +1,9 @@
-use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
-
 use super::disp::{write_to_display, DisplayBuffer};
 use super::input::Key;
 use super::prog::{Program, ProgramKind, PROGRAM_MEMORY_SIZE, PROGRAM_STARTING_ADDRESS};
+
+use rand::rngs::StdRng;
+use rand::{RngCore, SeedableRng};
 
 use std::fmt::Display;
 use std::num::IntErrorKind;

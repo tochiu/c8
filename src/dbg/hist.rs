@@ -1,4 +1,10 @@
-use std::{collections::VecDeque, fmt::Write};
+use crate::{
+    disass::{write_inst_asm, ADDRESS_COMMENT_TOKEN, INSTRUCTION_MAX_LENGTH},
+    vm::{
+        core::{VMHistoryFragment, VM},
+        interp::InterpreterError,
+    },
+};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use tui::{
@@ -9,13 +15,7 @@ use tui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 
-use crate::{
-    disass::{write_inst_asm, ADDRESS_COMMENT_TOKEN, INSTRUCTION_MAX_LENGTH},
-    vm::{
-        core::{VMHistoryFragment, VM},
-        interp::InterpreterError,
-    },
-};
+use std::{collections::VecDeque, fmt::Write};
 
 const HISTORY_CAPACITY: usize = 250_000;
 

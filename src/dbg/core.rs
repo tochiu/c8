@@ -1,6 +1,11 @@
-use super::{mem::*, shell::*, hist::{History, HistoryWidget}};
+use super::{
+    hist::{History, HistoryWidget},
+    mem::*,
+    shell::*,
+};
 
 use crate::{
+    config::C8Config,
     disass::Disassembler,
     run::Runner,
     vm::{
@@ -9,7 +14,7 @@ use crate::{
         input::{Key, KEY_ORDERING},
         interp::{Instruction, Interpreter},
         prog::PROGRAM_MEMORY_SIZE,
-    }, config::C8Config,
+    },
 };
 
 use crossterm::event::{Event, KeyCode, KeyEventKind};
@@ -23,7 +28,9 @@ use tui::{
 
 use std::{
     cell::Cell,
-    collections::{HashMap, HashSet}, str::FromStr, num::{ParseIntError, IntErrorKind},
+    collections::{HashMap, HashSet},
+    num::{IntErrorKind, ParseIntError},
+    str::FromStr,
 };
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
@@ -243,15 +250,13 @@ impl Debugger {
     }
 
     pub fn step(&mut self, vm: &mut VM) -> bool {
-
-        
-
         let mut should_continue = if self.history.is_recording() {
             self.history.step(vm)
         } else {
             vm.handle_inputs();
             vm.step()
-        }.is_ok();
+        }
+        .is_ok();
 
         let interp = vm.interpreter();
 
@@ -351,14 +356,22 @@ impl Debugger {
                             }
                         } else if self.history_active {
                             let mut payload = (0, false);
-                            sink_event = self.history.handle_key_event(key_event, &mut self.history_active, &mut payload);
+                            sink_event = self.history.handle_key_event(
+                                key_event,
+                                &mut self.history_active,
+                                &mut payload,
+                            );
                             if !self.history_active {
                                 self.shell_active = true;
                             }
                             let (seek_amt, seek_forwards) = payload;
                             if seek_amt > 0 {
                                 if seek_forwards {
-                                    self.stepn(vm, seek_amt, 1.0 / runner.config().instruction_frequency as f32);
+                                    self.stepn(
+                                        vm,
+                                        seek_amt,
+                                        1.0 / runner.config().instruction_frequency as f32,
+                                    );
                                 } else {
                                     self.history.undo(vm, seek_amt);
                                     self.memory_widget_state.get_mut().poke();
@@ -413,7 +426,8 @@ impl Debugger {
                             .unwrap_or(1)
                             .min(u32::MAX as u128) as usize;
 
-                        let amt_stepped = self.stepn(vm, amt, 1.0 / runner.config().instruction_frequency as f32);
+                        let amt_stepped =
+                            self.stepn(vm, amt, 1.0 / runner.config().instruction_frequency as f32);
 
                         if amt_stepped > 1 {
                             self.shell.print(format!("Stepped {} times", amt_stepped));
@@ -1023,10 +1037,7 @@ impl<'a> DebuggerWidget<'a> {
             } else if self.dbg.history.is_recording() && self.dbg.shell_active {
                 let rects = Layout::default()
                     .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Percentage(50),
-                        Constraint::Percentage(50)
-                    ])
+                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .split(left_area);
                 (rects[0], rects[1])
             } else if self.dbg.shell_active {
@@ -1084,7 +1095,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             timer_area,
             stack_area,
             output_area,
-            history_area
+            history_area,
         ) = self.dbg_areas(main_area);
 
         let base_border = Borders::TOP.union(Borders::LEFT);
@@ -1107,8 +1118,13 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         HistoryWidget {
             history: &self.dbg.history,
             active: self.dbg.history_active,
-            border: if self.dbg.shell_active { Borders::TOP } else { Borders::TOP.union(Borders::BOTTOM) },
-        }.render(history_area, buf);
+            border: if self.dbg.shell_active {
+                Borders::TOP
+            } else {
+                Borders::TOP.union(Borders::BOTTOM)
+            },
+        }
+        .render(history_area, buf);
 
         // Memory
         let memory_block =
@@ -1286,17 +1302,16 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
     }
 }
 
-fn saturated_num_parse<F>(s: &str, min: F, max: F) -> Result<F, F::Err> 
-    where F: FromStr<Err = ParseIntError> + Ord
+fn saturated_num_parse<F>(s: &str, min: F, max: F) -> Result<F, F::Err>
+where
+    F: FromStr<Err = ParseIntError> + Ord,
 {
     match s.parse::<F>() {
         Ok(num) => Ok(num.max(min).min(max)),
-        Err(e) => {
-            match e.kind() {
-                IntErrorKind::PosOverflow => Ok(max),
-                IntErrorKind::NegOverflow => Ok(min),
-                _ => Err(e),
-            }
-        }
+        Err(e) => match e.kind() {
+            IntErrorKind::PosOverflow => Ok(max),
+            IntErrorKind::NegOverflow => Ok(min),
+            _ => Err(e),
+        },
     }
 }

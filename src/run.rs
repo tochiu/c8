@@ -11,14 +11,15 @@ use crate::{
 use crossterm::style::Stylize;
 
 use std::{
-    fmt::{Display, Write},
+    collections::BTreeMap,
+    fmt::Display,
     ops::DerefMut,
     sync::{
         mpsc::{channel, Receiver, Sender, TryRecvError},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant}, collections::BTreeMap,
+    time::{Duration, Instant},
 };
 
 pub type C8 = (VM, Option<Debugger>);
@@ -27,11 +28,16 @@ pub type C8Lock = Arc<Mutex<C8>>;
 pub type RunResult = Result<RunAnalytics, InterpreterError>;
 pub type RunControlResult = Result<(), &'static str>;
 
-fn update_frequency_stats(stats: &mut BTreeMap<u32, (Duration, u64)>, freq: u32, duration: Duration, instructions: u64) {
+fn update_frequency_stats(
+    stats: &mut BTreeMap<u32, (Duration, u64)>,
+    freq: u32,
+    duration: Duration,
+    instructions: u64,
+) {
     if instructions == 0 {
         return;
     }
-    
+
     let (total_duration, count) = stats.entry(freq).or_insert((Duration::ZERO, 0));
     *total_duration = total_duration.saturating_add(duration);
     *count += instructions;
@@ -130,7 +136,6 @@ impl Runner {
                     // vm runner step
                     let mut _guard = c8.lock().unwrap();
                     let (vm, maybe_dbg) = _guard.deref_mut();
-                    
 
                     if continuation.try_cont() {
                         // we can step synchronously
@@ -184,7 +189,12 @@ impl Runner {
                         runtime_start = Instant::now();
                         timer_instant = Instant::now();
                         if let Some(freq) = thread_frequency_receiver.try_iter().last() {
-                            update_frequency_stats(&mut frequency_stats, frequency, runtime_duration, instructions_executed);
+                            update_frequency_stats(
+                                &mut frequency_stats,
+                                frequency,
+                                runtime_duration,
+                                instructions_executed,
+                            );
                             interval.interval = Duration::from_secs_f64(1.0 / freq as f64);
                             frequency = freq;
                             runtime_duration = Duration::ZERO;
@@ -192,7 +202,12 @@ impl Runner {
                         }
                         interval.reset();
                     } else {
-                        update_frequency_stats(&mut frequency_stats, frequency, runtime_duration, instructions_executed);
+                        update_frequency_stats(
+                            &mut frequency_stats,
+                            frequency,
+                            runtime_duration,
+                            instructions_executed,
+                        );
                         return Ok(RunAnalytics {
                             frequency_stats,
                             program_name,
@@ -208,7 +223,7 @@ impl Runner {
             thread_handle,
             vm_event_sender,
             thread_continue_sender,
-            thread_frequency_sender
+            thread_frequency_sender,
         }
     }
 
@@ -294,7 +309,8 @@ impl Display for RunAnalytics {
             self.program_name
         )?;
 
-        for (&target_ips, &(runtime_duration, instructions_executed)) in self.frequency_stats.iter() {
+        for (&target_ips, &(runtime_duration, instructions_executed)) in self.frequency_stats.iter()
+        {
             let ips = instructions_executed as f64 / runtime_duration.as_secs_f64();
             let ips_diff = (ips - target_ips as f64) / target_ips as f64 * 100.0;
             let color_ips_diff = if ips_diff.abs() > OKAY_INSTRUCTION_FREQUENCY_DIFF {
@@ -304,7 +320,7 @@ impl Display for RunAnalytics {
             } else {
                 Stylize::green
             };
-            
+
             writeln!(
                 f,
                 "\n    {} Runner ({:#04}Hz): {:.3}s",
@@ -333,8 +349,6 @@ impl Display for RunAnalytics {
                 )?;
             }
         }
-
-        
 
         Ok(())
     }
