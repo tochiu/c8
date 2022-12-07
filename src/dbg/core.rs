@@ -142,6 +142,7 @@ pub struct Debugger {
 
     memory: Memory,
     memory_active: bool,
+    memory_visible: bool,
     memory_widget_state: Cell<MemoryWidgetState>,
 
     keyboard_shows_qwerty: bool,
@@ -171,6 +172,7 @@ impl Debugger {
 
             memory: Default::default(),
             memory_active: false,
+            memory_visible: true,
             memory_widget_state: Default::default(),
 
             keyboard_shows_qwerty: true,
@@ -734,6 +736,7 @@ impl Debugger {
 
                         match arg {
                             "vm" => self.vm_visible = true,
+                            "m" | "mem" | "memory" => self.memory_visible = true,
                             "verbose" => self.memory.verbose = true,
                             _ => {
                                 self.shell.print_unrecognized_cmd();
@@ -748,6 +751,7 @@ impl Debugger {
 
                         match arg {
                             "vm" => self.vm_visible = false,
+                            "m" | "mem" | "memory" => self.memory_visible = false,
                             "verbose" => self.memory.verbose = false,
                             _ => {
                                 self.shell.print_unrecognized_cmd();
@@ -961,7 +965,13 @@ impl<'a> DebuggerWidget<'a> {
     fn dbg_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
         let mut rects = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints(if !self.dbg.memory_active {
+            .constraints(if self.dbg.memory_active {
+                [
+                    Constraint::Length(0),
+                    Constraint::Length(15),
+                    Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(15))),
+                ]
+            } else if self.dbg.memory_visible {
                 [
                     Constraint::Length(area.width.saturating_sub(15) / 3),
                     Constraint::Length(15),
@@ -971,9 +981,9 @@ impl<'a> DebuggerWidget<'a> {
                 ]
             } else {
                 [
-                    Constraint::Length(0),
+                    Constraint::Length(area.width.saturating_sub(15)),
                     Constraint::Length(15),
-                    Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(15))),
+                    Constraint::Length(0),
                 ]
             })
             .split(area);
