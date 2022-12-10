@@ -28,10 +28,11 @@ use crossterm::{
 };
 use device_query::DeviceQuery;
 use log::LevelFilter;
+use anyhow::{Result, Context, bail};
 
 use std::{collections::HashSet, ops::DerefMut, thread, time::Duration};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<()> {
     // arg parsing
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
 
@@ -79,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some("cosmacvip") => ProgramKind::COSMACVIP,
             Some("chip48") => ProgramKind::CHIP48,
             Some("chip8") => ProgramKind::CHIP8,
-            _ => Err("--kind must be followed by COSMACVIP, CHIP48, or COMMON")?,
+            _ => bail!("--kind must be followed by COSMACVIP, CHIP48, or COMMON"),
         };
 
         args.remove(i + 1);
@@ -105,7 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         false
     };
 
-    let program_name = args.first().ok_or("expected program name")?;
+    let program_name = args.first().context("Expected program name")?;//.ok_or("lol")?;// .with_context(|| format!("Expected program name"))?; //.ok_or("expected program name")?;
     let program = Program::read(format!("roms/{}.ch8", program_name), program_kind)?;
 
     let config = C8Config {
@@ -134,6 +135,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // virtual machine runner
         let mut runner = Runner::spawn(config.clone(), program);
 
+        // wait
+        println!(
+            "\n  {} for {} thread",
+            format!("Waiting").green().bold(),
+            program_kind
+        );
+
         let (render_sender, render_thread) = spawn_render_thread(runner.c8(), config.clone());
 
         let main_thread = {
@@ -149,26 +157,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if !debugging {
                     runner
                         .resume()
-                        .expect("Initial resume should always be a success");
+                        .expect("Unable to resume runner");
                 }
 
                 loop {
                     // event loop
-                    if poll(Duration::from_millis(15)).unwrap_or(false) {
-                        if let Some(event) = read().ok() {
+                    let terminal_event_received = poll(Duration::from_millis(15))
+                        .expect("Unable to poll for terminal events");
+                    
+                    if runner.is_finished() {
+                        return runner.exit();
+                    }
+
+                    if terminal_event_received {
+                        if let Ok(event) = read().expect("Unable to read terminal event") {
                             let mut sink_vm_events = false;
 
                             if debugging {
-                                let mut _guard = c8.lock().unwrap();
+                                let mut _guard = c8.lock().expect("Unable to lock c8");
                                 let (vm, Some(dbg)) = _guard.deref_mut() else {
-                                    unreachable!("debug runs should contain a debugger");
+                                    unreachable!("Debug runs should contain a debugger");
                                 };
 
                                 sink_vm_events = sink_vm_events || dbg.is_active();
 
                                 // TODO: handle errors
                                 if dbg.handle_input_event(event.clone(), &mut runner, vm) {
-                                    render_sender.send(()).ok();
+                                    render_sender.send(())
+                                        .expect("Unable to send render event");
                                 }
 
                                 sink_vm_events = sink_vm_events || dbg.is_active();
@@ -176,16 +192,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             match event {
                                 Event::Resize(_, _) => {
-                                    render_sender.send(()).ok();
+                                    render_sender.send(())
+                                        .expect("Unable to send render event");
                                 }
                                 Event::FocusGained => {
                                     if !sink_vm_events {
-                                        vm_event_sender.send(VMEvent::Focus).ok();
+                                        vm_event_sender.send(VMEvent::Focus)
+                                            .expect("Unable to send VM focus event");
                                     }
                                 }
                                 Event::FocusLost => {
                                     if !sink_vm_events {
-                                        vm_event_sender.send(VMEvent::Unfocus).ok();
+                                        vm_event_sender.send(VMEvent::Unfocus).
+                                            expect("Unable to send VM unfocus event");
                                     }
                                 }
                                 Event::Key(key_event) => {
@@ -205,7 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             if let Ok(key) = Key::try_from(key_event.code) {
                                                 vm_event_sender
                                                     .send(VMEvent::FocusingKeyDown(key))
-                                                    .ok();
+                                                    .expect("Unable to send VM focusing key down event");
                                             }
                                         }
                                     }
@@ -224,33 +243,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
 
                     for &key in keys.difference(&last_keys) {
-                        vm_event_sender.send(VMEvent::KeyDown(key)).ok();
+                        vm_event_sender.send(VMEvent::KeyDown(key))
+                            .expect("Unable to send VM key down event");
                     }
 
                     for &key in last_keys.difference(&keys) {
-                        vm_event_sender.send(VMEvent::KeyUp(key)).ok();
+                        vm_event_sender.send(VMEvent::KeyUp(key))
+                            .expect("Unable to send VM key up event");
                     }
 
                     last_keys = keys;
 
                     // TODO attach event listener to logger instead of polling to update
                     if logger_level != LevelFilter::Off {
-                        render_sender.send(()).ok();
+                        render_sender.send(())
+                            .expect("Unable to send render event");
                     }
-
-                    // TODO: we should check state and exit if panic here maybe
                 }
             })
         };
 
         // wait for threads
-        render_thread.join().unwrap()?;
-        println!(
-            "\n  {} for {} thread",
-            format!("Waiting").green().bold(),
-            program_kind
-        );
-        println!("{}", main_thread.join().unwrap().unwrap());
+        render_thread.join().expect("Failed to join render thread");
+        match main_thread.join().expect("Failed to join main thread") {
+            Ok(analytics) => {
+                println!("{}", analytics);
+            }
+            Err(err) => {
+                println!(
+                    "\n    {} {}",
+                    format!("Error").red().bold(),
+                    err
+                );
+            }
+        }
     }
 
     Ok(())
