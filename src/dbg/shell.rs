@@ -4,7 +4,7 @@ use crate::{
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
-use tui::{buffer::Buffer, layout::Rect, style::Style, widgets::{StatefulWidget, Widget, Paragraph}, text::Spans};
+use tui::{buffer::Buffer, layout::Rect, style::{Style, Color}, widgets::{StatefulWidget, Widget, Paragraph}, text::{Spans, Span}};
 
 use std::{fmt::Write, cell::Cell};
 
@@ -22,7 +22,8 @@ pub(super) struct Shell {
 }
 
 impl Shell {
-    const PREFIX: &'static str = "(c8db) ";
+    const PREFIX_INPUT: &'static str = "(c8db) ";
+    const PREFIX_ERROR: &'static str = "ERROR: ";
 
     pub(super) fn handle_key_event(&mut self, event: KeyEvent) -> bool {
         if !self.input_enabled {
@@ -102,7 +103,7 @@ impl Shell {
         let mut buf = format!("{:#05X?}: ", interp.pc);
         let mut inst_asm = String::new();
         let mut inst_comment = String::new();
-        if let Ok(inst) = Instruction::try_from(interp.fetch()) {
+        if let Ok(inst) = interp.fetch().and_then(Instruction::try_from) {
             write_inst_asm(&inst, &mut inst_asm, &mut inst_comment).ok();
             write!(buf, "{}", inst_asm).ok();
             self.output.push(buf);
@@ -113,7 +114,7 @@ impl Shell {
                     .push(format!("{}# {}", " ".repeat(11), inst_comment));
             }
         } else {
-            buf.push_str(">> BAD INSTRUCTION <<");
+            buf.push_str("BAD INSTRUCTION");
             self.output.push(buf);
         }
     }
@@ -123,14 +124,18 @@ impl Shell {
     }
 
     pub(super) fn echo(&mut self, content: &str) {
-        let mut result = String::with_capacity(Shell::PREFIX.len() + content.len());
-        result.push_str(Shell::PREFIX);
+        let mut result = String::with_capacity(Shell::PREFIX_INPUT.len() + content.len());
+        result.push_str(Shell::PREFIX_INPUT);
         result.push_str(content);
         self.output.push(result);
     }
 
     pub(super) fn print<T: Into<String>>(&mut self, content: T) {
         self.output.push(content.into());
+    }
+
+    pub(super) fn error<T: Into<String>>(&mut self, content: T) {
+        self.output.push(format!("{}{}", Shell::PREFIX_ERROR, content.into()));
     }
 
     pub(super) fn print_unrecognized_cmd(&mut self) {
@@ -151,9 +156,9 @@ impl<'a> From<&'a Shell> for OutputWidget<'a> {
 }
 
 impl<'a> OutputWidget<'_> {
-    fn flush_line_buf(line_buf: &mut String, lines: &mut Vec<Spans>) {
+    fn flush_line_buf(line_buf: &mut String, lines: &mut Vec<Spans>, style: Style) {
         if !line_buf.is_empty() {
-            lines.push(Spans::from(line_buf.clone()));
+            lines.push(Spans::from(Span::styled(line_buf.clone(), style)));
             line_buf.clear();
         }
     }
@@ -171,6 +176,12 @@ impl<'a> Widget for OutputWidget<'_> {
         
         for mut entry in self.output.iter().rev().map(String::as_str) {
             let start = lines.len();
+            let style = if entry.starts_with(Shell::PREFIX_ERROR) {
+                Style::default().fg(Color::Red)
+            } else {
+                Style::default()
+            };
+
             while let Some(whitespace_len) = entry.find(|c: char| !c.is_whitespace()) {
                 let rest = &entry[whitespace_len..];
 
@@ -180,11 +191,11 @@ impl<'a> Widget for OutputWidget<'_> {
                 if line_buf.len() + whitespace_len + token_len > max_line_width {
                     if token_len > max_line_width {
                         for token_chunk in token.as_bytes().chunks(max_line_width) {
-                            OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
+                            OutputWidget::flush_line_buf(&mut line_buf, &mut lines, style);
                             line_buf.push_str(std::str::from_utf8(token_chunk).unwrap_or_default());
                         }
                     } else {
-                        OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
+                        OutputWidget::flush_line_buf(&mut line_buf, &mut lines, style);
                         line_buf.push_str(token);
                     }
                 } else {
@@ -198,7 +209,7 @@ impl<'a> Widget for OutputWidget<'_> {
                 }
             }
 
-            OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
+            OutputWidget::flush_line_buf(&mut line_buf, &mut lines, style);
 
             if lines.len() > start {
                 lines[start..].reverse();
@@ -240,7 +251,7 @@ impl<'a> CommandLineWidget<'_> {
         let cmd_x = area.left();
         let cmd_y = area.bottom().saturating_sub(1);
         let cmd_width = area.width as usize;
-        let cmd_prefix_width = Shell::PREFIX.len();
+        let cmd_prefix_width = Shell::PREFIX_INPUT.len();
         let input_area_width = cmd_width.saturating_sub(cmd_prefix_width);
 
         (cmd_x, cmd_y, cmd_width, cmd_prefix_width, input_area_width)
@@ -314,7 +325,7 @@ impl<'a> StatefulWidget for CommandLineWidget<'a> {
             buf.set_stringn(
                 cmd_x,
                 cmd_y,
-                Shell::PREFIX,
+                Shell::PREFIX_INPUT,
                 cmd_width as usize,
                 Style::default(),
             );

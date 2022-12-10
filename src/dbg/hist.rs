@@ -1,8 +1,7 @@
 use crate::{
     disass::{write_inst_asm, ADDRESS_COMMENT_TOKEN, INSTRUCTION_MAX_LENGTH},
     vm::{
-        core::{VMHistoryFragment, VM},
-        interp::InterpreterError,
+        core::{VMHistoryFragment, VM}
     },
 };
 
@@ -74,7 +73,7 @@ impl History {
         amt_rewinded
     }
 
-    pub(super) fn step(&mut self, vm: &mut VM) -> Result<(), InterpreterError> {
+    pub(super) fn step(&mut self, vm: &mut VM) -> Result<(), String> {
         // time step is not state that is completely deterministic so must set it if possible
         if self.cursor < self.fragments.len() {
             vm.time_step = self.fragments[self.cursor].time_step;
@@ -228,7 +227,7 @@ impl<'a> Widget for HistoryWidget<'_> {
                 let content = line
                     .0
                     .last_mut()
-                    .expect("line should be nonempty")
+                    .expect("Line should be nonempty")
                     .content
                     .to_mut();
                 for _ in 0..span_len {

@@ -47,11 +47,11 @@ impl From<u16> for InstructionParameters {
     fn from(bits: u16) -> Self {
         InstructionParameters {
             bits,
-            op:  ((bits & 0xF000) >> 4 * 3) as u8,
-            x:   ((bits & 0x0F00) >> 4 * 2) as u8,
-            y:   ((bits & 0x00F0) >> 4 * 1) as u8,
-            n:   ((bits & 0x000F) >> 4 * 0) as u8,
-            nn:  ((bits & 0x00FF) >> 4 * 0) as u8,
+            op: ((bits & 0xF000) >> 4 * 3) as u8,
+            x: ((bits & 0x0F00) >> 4 * 2) as u8,
+            y: ((bits & 0x00F0) >> 4 * 1) as u8,
+            n: ((bits & 0x000F) >> 4 * 0) as u8,
+            nn: ((bits & 0x00FF) >> 4 * 0) as u8,
             nnn: ((bits & 0x0FFF) >> 4 * 0) as u16,
         }
     }
@@ -198,14 +198,6 @@ pub enum InterpreterRequest {
     SetSoundTimer(u8),
 }
 
-#[derive(Debug)]
-pub enum InterpreterError {
-    BadInstruction(String),
-    OutOfBoundsPC,
-    OutOfBoundsRead,
-    OutOfBoundsWrite,
-}
-
 pub type InterpreterMemory = [u8; PROGRAM_MEMORY_SIZE as usize];
 
 #[derive(Debug, Eq, PartialEq)]
@@ -234,7 +226,7 @@ impl From<&Interpreter> for InterpreterHistoryFragment {
             index_memory.copy_from_slice(&interp.memory[index..index + n]);
         }
 
-        let instruction = Instruction::try_from(interp.fetch()).ok();
+        let instruction = interp.fetch().and_then(Instruction::try_from).ok();
 
         InterpreterHistoryFragment {
             payload: match instruction.as_ref() {
@@ -374,7 +366,7 @@ impl Interpreter {
 
         self.memory[index..index + n].copy_from_slice(&prior_state.index_memory);
         let Some(inst) = prior_state.instruction.as_ref() else {
-            unreachable!("cannot undo to a state without an instruction")
+            unreachable!("Cannot undo to a state without an instruction")
         };
         log::trace!("Undoing instruction: {:?}", inst);
 
@@ -412,49 +404,54 @@ impl Interpreter {
     }
 
     // interpret the next instruction
-    pub fn step(&mut self) -> Result<&InterpreterOutput, InterpreterError> {
+    pub fn step(&mut self) -> Result<&InterpreterOutput, String> {
         // clear output request
         self.output.request = None;
 
-        if (self.pc as usize) < self.memory.len() - 1 {
-            // fetch + decode
-            match Instruction::try_from(self.fetch()) {
-                Ok(inst) => {
-                    log::trace!("instruction {:#05X?} {:?} ", self.pc, inst);
-                    self.pc += 2;
+        // fetch + decode
+        match Instruction::try_from(self.fetch()?) {
+            Ok(inst) => {
+                log::trace!("Instruction {:#05X?} {:?} ", self.pc, inst);
+                self.pc += 2;
 
-                    // execute instruction
-                    Ok(self.exec(inst)?)
-                }
-                Err(e) => {
-                    log::error!("{}", e);
-                    Err(InterpreterError::BadInstruction(e))
+                // execute instruction
+                if let Err(e) = self.exec(inst) {
+                    self.pc -= 2; // revert program counter
+                    Err(e)
+                } else {
+                    Ok(&self.output)
                 }
             }
-        } else {
-            log::error!(
-                "Program counter address is out of bounds ({:#06X?})",
-                self.pc
-            );
-            Err(InterpreterError::OutOfBoundsPC)
+            Err(e) => Err(format!("Decode at {:#05X?} failed: {}", self.pc, e)),
         }
     }
 
-    pub fn pick_key<'a, 'b, T: TryInto<Key>>(&'a self, key_down: &'b Option<T>, key_up: &'b Option<T>) -> &'b Option<T> {
+    pub fn pick_key<'a, 'b, T: TryInto<Key>>(
+        &'a self,
+        key_down: &'b Option<T>,
+        key_up: &'b Option<T>,
+    ) -> &'b Option<T> {
         match self.program.kind {
             ProgramKind::COSMACVIP => key_up,
             _ => key_down,
         }
     }
 
-    pub fn fetch(&self) -> InstructionParameters {
-        InstructionParameters::from([
-            self.memory[self.pc as usize],
-            self.memory[self.pc as usize + 1],
-        ])
+    pub fn fetch(&self) -> Result<InstructionParameters, String> {
+        if (self.pc as usize) < self.memory.len() - 1 {
+            Ok(InstructionParameters::from([
+                self.memory[self.pc as usize],
+                self.memory[self.pc as usize + 1],
+            ]))
+        } else {
+            Err(format!(
+                "Fetch failed: Program counter address is out of bounds ({:#05X?})",
+                self.pc
+            ))
+        }
     }
 
-    pub fn exec(&mut self, inst: Instruction) -> Result<&InterpreterOutput, InterpreterError> {
+    fn exec(&mut self, inst: Instruction) -> Result<(), String> {
         match inst {
             Instruction::ClearScreen => {
                 self.output.display.fill(0);
@@ -464,10 +461,19 @@ impl Interpreter {
             Instruction::Jump(pc) => self.pc = pc,
 
             Instruction::JumpWithOffset(address, vx) => {
-                if self.program.kind == ProgramKind::CHIP48 {
-                    self.pc = address + self.registers[vx as usize] as u16;
+                let offset = if self.program.kind == ProgramKind::CHIP48 {
+                    self.registers[vx as usize] as u16
                 } else {
-                    self.pc = address + self.registers[0] as u16;
+                    self.registers[0] as u16
+                };
+
+                if (offset as usize) < self.memory.len().saturating_sub(address as usize) {
+                    self.pc = address + offset;
+                } else {
+                    return Err(format!(
+                        "Jump with offset failed: adresss {:#05X?} with offset {:#04X?} ({}) is out of bounds",
+                        address, offset, offset
+                    ));
                 }
             }
 
@@ -480,7 +486,7 @@ impl Interpreter {
                 self.pc = self
                     .stack
                     .pop()
-                    .expect("could not return from subroutine because stack is empty")
+                    .expect("Could not return from subroutine because stack is empty")
             }
 
             Instruction::SkipIfEqualsConstant(vx, value) => {
@@ -613,7 +619,12 @@ impl Interpreter {
                         self.index = addr.overflowing_add(1).0;
                     }
                 } else {
-                    return Err(InterpreterError::OutOfBoundsRead);
+                    return Err(format!(
+                        "Failed to load bytes from memory: out of bounds read ({} byte{} from i = {:#05X?})", 
+                        vx + 1, 
+                        if vx > 0 { "s" } else { "" }, 
+                        self.index
+                    ));
                 }
             }
 
@@ -625,7 +636,12 @@ impl Interpreter {
                         self.index = addr.overflowing_add(1).0;
                     }
                 } else {
-                    return Err(InterpreterError::OutOfBoundsWrite);
+                    return Err(format!(
+                        "Failed to write bytes to memory: out of bounds write ({} byte{} from i = {:#05X?})", 
+                        vx + 1, 
+                        if vx > 0 { "s" } else { "" }, 
+                        self.index
+                    ));
                 }
             }
 
@@ -640,7 +656,7 @@ impl Interpreter {
                         *val = number / 10u8.pow(i as u32) % 10;
                     }
                 } else {
-                    return Err(InterpreterError::OutOfBoundsWrite);
+                    return Err(format!("Failed to write decimal to memory: out of bounds write (3 bytes from i = {:#05X?})", self.index));
                 }
             }
 
@@ -653,7 +669,12 @@ impl Interpreter {
                     .checked_addr_add(self.index, height.saturating_sub(1) as u16)
                     .is_none()
                 {
-                    return Err(InterpreterError::OutOfBoundsRead);
+                    return Err(format!(
+                        "Failed to display: sprite out of bounds read ({} byte{} from i = {:#05X?})", 
+                        height, 
+                        if height > 1 { "s" } else { "" }, 
+                        self.index
+                    ));
                 }
 
                 self.exec_display_instruction(vx, vy, height);
@@ -661,8 +682,7 @@ impl Interpreter {
                 self.output.request = Some(InterpreterRequest::Display);
             }
         }
-
-        Ok(&self.output)
+        Ok(())
     }
 
     fn exec_display_instruction(&mut self, vx: u8, vy: u8, height: u8) {

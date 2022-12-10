@@ -3,12 +3,12 @@ use crate::{
     dbg::core::Debugger,
     vm::{
         core::{VMEvent, VM},
-        interp::InterpreterError,
         prog::Program,
     },
 };
 
 use crossterm::style::Stylize;
+use anyhow::Result;
 
 use std::{
     collections::BTreeMap,
@@ -25,7 +25,7 @@ use std::{
 pub type C8 = (VM, Option<Debugger>);
 pub type C8Lock = Arc<Mutex<C8>>;
 
-pub type RunResult = Result<RunAnalytics, InterpreterError>;
+pub type RunResult = Result<RunAnalytics, String>;
 pub type RunControlResult = Result<(), &'static str>;
 
 fn update_frequency_stats(
@@ -80,9 +80,11 @@ impl Runner {
         self.thread_handle.is_finished()
     }
 
-    pub fn set_instruction_frequency(&mut self, frequency: u32) {
+    pub fn set_instruction_frequency(&mut self, frequency: u32) -> Result<(), &'static str> {
         self.config.instruction_frequency = frequency;
-        self.thread_frequency_sender.send(frequency).ok();
+        self.thread_frequency_sender.send(frequency).map_err(|_| {
+            "Failed to send instruction frequency to vm thread"
+        })
     }
 
     pub fn spawn(config: C8Config, program: Program) -> Self {
@@ -134,7 +136,8 @@ impl Runner {
 
                 loop {
                     // vm runner step
-                    let mut _guard = c8.lock().unwrap();
+                    let mut _guard = c8.lock()
+                        .expect("Failed to lock C8 for main loop");
                     let (vm, maybe_dbg) = _guard.deref_mut();
 
                     if continuation.try_cont() {

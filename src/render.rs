@@ -12,32 +12,35 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-
 use tui::{
     backend::{CrosstermBackend, Backend},
     style::{Color, Style},
     widgets::{Block, Borders}, Frame,
 };
-
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
+use anyhow::{Result, anyhow};
 
 use std::{
-    io::{self, stdout, Result},
+    io::{self, stdout},
     ops::DerefMut, sync::mpsc::{Sender, channel, TryRecvError}, thread::{JoinHandle, self}, time::Duration,
 };
 
 type Terminal = tui::Terminal<CrosstermBackend<io::Stdout>>;
 
-pub fn spawn_render_thread(c8: C8Lock, config: C8Config) -> (Sender<()>, JoinHandle<Result<()>>) {
+pub fn spawn_render_thread(c8: C8Lock, config: C8Config) -> (Sender<()>, JoinHandle<()>) {
     let (render_sender, render_receiver) = channel::<()>();
-    let render_thread_handle = thread::spawn(move || -> Result<()> {
+    let render_thread_handle = thread::spawn(move || {
         // change terminal to an alternate screen so user doesnt lose terminal history on exit
         // and enable raw mode so we have full authority over event handling and output
-        enable_raw_mode()?;
-        let mut stdout = stdout();
-        execute!(stdout, EnterAlternateScreen)?;
+        enable_raw_mode()
+            .expect("Failed to enable terminal raw mode");
 
-        let mut terminal = tui::Terminal::new(CrosstermBackend::new(stdout))?;
+        let mut stdout = stdout();
+        execute!(stdout, EnterAlternateScreen)
+            .expect("Failed to enter alternate terminal screen");
+
+        let mut terminal = tui::Terminal::new(CrosstermBackend::new(stdout))
+            .expect("Failed to create interface to terminal backend");
 
         let mut renderer = Renderer {
             dbg_widget_state: Default::default(),
@@ -62,13 +65,17 @@ pub fn spawn_render_thread(c8: C8Lock, config: C8Config) -> (Sender<()>, JoinHan
 
             if let Err(TryRecvError::Disconnected) = render_receiver.try_recv() {
                 // clean up the terminal so its usable after program exit
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-                terminal.show_cursor()?;
-                return Ok(())
+                disable_raw_mode()
+                    .expect("Failed to disable terminal raw mode");
+                execute!(terminal.backend_mut(), LeaveAlternateScreen)
+                    .expect("Failed to leave alternate terminal screen");
+                terminal.show_cursor()
+                    .expect("Failed to show terminal cursor");
+                return;
             }
 
-            renderer.step(&mut terminal, should_redraw, &c8)?;
+            renderer.step(&mut terminal, should_redraw, &c8)
+                .expect("Failed render step");
             should_redraw = false;
 
             interval.sleep();
@@ -87,7 +94,9 @@ struct Renderer {
 
 impl Renderer {
     fn step(&mut self, terminal: &mut Terminal, should_redraw: bool, c8: &C8Lock) -> Result<()> {
-        let mut _guard = c8.lock().unwrap();
+        let mut _guard = c8.lock()
+            .map_err(|_| anyhow!("Failed to lock C8 for render step"))?;
+
         let (vm, maybe_dbg) = _guard.deref_mut();
 
         let did_vm_disp_update = if let Some(buf) = vm.extract_new_frame() {
@@ -98,7 +107,9 @@ impl Renderer {
         };
 
         let is_dbg_visible = maybe_dbg.as_ref().map_or(false, Debugger::is_active);
-        let should_draw = should_redraw || did_vm_disp_update || is_dbg_visible != self.dbg_visible;
+        let should_draw = should_redraw 
+            || did_vm_disp_update 
+            || is_dbg_visible != self.dbg_visible;
 
         if should_draw {
             self.dbg_visible = is_dbg_visible;

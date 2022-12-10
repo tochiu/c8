@@ -1,7 +1,7 @@
 use super::{
     disp::DisplayBuffer,
     input::{Key, Keyboard},
-    interp::{Interpreter, InterpreterError, InterpreterHistoryFragment, InterpreterRequest},
+    interp::{Interpreter, InterpreterHistoryFragment, InterpreterRequest},
     prog::Program,
 };
 
@@ -194,7 +194,7 @@ impl VM {
         input.delay_timer = delay_timer; // delay timer is ceiled to the nearest 8-bit number
     }
 
-    pub fn step(&mut self) -> Result<(), InterpreterError> {
+    pub fn step(&mut self) -> Result<(), String> {
         // interpret next instruction
         let output = self.interp.step()?;
 

@@ -170,68 +170,67 @@ fn main() -> Result<()> {
                     }
 
                     if terminal_event_received {
-                        if let Ok(event) = read().expect("Unable to read terminal event") {
-                            let mut sink_vm_events = false;
+                        let event = read().expect("Unable to read terminal event");
+                        let mut sink_vm_events = false;
 
-                            if debugging {
-                                let mut _guard = c8.lock().expect("Unable to lock c8");
-                                let (vm, Some(dbg)) = _guard.deref_mut() else {
-                                    unreachable!("Debug runs should contain a debugger");
-                                };
+                        if debugging {
+                            let mut _guard = c8.lock().expect("Unable to lock c8");
+                            let (vm, Some(dbg)) = _guard.deref_mut() else {
+                                unreachable!("Debug runs should contain a debugger");
+                            };
 
-                                sink_vm_events = sink_vm_events || dbg.is_active();
+                            sink_vm_events = sink_vm_events || dbg.is_active();
 
-                                // TODO: handle errors
-                                if dbg.handle_input_event(event.clone(), &mut runner, vm) {
-                                    render_sender.send(())
-                                        .expect("Unable to send render event");
-                                }
-
-                                sink_vm_events = sink_vm_events || dbg.is_active();
+                            // TODO: handle errors
+                            if dbg.handle_input_event(event.clone(), &mut runner, vm) {
+                                render_sender.send(())
+                                    .expect("Unable to send render event");
                             }
 
-                            match event {
-                                Event::Resize(_, _) => {
-                                    render_sender.send(())
-                                        .expect("Unable to send render event");
+                            sink_vm_events = sink_vm_events || dbg.is_active();
+                        }
+
+                        match event {
+                            Event::Resize(_, _) => {
+                                render_sender.send(())
+                                    .expect("Unable to send render event");
+                            }
+                            Event::FocusGained => {
+                                if !sink_vm_events {
+                                    vm_event_sender.send(VMEvent::Focus)
+                                        .expect("Unable to send VM focus event");
                                 }
-                                Event::FocusGained => {
-                                    if !sink_vm_events {
-                                        vm_event_sender.send(VMEvent::Focus)
-                                            .expect("Unable to send VM focus event");
-                                    }
+                            }
+                            Event::FocusLost => {
+                                if !sink_vm_events {
+                                    vm_event_sender.send(VMEvent::Unfocus).
+                                        expect("Unable to send VM unfocus event");
                                 }
-                                Event::FocusLost => {
-                                    if !sink_vm_events {
-                                        vm_event_sender.send(VMEvent::Unfocus).
-                                            expect("Unable to send VM unfocus event");
-                                    }
-                                }
-                                Event::Key(key_event) => {
-                                    // Esc or Crtl+C interrupt handler
-                                    if (key_event.code == CrosstermKey::Esc && !sink_vm_events) // Esc is an exit if debugger isnt sinking keys
-                                        || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL) // Ctrl+C is a hard exit
-                                            && (key_event.code == CrosstermKey::Char('c')
-                                                || key_event.code == CrosstermKey::Char('C'))
+                            }
+                            Event::Key(key_event) => {
+                                // Esc or Crtl+C interrupt handler
+                                if (key_event.code == CrosstermKey::Esc && !sink_vm_events) // Esc is an exit if debugger isnt sinking keys
+                                    || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL) // Ctrl+C is a hard exit
+                                        && (key_event.code == CrosstermKey::Char('c')
+                                            || key_event.code == CrosstermKey::Char('C'))
+                                {
+                                    // exit virtual machine
+                                    return runner.exit();
+                                } else if !sink_vm_events {
+                                    // kinda expecting a crossterm key event to mean renderer is in focus
+                                    if let KeyEventKind::Repeat | KeyEventKind::Press =
+                                        key_event.kind
                                     {
-                                        // exit virtual machine
-                                        return runner.exit();
-                                    } else if !sink_vm_events {
-                                        // kinda expecting a crossterm key event to mean renderer is in focus
-                                        if let KeyEventKind::Repeat | KeyEventKind::Press =
-                                            key_event.kind
-                                        {
-                                            if let Ok(key) = Key::try_from(key_event.code) {
-                                                vm_event_sender
-                                                    .send(VMEvent::FocusingKeyDown(key))
-                                                    .expect("Unable to send VM focusing key down event");
-                                            }
+                                        if let Ok(key) = Key::try_from(key_event.code) {
+                                            vm_event_sender
+                                                .send(VMEvent::FocusingKeyDown(key))
+                                                .expect("Unable to send VM focusing key down event");
                                         }
                                     }
                                 }
-                                _ => (),
-                            };
-                        }
+                            }
+                            _ => (),
+                        };
                     }
 
                     // execute device query step

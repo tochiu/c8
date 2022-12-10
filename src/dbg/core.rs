@@ -56,7 +56,7 @@ impl From<&Interpreter> for WatchState {
             index: interp.index,
             pc: interp.pc,
             addresses: Default::default(),
-            instruction: Instruction::try_from(interp.fetch()).ok(),
+            instruction: interp.fetch().and_then(Instruction::try_from).ok()
         }
     }
 }
@@ -123,7 +123,7 @@ impl WatchState {
         self.pc = interp.pc;
         self.index = interp.index;
         self.registers.copy_from_slice(&interp.registers);
-        self.instruction = Instruction::try_from(interp.fetch()).ok();
+        self.instruction = interp.fetch().and_then(Instruction::try_from).ok();
     }
 }
 
@@ -134,8 +134,6 @@ pub(super) enum DebugEvent {
 
 pub struct Debugger {
     active: bool,
-    // recording: bool,
-    vm_state_is_valid: bool,
 
     history: History,
     history_active: bool,
@@ -160,6 +158,7 @@ pub struct Debugger {
     shell_active: bool,
 
     vm_visible: bool,
+    vm_exception: Option<String>,
 }
 
 impl Debugger {
@@ -190,7 +189,7 @@ impl Debugger {
             shell_active: false,
 
             vm_visible: false,
-            vm_state_is_valid: true,
+            vm_exception: None
         };
 
         dbg.vm_visible = true;
@@ -207,12 +206,6 @@ impl Debugger {
 
     pub fn frequency(&self) -> u32 {
         self.runner_frequency
-    }
-
-    fn pause(&mut self, runner: &mut Runner, vm: &VM) {
-        log::info!("c8vm interrupt!");
-        runner.pause().unwrap();
-        self.activate(vm);
     }
 
     fn activate(&mut self, vm: &VM) {
@@ -250,13 +243,23 @@ impl Debugger {
     }
 
     pub fn step(&mut self, vm: &mut VM) -> bool {
-        let mut should_continue = if self.history.is_recording() {
+        if let Some(e) = self.vm_exception.as_ref() {
+            self.shell.error(e);
+            return false;
+        }
+
+        let step_result = if self.history.is_recording() {
             self.history.step(vm)
         } else {
             vm.handle_inputs();
             vm.step()
+        };
+        
+        let mut should_continue = step_result.is_ok();
+        if let Err(e) = step_result {
+            self.shell.error(&e);
+            self.vm_exception = Some(e);
         }
-        .is_ok();
 
         let interp = vm.interpreter();
 
@@ -339,587 +342,610 @@ impl Debugger {
     pub fn handle_input_event(&mut self, event: Event, runner: &mut Runner, vm: &mut VM) -> bool {
         let mut sink_event = false;
 
-        match event {
-            Event::Key(key_event) => {
-                if let KeyEventKind::Press | KeyEventKind::Repeat = key_event.kind {
-                    if self.active {
-                        if self.shell_active {
-                            sink_event = self.shell.handle_key_event(key_event);
-                        } else if self.memory_active {
-                            sink_event = self.memory.handle_key_event(
-                                key_event,
-                                self.memory_widget_state.get_mut(),
-                                &mut self.memory_active,
+        'handler: {
+            let Event::Key(key_event) = event else {
+                break 'handler;
+            };
+
+            let (KeyEventKind::Press | KeyEventKind::Repeat) = key_event.kind else {
+                break 'handler;
+            };
+
+            if self.active {
+                if self.shell_active {
+                    sink_event = self.shell.handle_key_event(key_event);
+                } else if self.memory_active {
+                    sink_event = self.memory.handle_key_event(
+                        key_event,
+                        self.memory_widget_state.get_mut(),
+                        &mut self.memory_active,
+                    );
+                    if !self.memory_active {
+                        self.shell_active = true;
+                    }
+                } else if self.history_active {
+                    let mut payload = (0, false);
+                    sink_event = self.history.handle_key_event(
+                        key_event,
+                        &mut self.history_active,
+                        &mut payload,
+                    );
+                    if !self.history_active {
+                        self.shell_active = true;
+                    }
+                    let (seek_amt, seek_forwards) = payload;
+                    if seek_amt > 0 {
+                        if seek_forwards {
+                            self.stepn(
+                                vm,
+                                seek_amt,
+                                1.0 / runner.config().instruction_frequency as f32,
                             );
-                            if !self.memory_active {
-                                self.shell_active = true;
+                        } else {
+                            self.history.undo(vm, seek_amt);
+                            self.memory_widget_state.get_mut().poke();
+                        }
+                    }
+                }
+            } else if key_event.code == KeyCode::Esc {
+                log::info!("c8vm interrupt!");
+                sink_event = true;
+                if let Err(e) = runner.pause() {
+                    log::warn!("Failed to pause runner: {}", e);
+                    break 'handler;
+                }
+                self.activate(vm);
+            }
+        }
+
+        for cmd_str in self.shell.try_recv().collect::<Vec<_>>() {
+            if !self.active {
+                break;
+            }
+
+            self.handle_cmd_input(&cmd_str, runner, vm);
+        }
+
+        sink_event
+    }
+
+    fn handle_cmd_input(&mut self, cmd_str: &str, runner: &mut Runner, vm: &mut VM) {
+        self.shell.echo(&cmd_str);
+
+        let lowercase_cmd_str = cmd_str.to_ascii_lowercase();
+        let mut cmd_args = lowercase_cmd_str.split_ascii_whitespace();
+
+        let Some(cmd) = cmd_args.next() else {
+            self.shell.print_unrecognized_cmd();
+            return;
+        };
+
+        // TODO: add more commands here
+        match cmd {
+            "r" | "c" | "run" | "cont" | "continue" => {
+                if let Some(e) = self.vm_exception.as_ref() {
+                    self.shell.error(e);
+                    return;
+                }
+
+                if let Err(e) = runner.resume() {
+                    log::warn!("Failed to resume runner: {}", e);
+                    return;
+                }
+
+                self.deactivate();
+                self.history.clear_forward_history();
+                vm.clear_event_queue();
+                vm.keyboard_mut().clear();
+            }
+            "s" | "step" => {
+                let amt = cmd_args
+                    .next()
+                    .and_then(|arg| arg.parse::<u128>().ok())
+                    .unwrap_or(1)
+                    .min(u32::MAX as u128) as usize;
+
+                let amt_stepped =
+                    self.stepn(vm, amt, 1.0 / runner.config().instruction_frequency as f32);
+
+                if amt_stepped > 1 {
+                    self.shell.print(format!("Stepped {} times", amt_stepped));
+                } else if amt_stepped == 1 {
+                    self.shell.output_pc(vm.interpreter());
+                }
+            }
+            "rec" | "record" => {
+                if self.history.is_recording() {
+                    self.shell.print("Already recording VM state");
+                    return;
+                }
+                self.history.start_recording();
+                self.shell.print("Recording VM state");
+            }
+            "un" | "undo" | "rw" | "rewind" | "<<" => {
+                let Some(amt) = cmd_args
+                    .next()
+                    .unwrap_or("1")
+                    .parse::<usize>().ok()
+                else {
+                    self.shell.print("Please enter a valid amount to rewind");
+                    return;
+                };
+
+                let amt_rewinded = self.history.undo(vm, amt);
+
+                if amt_rewinded > 0 {
+                    self.vm_exception = None;
+                    self.memory_widget_state.get_mut().poke();
+                    if amt_rewinded > 1 {
+                        self.shell.print(format!("Rewound {} times", amt_rewinded));
+                    } else {
+                        self.shell.output_pc(vm.interpreter());
+                    }
+                } else {
+                    self.shell.print("Nothing to rewind");
+                }
+            }
+            "stop" => {
+                let Some("r" | "rec" | "record" | "recording") = cmd_args.next() else {
+                    self.shell.print("Please specify what to stop (record)");
+                    return;
+                };
+                if self.history.is_recording() {
+                    self.history.stop_recording();
+                    self.shell.print("Stopped recording VM state");
+                } else {
+                    self.shell.print("Already not recording VM state");
+                }
+            }
+            "h" | "hist" | "history" => {
+                if !self.history.is_recording() {
+                    self.shell.print("Not recording VM state");
+                    return;
+                }
+                self.history_active = true;
+                self.shell_active = false;
+            }
+            "hz" | "hertz" | "rate" | "freq" | "frequency" => {
+                let Some(freq) = cmd_args
+                    .next()
+                    .and_then(|arg| saturated_num_parse(arg, 1, u32::MAX).ok())
+                else {
+                    self.shell.print("Please enter a valid frequency");
+                    return;
+                };
+
+                if let Err(e) = runner.set_instruction_frequency(freq) {
+                    self.shell.error(e);
+                    return;
+                }
+
+                self.runner_frequency = freq;
+                self.shell.print(format!("Set frequency to {}Hz", freq));
+            }
+            "kd" | "ku" | "kp" | "keydown" | "keyup" | "keypress" => {
+                let Some(key) = cmd_args.next().and_then(|arg| {
+                    if arg.starts_with("0x") {
+                        u8::from_str_radix(&arg[2..], 16).ok().and_then(|code| Key::try_from(code).ok())
+                    } else {
+                        Key::try_from(arg).ok()
+                    }
+                }) else {
+                    self.shell.print("Please specify a valid key");
+                    return;
+                };
+
+                if let "kd" | "keydown" = cmd {
+                    vm.keyboard_mut().handle_focus();
+                    vm.keyboard_mut().handle_key_down(key);
+                    self.shell.print(format!(
+                        "Key \"{:X}\" ({}) down",
+                        key.to_code(),
+                        key.to_str()
+                    ));
+                } else if let "ku" | "keyup" = cmd {
+                    vm.keyboard_mut().handle_key_up(key);
+                    self.shell.print(format!(
+                        "Key \"{:X}\" ({}) up",
+                        key.to_code(),
+                        key.to_str()
+                    ));
+                } else {
+                    vm.keyboard_mut().handle_key_up(key);
+                    vm.keyboard_mut().handle_focus();
+                    vm.keyboard_mut().handle_key_down(key);
+                    vm.keyboard_mut().handle_key_up(key);
+                    self.shell.print(format!(
+                        "Key \"{:X}\" ({}) pressed",
+                        key.to_code(),
+                        key.to_str()
+                    ));
+                }
+            }
+            "ks" | "keyswitch" | "keyswap" => {
+                self.keyboard_shows_qwerty = !self.keyboard_shows_qwerty;
+                self.shell.print(format!(
+                    "Keyboard layout switched to {}",
+                    if self.keyboard_shows_qwerty {
+                        "QWERTY"
+                    } else {
+                        "CHIP-8"
+                    }
+                ));
+            }
+            "w" | "watch" | "watchpoint" => {
+                let Some(arg) = cmd_args.next() else {
+                    self.shell.print("Please specify a register or pointer to watch");
+                    return;
+                };
+
+                let watchpoint_already_exists = !match arg {
+                    "pc" => self
+                        .watchpoints
+                        .insert(Watchpoint::Pointer(MemoryPointer::ProgramCounter)),
+                    "i" | "index" => self
+                        .watchpoints
+                        .insert(Watchpoint::Pointer(MemoryPointer::Index)),
+                    _ => {
+                        if arg.starts_with('v') {
+                            if let Some(register) = u8::from_str_radix(&arg[1..], 16)
+                                .ok()
+                                .and_then(|x| {
+                                    if x < 16 {
+                                        Some(x)
+                                    } else {
+                                        None
+                                    }
+                                })
+                            {
+                                self.watchpoints.insert(Watchpoint::Register(register))
+                            } else {
+                                self.shell.print(
+                                    "Please specify a valid register (v0..vf) to watch",
+                                );
+                                return;
                             }
-                        } else if self.history_active {
-                            let mut payload = (0, false);
-                            sink_event = self.history.handle_key_event(
-                                key_event,
-                                &mut self.history_active,
-                                &mut payload,
-                            );
-                            if !self.history_active {
-                                self.shell_active = true;
+                        } else if let Some(addr) = vm.interpreter().parse_addr(arg) {
+                            self.watch_state
+                                .addresses
+                                .insert(addr, vm.interpreter().memory[addr as usize]);
+                            self.watchpoints.insert(Watchpoint::Address(addr))
+                        } else {
+                            self.shell
+                                .print("Please specify a register or pointer to watch");
+                            return;
+                        }
+                    }
+                };
+
+                self.shell.print(if watchpoint_already_exists {
+                    format!("Watchpoint {} already exists", arg)
+                } else {
+                    format!("Watching {}", arg)
+                });
+            }
+            "b" | "break" | "breakpoint" => {
+                let Some(addr) = cmd_args.next().and_then(|arg| vm.interpreter().parse_addr(arg)) else {
+                    self.shell.print(format!("Please specify a valid address in the range [{:#05X}, {:#05X}]", 0, PROGRAM_MEMORY_SIZE - 1).as_str());
+                    return;
+                };
+
+                if self.breakpoints.insert(addr) {
+                    self.shell.print(format!("Breakpoint at {:#05X}", addr));
+                } else {
+                    self.shell
+                        .print(format!("Breakpoint at {:#05X} already exists", addr));
+                }
+            }
+            "switch" => {
+                let Some("k" | "keys" | "keyboard") = cmd_args.next() else {
+                    self.shell.print("Please specify a valid widget to switch to");
+                    return;
+                };
+            }
+            "clear" => {
+                let Some(arg) = cmd_args.next() else {
+                    self.shell.print("Please specify a watchpoint or breakpoint to clear");
+                    return;
+                };
+
+                match arg {
+                    "k" | "keys" | "keyboard" => {
+                        vm.keyboard_mut().clear();
+                        self.shell.print("Cleared keyboard");
+                    }
+                    "b" | "break" | "breakpoint" => {
+                        let Some(arg) = cmd_args.next() else {
+                            self.shell.print("Please specify a breakpoint (or all) to clear");
+                            return;
+                        };
+
+                        match arg {
+                            "all" => {
+                                self.breakpoints.clear();
+                                self.shell.print("Cleared all breakpoints");
                             }
-                            let (seek_amt, seek_forwards) = payload;
-                            if seek_amt > 0 {
-                                if seek_forwards {
-                                    self.stepn(
-                                        vm,
-                                        seek_amt,
-                                        1.0 / runner.config().instruction_frequency as f32,
-                                    );
+                            _ => {
+                                if let Some(addr) = vm.interpreter().parse_addr(arg) {
+                                    if self.breakpoints.remove(&addr) {
+                                        self.shell.print(format!(
+                                            "Cleared breakpoint at {:#05X}",
+                                            addr
+                                        ));
+                                    } else {
+                                        self.shell.print(format!(
+                                            "No breakpoint at {:#05X}",
+                                            addr
+                                        ));
+                                    }
                                 } else {
-                                    self.history.undo(vm, seek_amt);
-                                    self.memory_widget_state.get_mut().poke();
+                                    self.shell.print("Please specify a valid breakpoint (or all) to clear");
                                 }
                             }
                         }
-                    } else if key_event.code == KeyCode::Esc {
-                        self.pause(runner, vm);
-                        sink_event = true;
-                    }
-                }
-            }
-            _ => (),
-        }
-
-        let cmds = self.shell.try_recv();
-
-        if self.active {
-            for cmd_str in cmds.collect::<Vec<_>>() {
-                self.shell.echo(&cmd_str);
-
-                let lowercase_cmd_str = cmd_str.to_ascii_lowercase();
-                let mut cmd_args = lowercase_cmd_str.split_ascii_whitespace();
-
-                let Some(cmd) = cmd_args.next() else {
-                    self.shell.print_unrecognized_cmd();
-                    continue;
-                };
-
-                // TODO: add more commands here
-                match cmd {
-                    "r" | "c" | "run" | "cont" | "continue" => {
-                        if !self.vm_state_is_valid {
-                            // if vm stepped into an invalid state we cannot further it
-                            self.shell.print("Cannot continue c8vm from invalid state!");
-                            continue;
-                        }
-                        self.deactivate();
-                        self.history.clear_forward_history();
-                        vm.clear_event_queue();
-                        vm.keyboard_mut().clear();
-                        runner.resume().unwrap();
-                        break;
-                    }
-                    "s" | "step" => {
-                        if !self.vm_state_is_valid {
-                            self.shell.print("Cannot continue c8vm from invalid state!")
-                        }
-                        let amt = cmd_args
-                            .next()
-                            .and_then(|arg| arg.parse::<u128>().ok())
-                            .unwrap_or(1)
-                            .min(u32::MAX as u128) as usize;
-
-                        let amt_stepped =
-                            self.stepn(vm, amt, 1.0 / runner.config().instruction_frequency as f32);
-
-                        if amt_stepped > 1 {
-                            self.shell.print(format!("Stepped {} times", amt_stepped));
-                        } else if amt_stepped == 1 {
-                            self.shell.output_pc(vm.interpreter());
-                        }
-                    }
-                    "rec" | "record" => {
-                        if self.history.is_recording() {
-                            self.shell.print("Already recording VM state");
-                            continue;
-                        }
-                        self.history.start_recording();
-                        self.shell.print("Recording VM state");
-                    }
-                    "un" | "undo" | "rw" | "rewind" | "<<" => {
-                        let Some(amt) = cmd_args
-                            .next()
-                            .unwrap_or("1")
-                            .parse::<usize>().ok()
-                        else {
-                            self.shell.print("Please enter a valid amount to rewind");
-                            continue;
-                        };
-
-                        let amt_rewinded = self.history.undo(vm, amt);
-
-                        if amt_rewinded > 0 {
-                            self.memory_widget_state.get_mut().poke();
-                            if amt_rewinded > 1 {
-                                self.shell.print(format!("Rewound {} times", amt_rewinded));
-                            } else {
-                                self.shell.output_pc(vm.interpreter());
-                            }
-                        } else {
-                            self.shell.print("Nothing to rewind");
-                        }
-                    }
-                    "stop" => {
-                        let Some("r" | "rec" | "record" | "recording") = cmd_args.next() else {
-                            self.shell.print("Please specify what to stop (record)");
-                            continue;
-                        };
-                        if self.history.is_recording() {
-                            self.history.stop_recording();
-                            self.shell.print("Stopped recording VM state");
-                        } else {
-                            self.shell.print("Already not recording VM state");
-                        }
-                    }
-                    "h" | "hist" | "history" => {
-                        if !self.history.is_recording() {
-                            self.shell.print("Not recording VM state");
-                            continue;
-                        }
-                        self.history_active = true;
-                        self.shell_active = false;
-                    }
-                    "hz" | "hertz" | "rate" | "freq" | "frequency" => {
-                        let Some(freq) = cmd_args
-                            .next()
-                            .and_then(|arg| saturated_num_parse(arg, 1, u32::MAX).ok())
-                        else {
-                            self.shell.print("Please enter a valid frequency");
-                            continue;
-                        };
-
-                        runner.set_instruction_frequency(freq);
-                        self.runner_frequency = freq;
-                        self.shell.print(format!("Set frequency to {}Hz", freq));
-                    }
-                    "kd" | "ku" | "kp" | "keydown" | "keyup" | "keypress" => {
-                        let Some(key) = cmd_args.next().and_then(|arg| {
-                            if arg.starts_with("0x") {
-                                u8::from_str_radix(&arg[2..], 16).ok().and_then(|code| Key::try_from(code).ok())
-                            } else {
-                                Key::try_from(arg).ok()
-                            }
-                        }) else {
-                            self.shell.print("Please specify a valid key");
-                            continue;
-                        };
-
-                        if let "kd" | "keydown" = cmd {
-                            vm.keyboard_mut().handle_focus();
-                            vm.keyboard_mut().handle_key_down(key);
-                            self.shell.print(format!(
-                                "Key \"{:X}\" ({}) down",
-                                key.to_code(),
-                                key.to_str()
-                            ));
-                        } else if let "ku" | "keyup" = cmd {
-                            vm.keyboard_mut().handle_key_up(key);
-                            self.shell.print(format!(
-                                "Key \"{:X}\" ({}) up",
-                                key.to_code(),
-                                key.to_str()
-                            ));
-                        } else {
-                            vm.keyboard_mut().handle_key_up(key);
-                            vm.keyboard_mut().handle_focus();
-                            vm.keyboard_mut().handle_key_down(key);
-                            vm.keyboard_mut().handle_key_up(key);
-                            self.shell.print(format!(
-                                "Key \"{:X}\" ({}) pressed",
-                                key.to_code(),
-                                key.to_str()
-                            ));
-                        }
-                    }
-                    "ks" | "keyswitch" | "keyswap" => {
-                        self.keyboard_shows_qwerty = !self.keyboard_shows_qwerty;
-                        self.shell.print(format!(
-                            "Keyboard layout switched to {}",
-                            if self.keyboard_shows_qwerty {
-                                "QWERTY"
-                            } else {
-                                "CHIP-8"
-                            }
-                        ));
                     }
                     "w" | "watch" | "watchpoint" => {
                         let Some(arg) = cmd_args.next() else {
-                            self.shell.print("Please specify a register or pointer to watch");
-                            continue;
-                        };
-
-                        let watchpoint_already_exists = !match arg {
-                            "pc" => self
-                                .watchpoints
-                                .insert(Watchpoint::Pointer(MemoryPointer::ProgramCounter)),
-                            "i" | "index" => self
-                                .watchpoints
-                                .insert(Watchpoint::Pointer(MemoryPointer::Index)),
-                            _ => {
-                                if arg.starts_with('v') {
-                                    if let Some(register) = u8::from_str_radix(&arg[1..], 16)
-                                        .ok()
-                                        .and_then(|x| if x < 16 { Some(x) } else { None })
-                                    {
-                                        self.watchpoints.insert(Watchpoint::Register(register))
-                                    } else {
-                                        self.shell.print(
-                                            "Please specify a valid register (v0..vf) to watch",
-                                        );
-                                        continue;
-                                    }
-                                } else if let Some(addr) = vm.interpreter().parse_addr(arg) {
-                                    self.watch_state
-                                        .addresses
-                                        .insert(addr, vm.interpreter().memory[addr as usize]);
-                                    self.watchpoints.insert(Watchpoint::Address(addr))
-                                } else {
-                                    self.shell
-                                        .print("Please specify a register or pointer to watch");
-                                    continue;
-                                }
-                            }
-                        };
-
-                        self.shell.print(if watchpoint_already_exists {
-                            format!("Watchpoint {} already exists", arg)
-                        } else {
-                            format!("Watching {}", arg)
-                        });
-                    }
-                    "b" | "break" | "breakpoint" => {
-                        let Some(addr) = cmd_args.next().and_then(|arg| vm.interpreter().parse_addr(arg)) else {
-                            self.shell.print(format!("Please specify a valid address in the range [{:#05X}, {:#05X}]", 0, PROGRAM_MEMORY_SIZE - 1).as_str());
-                            continue;
-                        };
-
-                        if self.breakpoints.insert(addr) {
-                            self.shell.print(format!("Breakpoint at {:#05X}", addr));
-                        } else {
-                            self.shell
-                                .print(format!("Breakpoint at {:#05X} already exists", addr));
-                        }
-                    }
-                    "switch" => {
-                        let Some("k" | "keys" | "keyboard") = cmd_args.next() else {
-                            self.shell.print("Please specify a valid widget to switch to");
-                            continue;
-                        };
-                    }
-                    "clear" => {
-                        let Some(arg) = cmd_args.next() else {
-                            self.shell.print("Please specify a watchpoint or breakpoint to clear");
-                            continue;
+                            self.shell.print("Please specify a watchpoint (or all) to clear");
+                            return;
                         };
 
                         match arg {
-                            "k" | "keys" | "keyboard" => {
-                                vm.keyboard_mut().clear();
-                                self.shell.print("Cleared keyboard");
-                            }
-                            "b" | "break" | "breakpoint" => {
-                                let Some(arg) = cmd_args.next() else {
-                                    self.shell.print("Please specify a breakpoint (or all) to clear");
-                                    continue;
-                                };
-
-                                match arg {
-                                    "all" => {
-                                        self.breakpoints.clear();
-                                        self.shell.print("Cleared all breakpoints");
-                                    }
-                                    _ => {
-                                        if let Some(addr) = vm.interpreter().parse_addr(arg) {
-                                            if self.breakpoints.remove(&addr) {
-                                                self.shell.print(format!(
-                                                    "Cleared breakpoint at {:#05X}",
-                                                    addr
-                                                ));
-                                            } else {
-                                                self.shell.print(format!(
-                                                    "No breakpoint at {:#05X}",
-                                                    addr
-                                                ));
-                                            }
-                                        } else {
-                                            self.shell.print("Please specify a valid breakpoint (or all) to clear");
-                                        }
-                                    }
-                                }
-                            }
-                            "w" | "watch" | "watchpoint" => {
-                                let Some(arg) = cmd_args.next() else {
-                                    self.shell.print("Please specify a watchpoint (or all) to clear");
-                                    continue;
-                                };
-
-                                match arg {
-                                    "all" => {
-                                        self.watchpoints.clear();
-                                        self.watch_state.addresses.clear();
-                                        self.shell.print("Cleared all watchpoints");
-                                    }
-                                    _ => {
-                                        let watchpoint = match arg {
-                                            "pc" => {
-                                                Watchpoint::Pointer(MemoryPointer::ProgramCounter)
-                                            }
-                                            "i" | "index" => {
-                                                Watchpoint::Pointer(MemoryPointer::Index)
-                                            }
-                                            _ => {
-                                                if arg.starts_with('v') {
-                                                    if let Some(register) =
-                                                        u8::from_str_radix(&arg[1..], 16)
-                                                            .ok()
-                                                            .and_then(|x| {
-                                                                if x < 16 {
-                                                                    Some(x)
-                                                                } else {
-                                                                    None
-                                                                }
-                                                            })
-                                                    {
-                                                        Watchpoint::Register(register)
-                                                    } else {
-                                                        self.shell.print("Please specify a valid register (v0..vf) to clear");
-                                                        continue;
-                                                    }
-                                                } else if let Some(addr) =
-                                                    vm.interpreter().parse_addr(arg)
-                                                {
-                                                    Watchpoint::Address(addr)
-                                                } else {
-                                                    self.shell.print("Please specify a valid watchpoint (or all) to clear");
-                                                    continue;
-                                                }
-                                            }
-                                        };
-
-                                        if self.watchpoints.remove(&watchpoint) {
-                                            if let Watchpoint::Address(addr) = watchpoint {
-                                                self.watch_state.addresses.remove(&addr);
-                                                self.shell.print(format!(
-                                                    "Cleared watchpoint {:#05X}",
-                                                    addr
-                                                ));
-                                            } else {
-                                                self.shell
-                                                    .print(format!("Cleared watchpoint {}", arg));
-                                            }
-                                        } else {
-                                            self.shell.print(format!("No watchpoint {}", arg));
-                                        }
-                                    }
-                                }
+                            "all" => {
+                                self.watchpoints.clear();
+                                self.watch_state.addresses.clear();
+                                self.shell.print("Cleared all watchpoints");
                             }
                             _ => {
-                                self.shell
-                                    .print("Please specify a breakpoint or watchpoint to clear");
-                            }
-                        }
-                    }
-                    "i" | "info" => {
-                        let Some(arg) = cmd_args.next() else {
-                            self.shell.print_unrecognized_cmd();
-                            continue;
-                        };
-
-                        match arg {
-                            "b" | "break" | "breakpoint" => {
-                                if self.breakpoints.is_empty() {
-                                    self.shell.print("No breakpoints set");
-                                } else {
-                                    self.shell.print("Breakpoints:");
-                                    for breakpoint in self.breakpoints.iter() {
-                                        self.shell.print(format!("    - {:#05X}", breakpoint));
+                                let watchpoint = match arg {
+                                    "pc" => {
+                                        Watchpoint::Pointer(MemoryPointer::ProgramCounter)
                                     }
-                                }
-                            }
-                            "w" | "watch" | "watchpoint" => {
-                                if self.watchpoints.is_empty() {
-                                    self.shell.print("No watchpoints set");
-                                } else {
-                                    self.shell.print("Watchpoints:");
-                                    for watchpoint in self.watchpoints.iter() {
+                                    "i" | "index" => {
+                                        Watchpoint::Pointer(MemoryPointer::Index)
+                                    }
+                                    _ => {
+                                        if arg.starts_with('v') {
+                                            if let Some(register) =
+                                                u8::from_str_radix(&arg[1..], 16)
+                                                    .ok()
+                                                    .and_then(|x| {
+                                                        if x < 16 {
+                                                            Some(x)
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
+                                            {
+                                                Watchpoint::Register(register)
+                                            } else {
+                                                self.shell.print("Please specify a valid register (v0..vf) to clear");
+                                                return;
+                                            }
+                                        } else if let Some(addr) =
+                                            vm.interpreter().parse_addr(arg)
+                                        {
+                                            Watchpoint::Address(addr)
+                                        } else {
+                                            self.shell.print("Please specify a valid watchpoint (or all) to clear");
+                                            return;
+                                        }
+                                    }
+                                };
+
+                                if self.watchpoints.remove(&watchpoint) {
+                                    if let Watchpoint::Address(addr) = watchpoint {
+                                        self.watch_state.addresses.remove(&addr);
                                         self.shell.print(format!(
-                                            "    - {}",
-                                            match watchpoint {
-                                                Watchpoint::Register(register) =>
-                                                    format!("v{:x}", register),
-                                                Watchpoint::Pointer(pointer) =>
-                                                    pointer.identifier().to_string(),
-                                                Watchpoint::Address(addr) =>
-                                                    format!("{:#05X}", addr),
-                                            }
+                                            "Cleared watchpoint {:#05X}",
+                                            addr
                                         ));
+                                    } else {
+                                        self.shell
+                                            .print(format!("Cleared watchpoint {}", arg));
                                     }
-                                }
-                            }
-                            _ => {
-                                self.shell.print_unrecognized_cmd();
-                                continue;
-                            }
-                        }
-                    }
-                    "show" => {
-                        let Some(arg) = cmd_args.next() else {
-                            self.shell.print_unrecognized_cmd();
-                            continue;
-                        };
-
-                        match arg {
-                            "vm" => self.vm_visible = true,
-                            "m" | "mem" | "memory" => self.memory_visible = true,
-                            "verbose" => self.memory.verbose = true,
-                            _ => {
-                                self.shell.print_unrecognized_cmd();
-                            }
-                        }
-                    }
-                    "hide" => {
-                        let Some(arg) = cmd_args.next() else {
-                            self.shell.print_unrecognized_cmd();
-                            continue;
-                        };
-
-                        match arg {
-                            "vm" => self.vm_visible = false,
-                            "m" | "mem" | "memory" => self.memory_visible = false,
-                            "verbose" => self.memory.verbose = false,
-                            _ => {
-                                self.shell.print_unrecognized_cmd();
-                            }
-                        }
-                    }
-                    "dump" => {
-                        let Some(arg) = cmd_args.next() else {
-                            self.shell.print_unrecognized_cmd();
-                            continue;
-                        };
-
-                        let ("m" | "mem" | "memory") = arg else {
-                            self.shell.print_unrecognized_cmd();
-                            continue;
-                        };
-
-                        if cmd_args.next().is_none() {
-                            self.shell.print("Please specify a path to dump memory to");
-                            continue;
-                        }
-
-                        let path_arg =
-                            cmd_str.trim_start()[4..].trim_start()[arg.len()..].trim_start();
-                        let path = if path_arg.starts_with('"') {
-                            if let Some(end) = path_arg[1..].find('"') {
-                                &path_arg[1..end + 1]
-                            } else {
-                                self.shell
-                                    .print("Please specify a valid path to dump memory to");
-                                continue;
-                            }
-                        } else {
-                            path_arg
-                        };
-
-                        match (MemoryWidget {
-                            active: self.memory_active,
-                            memory: &self.memory,
-                            watchpoints: &self.watchpoints,
-                            breakpoints: &self.breakpoints,
-                            interpreter: vm.interpreter(),
-                            disassembler: &self.disassembler,
-                        }
-                        .write_to_file(path))
-                        {
-                            Ok(_) => self.shell.print(format!("Dumped memory to \"{}\"", path)),
-                            Err(e) => self
-                                .shell
-                                .print(format!("Failed to dump memory to \"{}\": {}", path, e)),
-                        };
-                    }
-                    "m" | "mem" | "memory" => {
-                        self.memory_active = true;
-                        self.shell_active = false;
-                    }
-                    "g" | "goto" => {
-                        let Some(arg) = cmd_args.next() else {
-                            self.shell.print_unrecognized_cmd();
-                            continue;
-                        };
-
-                        match arg {
-                            "start" => self.memory_widget_state.get_mut().set_focus(0),
-                            "end" => self
-                                .memory_widget_state
-                                .get_mut()
-                                .set_focus(vm.interpreter().memory.len() as u16 - 1),
-                            "pc" => self
-                                .memory_widget_state
-                                .get_mut()
-                                .set_focus(vm.interpreter().pc),
-                            "i" | "index" => self
-                                .memory_widget_state
-                                .get_mut()
-                                .set_focus(vm.interpreter().index),
-                            _ => {
-                                if let Some(addr) = vm.interpreter().parse_addr(arg) {
-                                    self.memory_widget_state.get_mut().set_focus(addr)
                                 } else {
-                                    self.shell.print_unrecognized_cmd()
+                                    self.shell.print(format!("No watchpoint {}", arg));
                                 }
                             }
-                        };
-                    }
-                    "f" | "follow" => {
-                        let Some(arg) = cmd_args.next() else {
-                            self.shell.print("Follow command syntax:");
-                            self.shell.print("    - follow (pc/i)");
-                            continue;
-                        };
-
-                        match arg {
-                            "pc" => {
-                                self.memory.follow = Some(MemoryPointer::ProgramCounter);
-                                self.memory_widget_state.get_mut().poke();
-                            }
-                            "i" | "index" => {
-                                self.memory.follow = Some(MemoryPointer::Index);
-                                self.memory_widget_state.get_mut().poke();
-                            }
-                            _ => {
-                                self.shell
-                                    .print("Please specify a pointer (pc/i) to follow");
-                                continue;
-                            }
                         }
-
-                        self.shell.print(format!("Following {}", arg));
                     }
-                    "uf" | "unfollow" => {
-                        if let Some(pointer) = self.memory.follow {
-                            self.memory.follow = None;
-                            self.shell
-                                .print(format!("Unfollowing {}", pointer.identifier()));
+                    _ => {
+                        self.shell
+                            .print("Please specify a breakpoint or watchpoint to clear");
+                    }
+                }
+            }
+            "i" | "info" => {
+                let Some(arg) = cmd_args.next() else {
+                    self.shell.print_unrecognized_cmd();
+                    return;
+                };
+
+                match arg {
+                    "b" | "break" | "breakpoint" => {
+                        if self.breakpoints.is_empty() {
+                            self.shell.print("No breakpoints set");
                         } else {
-                            self.shell.print("Already unfollowed");
+                            self.shell.print("Breakpoints:");
+                            for breakpoint in self.breakpoints.iter() {
+                                self.shell.print(format!("    - {:#05X}", breakpoint));
+                            }
                         }
                     }
+                    "w" | "watch" | "watchpoint" => {
+                        if self.watchpoints.is_empty() {
+                            self.shell.print("No watchpoints set");
+                        } else {
+                            self.shell.print("Watchpoints:");
+                            for watchpoint in self.watchpoints.iter() {
+                                self.shell.print(format!(
+                                    "    - {}",
+                                    match watchpoint {
+                                        Watchpoint::Register(register) =>
+                                            format!("v{:x}", register),
+                                        Watchpoint::Pointer(pointer) =>
+                                            pointer.identifier().to_string(),
+                                        Watchpoint::Address(addr) =>
+                                            format!("{:#05X}", addr),
+                                    }
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        self.shell.print_unrecognized_cmd();
+                        return;
+                    }
+                }
+            }
+            "show" => {
+                let Some(arg) = cmd_args.next() else {
+                    self.shell.print_unrecognized_cmd();
+                    return;
+                };
+
+                match arg {
+                    "vm" => self.vm_visible = true,
+                    "m" | "mem" | "memory" => self.memory_visible = true,
+                    "verbose" => self.memory.verbose = true,
                     _ => {
                         self.shell.print_unrecognized_cmd();
                     }
                 }
             }
-        }
+            "hide" => {
+                let Some(arg) = cmd_args.next() else {
+                    self.shell.print_unrecognized_cmd();
+                    return;
+                };
 
-        sink_event
+                match arg {
+                    "vm" => self.vm_visible = false,
+                    "m" | "mem" | "memory" => self.memory_visible = false,
+                    "verbose" => self.memory.verbose = false,
+                    _ => {
+                        self.shell.print_unrecognized_cmd();
+                    }
+                }
+            }
+            "dump" => {
+                let Some(arg) = cmd_args.next() else {
+                    self.shell.print_unrecognized_cmd();
+                    return;
+                };
+
+                let ("m" | "mem" | "memory") = arg else {
+                    self.shell.print_unrecognized_cmd();
+                    return;
+                };
+
+                if cmd_args.next().is_none() {
+                    self.shell.print("Please specify a path to dump memory to");
+                    return;
+                }
+
+                let path_arg =
+                    cmd_str.trim_start()[4..].trim_start()[arg.len()..].trim_start();
+                let path = if path_arg.starts_with('"') {
+                    if let Some(end) = path_arg[1..].find('"') {
+                        &path_arg[1..end + 1]
+                    } else {
+                        self.shell
+                            .print("Please specify a valid path to dump memory to");
+                        return;
+                    }
+                } else {
+                    path_arg
+                };
+
+                match (MemoryWidget {
+                    active: self.memory_active,
+                    memory: &self.memory,
+                    watchpoints: &self.watchpoints,
+                    breakpoints: &self.breakpoints,
+                    interpreter: vm.interpreter(),
+                    disassembler: &self.disassembler,
+                }
+                .write_to_file(path))
+                {
+                    Ok(_) => self.shell.print(format!("Dumped memory to \"{}\"", path)),
+                    Err(e) => self
+                        .shell
+                        .print(format!("Failed to dump memory to \"{}\": {}", path, e)),
+                };
+            }
+            "m" | "mem" | "memory" => {
+                self.memory_active = true;
+                self.shell_active = false;
+            }
+            "g" | "goto" => {
+                let Some(arg) = cmd_args.next() else {
+                    self.shell.print_unrecognized_cmd();
+                    return;
+                };
+
+                match arg {
+                    "start" => self.memory_widget_state.get_mut().set_focus(0),
+                    "end" => self
+                        .memory_widget_state
+                        .get_mut()
+                        .set_focus(vm.interpreter().memory.len() as u16 - 1),
+                    "pc" => self
+                        .memory_widget_state
+                        .get_mut()
+                        .set_focus(vm.interpreter().pc),
+                    "i" | "index" => self
+                        .memory_widget_state
+                        .get_mut()
+                        .set_focus(vm.interpreter().index),
+                    _ => {
+                        if let Some(addr) = vm.interpreter().parse_addr(arg) {
+                            self.memory_widget_state.get_mut().set_focus(addr)
+                        } else {
+                            self.shell.print_unrecognized_cmd()
+                        }
+                    }
+                };
+            }
+            "f" | "follow" => {
+                let Some(arg) = cmd_args.next() else {
+                    self.shell.print("Follow command syntax:");
+                    self.shell.print("    - follow (pc/i)");
+                    return;
+                };
+
+                match arg {
+                    "pc" => {
+                        self.memory.follow = Some(MemoryPointer::ProgramCounter);
+                        self.memory_widget_state.get_mut().poke();
+                    }
+                    "i" | "index" => {
+                        self.memory.follow = Some(MemoryPointer::Index);
+                        self.memory_widget_state.get_mut().poke();
+                    }
+                    _ => {
+                        self.shell
+                            .print("Please specify a pointer (pc/i) to follow");
+                        return;
+                    }
+                }
+
+                self.shell.print(format!("Following {}", arg));
+            }
+            "uf" | "unfollow" => {
+                if let Some(pointer) = self.memory.follow {
+                    self.memory.follow = None;
+                    self.shell
+                        .print(format!("Unfollowing {}", pointer.identifier()));
+                } else {
+                    self.shell.print("Already unfollowed");
+                }
+            }
+            _ => {
+                self.shell.print_unrecognized_cmd();
+            }
+        }
     }
 }
 
