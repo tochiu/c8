@@ -1,4 +1,4 @@
-use crate::vm::{
+use crate::run::{
     interp::{Instruction, InstructionParameters, Interpreter, InterpreterMemory},
     prog::{Program, PROGRAM_STARTING_ADDRESS},
 };

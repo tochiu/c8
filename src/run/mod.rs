@@ -1,3 +1,4 @@
+pub mod vm;
 pub mod core;
 pub mod prog;
 pub mod disp;

@@ -1,7 +1,7 @@
 use crate::{
     disass::{write_inst_asm, ADDRESS_COMMENT_TOKEN, INSTRUCTION_MAX_LENGTH},
-    vm::{
-        core::{VMHistoryFragment, VM}
+    run::{
+        vm::{VMHistoryFragment, VM}
     },
 };
 

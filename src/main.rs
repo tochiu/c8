@@ -5,14 +5,13 @@ mod dbg;
 mod disass;
 mod render;
 mod run;
-mod vm;
 
 use {
     disass::Disassembler,
     render::spawn_render_thread,
-    run::{RunResult, Runner},
-    vm::{
-        core::VMEvent,
+    run::{
+        core::{RunResult, Runner},
+        vm::VMEvent,
         input::Key,
         prog::{Program, ProgramKind},
     },

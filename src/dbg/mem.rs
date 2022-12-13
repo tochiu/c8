@@ -4,7 +4,7 @@ use crate::{
     disass::{
         write_byte_str, Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS,
     },
-    vm::{
+    run::{
         interp::{Instruction, Interpreter},
         prog::PROGRAM_MEMORY_SIZE,
     },

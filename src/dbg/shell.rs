@@ -1,6 +1,6 @@
 use crate::{
     disass::write_inst_asm,
-    vm::interp::{Instruction, Interpreter},
+    run::interp::{Instruction, Interpreter},
 };
 
 use crossterm::event::{KeyCode, KeyEvent};

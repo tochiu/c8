@@ -7,9 +7,9 @@ use super::{
 use crate::{
     config::C8Config,
     disass::Disassembler,
-    run::Runner,
-    vm::{
-        core::VM,
+    run::{
+        vm::VM,
+        core::Runner,
         disp::{Display, DisplayWidget, DISPLAY_WINDOW_HEIGHT, DISPLAY_WINDOW_WIDTH},
         input::{Key, KEY_ORDERING},
         interp::{Instruction, Interpreter},

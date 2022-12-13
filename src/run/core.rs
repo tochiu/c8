@@ -1,8 +1,8 @@
 use crate::{
     config::{C8Config, GOOD_INSTRUCTION_FREQUENCY_DIFF, OKAY_INSTRUCTION_FREQUENCY_DIFF},
     dbg::core::Debugger,
-    vm::{
-        core::{VMEvent, VM},
+    run::{
+        vm::{VMEvent, VM},
         prog::Program,
     },
 };
