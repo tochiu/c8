@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, fs::read, io, path::Path, fmt::Display};
+use std::{ffi::OsStr, fmt::Display, fs::read, io, path::Path};
 
 pub const PROGRAM_STARTING_ADDRESS: u16 = 0x200;
 pub const PROGRAM_MEMORY_SIZE: u16 = 4096;
@@ -10,7 +10,7 @@ pub enum ProgramKind {
     #[default]
     CHIP8,
     CHIP48,
-    COSMACVIP
+    COSMACVIP,
 }
 
 impl Display for ProgramKind {
@@ -18,7 +18,7 @@ impl Display for ProgramKind {
         match self {
             Self::CHIP8 => write!(f, "CHIP8"),
             Self::CHIP48 => write!(f, "CHIP48"),
-            Self::COSMACVIP => write!(f, "CHIP8 (COSMAC VIP)")
+            Self::COSMACVIP => write!(f, "CHIP8 (COSMAC VIP)"),
         }
     }
 }
@@ -31,9 +31,17 @@ pub struct Program {
 }
 
 impl Program {
-    pub fn read<P: AsRef<Path>>(path: P, kind: ProgramKind) -> io::Result<Program> {
+    pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Program> {
         let program = Program {
-            kind,
+            kind: match path.as_ref().extension().and_then(OsStr::to_str) {
+                Some("ch8" | "c8") => ProgramKind::CHIP8,
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Invalid file extension (expected .ch8 or .c8)",
+                    ))
+                }
+            },
             name: path
                 .as_ref()
                 .file_stem()
@@ -47,7 +55,7 @@ impl Program {
             Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "program size ({}B) is below minimum size (2B)",
+                    "Program size ({}B) is below minimum size (2B)",
                     program.data.len()
                 ),
             ))
@@ -55,7 +63,7 @@ impl Program {
             Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "program size ({}B) exceeds maximum size ({}B)",
+                    "Program size ({}B) exceeds maximum size ({}B)",
                     program.data.len(),
                     PROGRAM_MAX_SIZE
                 ),

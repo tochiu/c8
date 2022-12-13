@@ -6,7 +6,7 @@ use super::{
 
 use crate::{
     config::C8Config,
-    disass::Disassembler,
+    asm::Disassembler,
     run::{
         vm::VM,
         core::Runner,
@@ -152,7 +152,7 @@ pub struct Debugger {
 
     keyboard_shows_qwerty: bool,
 
-    runner_frequency: u32,
+    runner_frequency: u16,
 
     shell: Shell,
     shell_active: bool,
@@ -204,7 +204,7 @@ impl Debugger {
         self.active
     }
 
-    pub fn frequency(&self) -> u32 {
+    pub fn frequency(&self) -> u16 {
         self.runner_frequency
     }
 
@@ -509,7 +509,7 @@ impl Debugger {
             "hz" | "hertz" | "rate" | "freq" | "frequency" => {
                 let Some(freq) = cmd_args
                     .next()
-                    .and_then(|arg| saturated_num_parse(arg, 1, u32::MAX).ok())
+                    .and_then(|arg| saturated_num_parse(arg, 1, u16::MAX).ok())
                 else {
                     self.shell.print("Please enter a valid frequency");
                     return;

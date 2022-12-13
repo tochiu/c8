@@ -1,17 +1,25 @@
 use crate::{
     config::{C8Config, GOOD_INSTRUCTION_FREQUENCY_DIFF, OKAY_INSTRUCTION_FREQUENCY_DIFF},
     dbg::core::Debugger,
+    render::spawn_render_thread,
     run::{
-        vm::{VMEvent, VM},
         prog::Program,
+        vm::{VMEvent, VM},
     },
 };
 
-use crossterm::style::Stylize;
 use anyhow::Result;
+use crossterm::{
+    event::{
+        poll, read, Event, KeyCode as CrosstermKey, KeyEventKind,
+        KeyModifiers as CrosstermKeyModifiers,
+    },
+    style::Stylize,
+};
+use device_query::DeviceQuery;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     fmt::Display,
     ops::DerefMut,
     sync::{
@@ -22,15 +30,143 @@ use std::{
     time::{Duration, Instant},
 };
 
+use super::input::Key;
+
 pub type C8 = (VM, Option<Debugger>);
 pub type C8Lock = Arc<Mutex<C8>>;
 
 pub type RunResult = Result<RunAnalytics, String>;
 pub type RunControlResult = Result<(), &'static str>;
 
+pub fn spawn_run_threads(
+    program: Program,
+    config: C8Config,
+) -> (JoinHandle<()>, JoinHandle<RunResult>) {
+    // runner
+    let mut runner = Runner::spawn(config.clone(), program);
+
+    // render
+    let (render_sender, render_thread) = spawn_render_thread(runner.c8(), config.clone());
+
+    // main thread
+    let c8 = runner.c8();
+    let vm_event_sender = runner.vm_event_sender();
+
+    let main_thread = thread::spawn(move || -> RunResult {
+        let device_state = device_query::DeviceState::new();
+        let mut last_keys = HashSet::new();
+
+        // start runner
+        if !config.debugging {
+            runner.resume().expect("Unable to resume runner");
+        }
+
+        loop {
+            // event loop
+            let terminal_event_received =
+                poll(Duration::from_millis(15)).expect("Unable to poll for terminal events");
+
+            if runner.is_finished() {
+                return runner.exit();
+            }
+
+            if terminal_event_received {
+                let event = read().expect("Unable to read terminal event");
+                let mut sink_vm_events = false;
+
+                if config.debugging {
+                    let mut _guard = c8.lock().expect("Unable to lock c8");
+                    let (vm, Some(dbg)) = _guard.deref_mut() else {
+                        unreachable!("Debug runs should contain a debugger");
+                    };
+
+                    sink_vm_events = sink_vm_events || dbg.is_active();
+
+                    // TODO: handle errors
+                    if dbg.handle_input_event(event.clone(), &mut runner, vm) {
+                        render_sender.send(()).expect("Unable to send render event");
+                    }
+
+                    sink_vm_events = sink_vm_events || dbg.is_active();
+                }
+
+                match event {
+                    Event::Resize(_, _) => {
+                        render_sender.send(()).expect("Unable to send render event");
+                    }
+                    Event::FocusGained => {
+                        if !sink_vm_events {
+                            vm_event_sender
+                                .send(VMEvent::Focus)
+                                .expect("Unable to send VM focus event");
+                        }
+                    }
+                    Event::FocusLost => {
+                        if !sink_vm_events {
+                            vm_event_sender
+                                .send(VMEvent::Unfocus)
+                                .expect("Unable to send VM unfocus event");
+                        }
+                    }
+                    Event::Key(key_event) => {
+                        // Esc or Crtl+C interrupt handler
+                        if (key_event.code == CrosstermKey::Esc && !sink_vm_events) // Esc is an exit if debugger isnt sinking keys
+                            || key_event.modifiers.contains(CrosstermKeyModifiers::CONTROL) // Ctrl+C is a hard exit
+                                && (key_event.code == CrosstermKey::Char('c')
+                                    || key_event.code == CrosstermKey::Char('C'))
+                        {
+                            // exit virtual machine
+                            return runner.exit();
+                        } else if !sink_vm_events {
+                            // kinda expecting a crossterm key event to mean renderer is in focus
+                            if let KeyEventKind::Repeat | KeyEventKind::Press = key_event.kind {
+                                if let Ok(key) = Key::try_from(key_event.code) {
+                                    vm_event_sender
+                                        .send(VMEvent::FocusingKeyDown(key))
+                                        .expect("Unable to send VM focusing key down event");
+                                }
+                            }
+                        }
+                    }
+                    _ => (),
+                };
+            }
+
+            // execute device query step
+            let keys = HashSet::from_iter(
+                device_state
+                    .get_keys()
+                    .into_iter()
+                    .filter_map(|keycode| Key::try_from(keycode).ok()),
+            );
+
+            for &key in keys.difference(&last_keys) {
+                vm_event_sender
+                    .send(VMEvent::KeyDown(key))
+                    .expect("Unable to send VM key down event");
+            }
+
+            for &key in last_keys.difference(&keys) {
+                vm_event_sender
+                    .send(VMEvent::KeyUp(key))
+                    .expect("Unable to send VM key up event");
+            }
+
+            last_keys = keys;
+
+            // TODO attach event listener to logger instead of polling to update
+            if config.logging {
+                render_sender.send(()).expect("Unable to send render event");
+            }
+        }
+    });
+
+    (render_thread, main_thread)
+}
+
 fn update_frequency_stats(
-    stats: &mut BTreeMap<u32, (Duration, u64)>,
-    freq: u32,
+    stats: &mut BTreeMap<u16, (Duration, u64)>,
+    freq: u16,
     duration: Duration,
     instructions: u64,
 ) {
@@ -50,7 +186,7 @@ pub struct Runner {
 
     thread_handle: JoinHandle<RunResult>,
     thread_continue_sender: Sender<bool>,
-    thread_frequency_sender: Sender<u32>,
+    thread_frequency_sender: Sender<u16>,
 
     vm_event_sender: Sender<VMEvent>,
 }
@@ -80,17 +216,17 @@ impl Runner {
         self.thread_handle.is_finished()
     }
 
-    pub fn set_instruction_frequency(&mut self, frequency: u32) -> Result<(), &'static str> {
+    pub fn set_instruction_frequency(&mut self, frequency: u16) -> Result<(), &'static str> {
         self.config.instruction_frequency = frequency;
-        self.thread_frequency_sender.send(frequency).map_err(|_| {
-            "Failed to send instruction frequency to vm thread"
-        })
+        self.thread_frequency_sender
+            .send(frequency)
+            .map_err(|_| "Failed to send instruction frequency to vm thread")
     }
 
     pub fn spawn(config: C8Config, program: Program) -> Self {
         let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
         let (thread_continue_sender, thread_continue_receiver) = channel::<bool>();
-        let (thread_frequency_sender, thread_frequency_receiver) = channel::<u32>();
+        let (thread_frequency_sender, thread_frequency_receiver) = channel::<u16>();
 
         let program_name = program.name.clone();
 
@@ -106,7 +242,7 @@ impl Runner {
         }));
 
         let mut frequency = config.instruction_frequency;
-        let mut frequency_stats: BTreeMap<u32, (Duration, u64)> = BTreeMap::new();
+        let mut frequency_stats: BTreeMap<u16, (Duration, u64)> = BTreeMap::new();
 
         let thread_handle = {
             let c8 = Arc::clone(&c8);
@@ -136,8 +272,7 @@ impl Runner {
 
                 loop {
                     // vm runner step
-                    let mut _guard = c8.lock()
-                        .expect("Failed to lock C8 for main loop");
+                    let mut _guard = c8.lock().expect("Failed to lock C8 for main loop");
                     let (vm, maybe_dbg) = _guard.deref_mut();
 
                     if continuation.try_cont() {
@@ -299,7 +434,7 @@ impl RunContinuation {
 }
 
 pub struct RunAnalytics {
-    frequency_stats: BTreeMap<u32, (Duration, u64)>,
+    frequency_stats: BTreeMap<u16, (Duration, u64)>,
     program_name: String,
 }
 

@@ -63,12 +63,12 @@ impl<'a> DisassemblyPath<'_> {
         self
     }
 
-    fn save_trace<S: Into<String>>(&self, disass: &mut Disassembler, message: S) {
+    fn save_trace<S: Into<String>>(&self, disasm: &mut Disassembler, message: S) {
         if self.tag < InstructionTag::Proven {
             return;
         }
 
-        disass.traces.push(Trace {
+        disasm.traces.push(Trace {
             tag: self.tag,
             message: message.into(),
             entries: self.trace.clone(),
@@ -159,7 +159,7 @@ impl From<Program> for Disassembler {
 impl Disassembler {
     pub fn update(&mut self, interp: &Interpreter, addr: u16, bytes: u16) {
         let memory = interp.memory;
-        let mut disass_required = false;
+        let mut disasm_required = false;
 
         // add 1 to byte becaus we have a window iterator and want to handle the instruction formed by the last byte in range and next byte
         let lbound = addr as usize;
@@ -179,7 +179,7 @@ impl Disassembler {
             *params = InstructionParameters::from([new_param_bits[0], new_param_bits[1]]);
             *inst = Instruction::try_from(*params).ok();
 
-            disass_required = disass_required
+            disasm_required = disasm_required
                 || *tag > InstructionTag::Parsable
                 || *tag < InstructionTag::Parsable && inst.is_some();
 
@@ -193,7 +193,7 @@ impl Disassembler {
         // handle edge-case of last byte because it doesn't fit into the size of an instruction
 
         let Some(last_byte) = self.memory[lbound..rbound].last_mut() else {
-            unreachable!("disass memory size must be nonzero");
+            unreachable!("disasm memory size must be nonzero");
         };
 
         let Some(new_last_byte) = memory[lbound..rbound].last() else {
@@ -202,7 +202,7 @@ impl Disassembler {
 
         *last_byte = *new_last_byte;
 
-        if disass_required {
+        if disasm_required {
             // reset tags that are >=parsable back to parsable before rerunning disassembler
             for tag in self.tags.iter_mut() {
                 *tag = (*tag).min(InstructionTag::Parsable);
@@ -394,7 +394,7 @@ impl Disassembler {
         }
     }
 
-    pub fn write_addr_disass(
+    pub fn write_addr_disasm(
         &self,
         addr: u16,
         addr_header: &mut impl std::fmt::Write,
@@ -426,7 +426,7 @@ impl Disassembler {
         Ok(())
     }
 
-    pub fn write_stacktraces(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
+    pub fn write_issue_traces(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
         writeln!(f, "FOUND {} ISSUE{}\n", self.traces.len(), if self.traces.len() == 1 { "" } else { "S" })?;
         for trace in self.traces.iter() {
             let is_error = trace.tag == InstructionTag::Proven;
@@ -516,7 +516,7 @@ impl Display for Disassembler {
             asm_content.clear();
             asm_comment.clear();
 
-            self.write_addr_disass(addr, &mut bin_header, &mut bin_opcode, &mut asm_content, &mut asm_comment)?;
+            self.write_addr_disasm(addr, &mut bin_header, &mut bin_opcode, &mut asm_content, &mut asm_comment)?;
 
             let show_bin_comment = tag <= InstructionTag::Valid;
             let show_asm_content = tag >= InstructionTag::Valid;

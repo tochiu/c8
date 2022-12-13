@@ -14,7 +14,7 @@
                     "--bin=chip8-vm"
                 ]
             },
-            "args": ["Test", "--disass"]
+            "args": ["Test", "--disasm"]
         },
         {
             "type": "lldb",

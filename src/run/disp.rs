@@ -55,11 +55,11 @@ pub fn write_to_display(
 pub struct Display {
     pub title: String,
     pub buffer: DisplayBuffer,
-    pub instruction_frequency: u32
+    pub instruction_frequency: u16
 }
 
 impl Display {
-    pub fn new(title: String, instruction_frequency: u32) -> Self {
+    pub fn new(title: String, instruction_frequency: u16) -> Self {
         Self {
             title,
             buffer: CLEAR_DISPLAY,

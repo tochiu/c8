@@ -1,7 +1,7 @@
 use super::core::Watchpoint;
 
 use crate::{
-    disass::{
+    asm::{
         write_byte_str, Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS,
     },
     run::{
@@ -303,7 +303,7 @@ impl<'a> MemoryWidget<'_> {
         addr_header.push(if is_watchpoint { '*' } else { ' ' });
 
         self.disassembler
-            .write_addr_disass(addr, addr_header, addr_opcode, addr_asm, addr_asm_desc)
+            .write_addr_disasm(addr, addr_header, addr_opcode, addr_asm, addr_asm_desc)
             .ok();
 
         let (draw, read, write, exec) = AddressFlags::extract(flags);

@@ -1,5 +1,5 @@
 use crate::{
-    disass::{write_inst_asm, ADDRESS_COMMENT_TOKEN, INSTRUCTION_MAX_LENGTH},
+    asm::{write_inst_asm, ADDRESS_COMMENT_TOKEN, INSTRUCTION_MAX_LENGTH},
     run::{
         vm::{VMHistoryFragment, VM}
     },

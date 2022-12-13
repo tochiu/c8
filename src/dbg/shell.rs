@@ -1,5 +1,5 @@
 use crate::{
-    disass::write_inst_asm,
+    asm::write_inst_asm,
     run::interp::{Instruction, Interpreter},
 };
 
