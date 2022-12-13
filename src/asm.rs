@@ -271,7 +271,7 @@ impl Disassembler {
                 // should stick if the path intersects a similar or better path
                 // (this instruction is what is singe-handedly making this disassembler nontrivial)
                 Instruction::JumpWithOffset(addr, _) => {
-                    log::info!(
+                    log::debug!(
                         "Jumping from {:#05X} to {:#05X} + [0, 256)",
                         path.addr,
                         addr
