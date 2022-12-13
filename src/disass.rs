@@ -1,6 +1,6 @@
 use crate::vm::{
     interp::{Instruction, InstructionParameters, Interpreter, InterpreterMemory},
-    prog::{Program, PROGRAM_MEMORY_SIZE, PROGRAM_STARTING_ADDRESS},
+    prog::{Program, PROGRAM_STARTING_ADDRESS},
 };
 
 use std::{
@@ -33,19 +33,23 @@ impl InstructionTag {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct DisassemblyPath {
+pub struct DisassemblyPath<'a> {
     addr: u16,
     tag: InstructionTag,
     depth: usize,
+    
+    trace: &'a mut Vec<TraceEntry>,
+    trace_pushed: bool,
 }
 
-impl DisassemblyPath {
-    fn fork(&self, addr: u16) -> Self {
+impl<'a> DisassemblyPath<'_> {
+    fn fork(&'a mut self, addr: u16) -> DisassemblyPath<'a> {
         DisassemblyPath {
             addr,
             tag: self.tag,
             depth: self.depth,
+            trace: self.trace,
+            trace_pushed: false,
         }
     }
 
@@ -58,6 +62,34 @@ impl DisassemblyPath {
         self.depth += 1;
         self
     }
+
+    fn save_trace<S: Into<String>>(&self, disass: &mut Disassembler, message: S) {
+        if self.tag < InstructionTag::Proven {
+            return;
+        }
+
+        disass.traces.push(Trace {
+            tag: self.tag,
+            message: message.into(),
+            entries: self.trace.clone(),
+        });
+    }
+
+    fn enter_trace(&mut self, instruction: Option<Instruction>, payload: Option<u8>) {
+        self.trace_pushed = true;
+        self.trace.push(TraceEntry {
+            addr: self.addr,
+            instruction,
+            payload
+        });
+    }
+
+    fn leave_trace(&mut self) {
+        if self.trace_pushed {
+            self.trace.pop();
+            self.trace_pushed = false;
+        }
+    }
 }
 
 pub struct Disassembler {
@@ -65,7 +97,21 @@ pub struct Disassembler {
     pub instructions: Vec<Option<Instruction>>,
     pub program: Program,
     pub memory: InterpreterMemory,
-    pub tags: Vec<InstructionTag>,
+    pub tags: Vec<InstructionTag>, 
+    pub traces: Vec<Trace>,
+}
+
+pub struct Trace {
+    tag: InstructionTag,
+    message: String,
+    entries: Vec<TraceEntry>,
+}
+
+#[derive(Clone)]
+struct TraceEntry {
+    addr: u16,
+    instruction: Option<Instruction>,
+    payload: Option<u8>,
 }
 
 impl From<Program> for Disassembler {
@@ -105,15 +151,12 @@ impl From<Program> for Disassembler {
             program,
             memory,
             tags,
+            traces: Vec::new(),
         }
     }
 }
 
 impl Disassembler {
-    fn validate_jump_addr(addr: u16) -> bool {
-        addr <= PROGRAM_MEMORY_SIZE - 2
-    }
-
     pub fn update(&mut self, interp: &Interpreter, addr: u16, bytes: u16) {
         let memory = interp.memory;
         let mut disass_required = false;
@@ -164,38 +207,41 @@ impl Disassembler {
             for tag in self.tags.iter_mut() {
                 *tag = (*tag).min(InstructionTag::Parsable);
             }
+
+            self.traces.clear();
             self.run();
         }
-
-        self.run_from(DisassemblyPath {
-            addr: interp.pc,
-            tag: InstructionTag::Proven,
-            depth: interp.stack.len(),
-        });
     }
 
     pub fn run(&mut self) {
-        self.run_from(DisassemblyPath {
-            addr: PROGRAM_STARTING_ADDRESS,
-            tag: InstructionTag::Proven,
-            depth: 0,
-        })
+        self.run_from(
+            PROGRAM_STARTING_ADDRESS,
+            InstructionTag::Proven,
+            0,
+        );
     }
 
-    pub fn run_from(&mut self, path: DisassemblyPath) {
+    pub fn run_from(&mut self, addr: u16, tag: InstructionTag, depth: usize) {
         log::info!(
             "Disassembling \"{}\" starting at {:#05X}",
             &self.program.name,
-            path.addr
+            addr
         );
+        let mut trace_buffer = Vec::new();
         let now = Instant::now();
-        self.eval(path);
+        self.eval(DisassemblyPath {
+            addr,
+            tag,
+            depth,
+            trace: &mut trace_buffer,
+            trace_pushed: false,
+        });
         let elapsed = now.elapsed().as_micros();
         log::info!("Disassembled \"{}\" in {} us", &self.program.name, elapsed);
     }
 
-    fn eval(&mut self, path: DisassemblyPath) -> bool {
-        if let Some(Some(instruction)) = self.instructions.get(path.addr as usize) {
+    fn eval(&mut self, mut path: DisassemblyPath) -> bool {
+        if let Some(Some(instruction)) = self.instructions.get(path.addr as usize).cloned() {
             let tag_old = self.tags[path.addr as usize];
             if tag_old >= path.tag {
                 log::trace!("path {:#05X?} is already good, backtracking!", path.addr);
@@ -213,99 +259,80 @@ impl Disassembler {
 
             // traverse
 
-            /* this is specifically to warn when only one skip branch is valid */
-            let mut one_skip_branch_is_valid = false;
-            let mut true_skip_branch_is_valid = false;
-
-            let (self_is_valid, path_is_valid) = match *instruction {
+            let path_is_valid = match instruction {
                 Instruction::Jump(addr) => {
-                    if Disassembler::validate_jump_addr(addr) {
-                        (true, self.eval(path.fork(addr)))
-                    } else {
-                        if path.tag == InstructionTag::Proven {
-                            log::error!("Attempt to jump to instruction {:#05X}", addr);
-                        }
-                        (false, false)
-                    }
+                    path.enter_trace(Some(instruction), None);
+                    let path_is_valid = self.eval(path.fork(addr));
+                    path.leave_trace();
+                    path_is_valid
                 }
 
                 // mark reachable jumps & then traverse the path of each reachable jump with the likely tag
                 // should stick if the path intersects a similar or better path
                 // (this instruction is what is singe-handedly making this disassembler nontrivial)
                 Instruction::JumpWithOffset(addr, _) => {
-                    let maybe_lbound = if Disassembler::validate_jump_addr(addr) {
-                        Some(addr as usize)
-                    } else {
-                        None
-                    };
-                    let maybe_rbound = if Disassembler::validate_jump_addr(addr + 255) {
-                        Some(addr as usize + 255)
-                    } else {
-                        None
-                    };
+                    log::info!(
+                        "Jumping from {:#05X} to {:#05X} + [0, 256)",
+                        path.addr,
+                        addr
+                    );
 
-                    if maybe_lbound.or(maybe_rbound).is_some() {
-                        log::info!(
-                            "Jumping from {:#05X} to {:#05X} + [0, 256)",
-                            path.addr,
-                            addr
-                        );
+                    let mut valid_jump_exists = false;
 
-                        let lbound = maybe_lbound.unwrap_or(0);
-                        let rbound = maybe_rbound.unwrap_or(PROGRAM_MEMORY_SIZE as usize - 2);
-
-                        for i in lbound..=rbound {
-                            self.eval(path.fork(i as u16).tag(InstructionTag::Valid));
+                    for i in 0..=255 {
+                        path.enter_trace(Some(instruction), Some(i));
+                        if (i as usize) < self.memory.len() - addr as usize {
+                            let is_valid_jump = self.eval(path.fork(addr + i as u16).tag(InstructionTag::Valid));
+                            valid_jump_exists = valid_jump_exists || is_valid_jump;
                         }
+                        path.leave_trace();
+                    }
 
-                        (true, true)
-                        // ^ We don't account for jump with offset instructions that have all invalid paths (only case where we should return (true, false))
-                    } else {
+                    if !valid_jump_exists {
+                        path.enter_trace(Some(instruction), None);
+                        path.save_trace(self, "Unable to evaluate at least one jump path as valid");
+                        path.leave_trace();
+
                         if path.tag == InstructionTag::Proven {
                             log::error!(
-                                "Attempt to jump from {:#05X} to {:#05X} + [0, 256)",
-                                path.addr,
-                                addr
-                            );
-                        } else {
-                            log::warn!(
-                                "Potential attempt to jump from {:#05X} to {:#05X} + [0, 256)",
-                                path.addr,
-                                addr
+                                "Unable to evaluate at least one jump path as valid from {:#05X}",
+                                path.addr
                             );
                         }
-                        (false, false)
                     }
-                }
 
+                    valid_jump_exists
+                }
+                
                 Instruction::CallSubroutine(addr) => {
-                    if Disassembler::validate_jump_addr(addr) {
-                        // i would check that path.addr + 2 is a valid address but technically the subroutine could never return
-                        // so it isn't certain that we traverse the next instruction, valid or not
-                        (
-                            true,
-                            self.eval(path.fork(addr).subroutine())
-                                && self.eval(path.fork(path.addr + 2)),
-                        )
-                    } else {
-                        if path.tag == InstructionTag::Proven {
-                            log::error!("Attempt to call subroutine {:#05X}", addr);
-                        }
-                        (false, false)
+                    // i would check that path.addr + 2 is a valid address but technically the subroutine could never return
+                    // so it isn't certain that we traverse the next instruction, valid or not
+                    path.enter_trace(Some(instruction), None);
+                    let is_call_path_valid = self.eval(path.fork(addr).subroutine());
+                    path.leave_trace();
+
+                    if is_call_path_valid {
+                        // if the call path is valid, then the next instruction can be evaluated
+                        self.eval(path.fork(path.addr + 2));
                     }
+                    
+
+                    is_call_path_valid
                 }
 
+                // TODO: return needs to do an explicit jump
                 Instruction::SubroutineReturn => {
                     if path.depth > 0 {
-                        (true, true)
+                        true
                     } else {
+                        path.save_trace(self, "Cannot return with empty call stack");
                         if path.tag == InstructionTag::Proven {
                             log::error!(
                                 "Attempted return at {:#05X} when stack is empty",
                                 path.addr
                             );
                         }
-                        (false, false)
+                        false
                     }
                 }
 
@@ -315,36 +342,22 @@ impl Disassembler {
                 | Instruction::SkipIfNotEquals(_, _)
                 | Instruction::SkipIfKeyDown(_)
                 | Instruction::SkipIfKeyNotDown(_) => {
-                    // if neither branch addresses are valid then it is impossible for the skip instruction to be valid
-                    if Disassembler::validate_jump_addr(path.addr + 2)
-                        || Disassembler::validate_jump_addr(path.addr + 4)
-                    {
-                        // evaluate branches (after this match statement the normal branch is evaluated)
-                        // one quirk i notice is that only 1 of the skip branches must be valid for the branch to be valid
-                        // this seems sensible to me for disassembly but i could be wrong (im probably wrong)
-                        let false_path_is_valid = self.eval(path.fork(path.addr + 2));
-                        let true_path_is_valid = self.eval(path.fork(path.addr + 4));
+                    // evaluate branches (after this match statement the normal branch is evaluated)
+                    // one quirk i notice is that only 1 of the skip branches must be valid for the branch to be valid
+                    // this seems sensible to me for disassembly but i could be wrong (im probably wrong)
+                    //path.enter_trace(Some(instruction), Some(0));
+                    let false_path_is_valid = self.eval(path.fork(path.addr + 2));
+                    //path.leave_trace();
 
-                        let path_is_valid = false_path_is_valid || true_path_is_valid;
+                    path.enter_trace(Some(instruction), None);
+                    let true_path_is_valid = self.eval(path.fork(path.addr + 4));
+                    path.leave_trace();
 
-                        if path_is_valid {
-                            if !true_path_is_valid {
-                                one_skip_branch_is_valid = true;
-                                true_skip_branch_is_valid = false;
-                            } else if !false_path_is_valid {
-                                one_skip_branch_is_valid = true;
-                                true_skip_branch_is_valid = true;
-                            }
-                        }
-
-                        (true, path_is_valid)
-                    } else {
-                        (false, false)
-                    }
+                    false_path_is_valid || true_path_is_valid
                 }
 
                 // if we made it this far then the instruction doesn't introduce a discontinuity so evaluate the next
-                _ => (true, self.eval(path.fork(path.addr + 2))),
+                _ => self.eval(path.fork(path.addr + 2)),
             };
 
             log::trace!(
@@ -354,26 +367,18 @@ impl Disassembler {
             );
 
             if !path_is_valid {
-                // invalid path means we must revert
-                //     IF the instruction itself is valid then it must be tagged as reachable (meaning it was the subsequent path that was invalid)
-                //     ELSE it is reverted back to its old tag (which currently should always be Parsable if we made it this far)
-                self.tags[path.addr as usize] = if self_is_valid {
-                    InstructionTag::Reachable
-                } else {
-                    tag_old
-                };
-                return false;
-            } else if one_skip_branch_is_valid {
-                // we care to warn if only one branch is valid or better
-                if true_skip_branch_is_valid {
-                    log::warn!("True branch of skip instruction at {:#05X} is valid but false branch isn't", path.addr);
-                } else {
-                    log::warn!("False branch of skip instruction at {:#05X} is valid but true branch isn't", path.addr);
+                if path.tag < InstructionTag::Proven {
+                    self.tags[path.addr as usize] = InstructionTag::Reachable;
                 }
+                false
+            } else {
+                true
             }
-
-            true
         } else {
+            path.enter_trace(None, None);
+            path.save_trace(self, "Unable to decode instruction");
+            path.leave_trace();
+
             log::trace!("path {:#05X?} is not parsable, backtracking!", path.addr);
 
             if path.tag == InstructionTag::Proven {
@@ -414,6 +419,64 @@ impl Disassembler {
 
         if let Some(instruction) = self.instructions[index].as_ref() {
             write_inst_asm(instruction, addr_asm, addr_asm_desc)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn write_stacktraces(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
+        writeln!(f, "FOUND {} ISSUE{}\n", self.traces.len(), if self.traces.len() == 1 { "" } else { "S" })?;
+        for trace in self.traces.iter() {
+            let is_error = trace.tag == InstructionTag::Proven;
+
+            let mut asm = String::new();
+            let mut asm_desc = String::new();
+            // TODO: fix this
+            writeln!(f, "{} {}", if is_error { "ERROR:" } else { "WARNING:" }, &trace.message)?;
+            for entry in trace.entries.iter().rev() {
+                write!(f, "  at {:#05X}", entry.addr)?;
+                if let Some(inst) = entry.instruction.as_ref() {
+                    match inst {
+                        Instruction::Jump(addr) => {
+                            write!(f, " JUMP {:#05X}", addr)?;
+                        }
+                        Instruction::JumpWithOffset(addr, _) => {
+                            write!(f, " JUMP {:#05X}", addr)?;
+                            if let Some(offset) = entry.payload {
+                                write!(f, " (offset = {})", offset)?;
+                            } else {
+                                write!(f, " (offset = all)")?;
+                            }
+                        }
+                        
+                        Instruction::CallSubroutine(addr) => {
+                            write!(f, " CALL {:#05X}", addr)?;
+                        }
+
+                        Instruction::SkipIfEqualsConstant(_, _)
+                        | Instruction::SkipIfNotEqualsConstant(_, _)
+                        | Instruction::SkipIfEquals(_, _)
+                        | Instruction::SkipIfNotEquals(_, _)
+                        | Instruction::SkipIfKeyDown(_)
+                        | Instruction::SkipIfKeyNotDown(_) => {
+                            write!(f, " SKIP {:#05X}", entry.addr + 2)?
+                        }
+                        _ => {
+                            asm.clear();
+                            asm_desc.clear();
+                            write_inst_asm(inst, &mut asm, &mut asm_desc).expect("Writing instruction to string failed");
+                            write!(f, " {}", &asm)?;
+                            if asm_desc.len() > 0 {
+                                write!(f, " {} {}", ADDRESS_COMMENT_TOKEN, &asm_desc)?;
+                            } else {
+                                
+                            }
+                        }
+                    }
+                }
+
+                writeln!(f, "")?;
+            }
         }
 
         Ok(())

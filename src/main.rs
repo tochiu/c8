@@ -99,6 +99,13 @@ fn main() -> Result<()> {
         false
     };
 
+    let check: bool = if let Some(i) = args.iter().position(|arg| arg == "--check") {
+        args.remove(i);
+        true
+    } else {
+        false
+    };
+
     let debugging: bool = if let Some(i) = args.iter().position(|arg| arg == "--debug") {
         args.remove(i);
         true
@@ -117,14 +124,19 @@ fn main() -> Result<()> {
     };
 
     // dissassemble if requested
-    if disassemble {
+    if disassemble || check {
         if let Some(level) = logger_level.to_level() {
             simple_logger::init_with_level(level)?;
         }
 
         let mut disass = Disassembler::from(program);
         disass.run();
-        print!("{}", disass);
+        if check {
+            disass.write_stacktraces(&mut std::io::stdout())?;
+        }
+        if disassemble {
+            print!("{}", disass);
+        }
     } else {
         // initialize tui logger
         if logger_level != LevelFilter::Off {
