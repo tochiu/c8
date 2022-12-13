@@ -12,7 +12,7 @@ tui = "0.19"
 tui-logger = "0.8"
 crossterm = "0.25"
 device_query = "1.1"
-spin_sleep = "1.1.1"
-simple_logger = "4.0.0"
+spin_sleep = "1.1"
+simple_logger = "4.0"
 anyhow = "1.0"
-clap = { version = "4.0.29", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
