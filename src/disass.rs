@@ -325,7 +325,9 @@ impl Disassembler {
                     if path.depth > 0 {
                         true
                     } else {
+                        path.enter_trace(Some(instruction), None);
                         path.save_trace(self, "Cannot return with empty call stack");
+                        path.leave_trace();
                         if path.tag == InstructionTag::Proven {
                             log::error!(
                                 "Attempted return at {:#05X} when stack is empty",
