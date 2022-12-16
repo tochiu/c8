@@ -427,10 +427,17 @@ impl Debugger {
 
             self.shell.echo(&input);
 
-            let Ok(args) = shell_words::split(&input) else {
+            let Ok(mut args) = shell_words::split(&input) else {
                 self.shell.print("Failed to parse command: mismatched quotes");
                 continue
             };
+
+            // Aliasing that I was too lazy to implement idiomtically in clap
+            if args.first().map_or(false, |cmd| cmd == "h") {
+                args[0] = "help".into();
+            } else if args.first().map_or(false, |cmd| cmd == "version" || cmd == "v") {
+                args[0] = "--version".into();
+            }
 
             match DebugCli::try_parse_from(args) {
                 Ok(DebugCli { command }) => {
