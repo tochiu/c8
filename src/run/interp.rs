@@ -222,7 +222,7 @@ impl From<&Interpreter> for InterpreterHistoryFragment {
         let index = interp.index as usize;
         if index < interp.memory.len() {
             let n = (index + 16).min(interp.memory.len()) - index;
-            index_memory.copy_from_slice(&interp.memory[index..index + n]);
+            index_memory[..n].copy_from_slice(&interp.memory[index..index + n]);
         }
 
         let instruction = interp.fetch().and_then(Instruction::try_from).ok();
