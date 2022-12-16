@@ -4,7 +4,7 @@ use crate::{
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
-use tui::{buffer::Buffer, layout::Rect, style::{Style, Color}, widgets::{StatefulWidget, Widget, Paragraph}, text::{Spans, Span}};
+use tui::{buffer::Buffer, layout::Rect, style::{Style, Color, Modifier}, widgets::{StatefulWidget, Widget, Paragraph}, text::{Spans, Span}};
 
 use std::{fmt::Write, cell::Cell};
 
@@ -137,11 +137,6 @@ impl Shell {
     pub(super) fn error<T: Into<String>>(&mut self, content: T) {
         self.output.push(format!("{}{}", Shell::PREFIX_ERROR, content.into()));
     }
-
-    pub(super) fn print_unrecognized_cmd(&mut self) {
-        self.output
-            .push("Command not recognized. Type \"h\" to get a list of commands.".into());
-    }
 }
 
 pub(super) struct OutputWidget<'a> {
@@ -175,9 +170,16 @@ impl<'a> Widget for OutputWidget<'_> {
         let max_line_width = area.width as usize;
         
         for mut entry in self.output.iter().rev().map(String::as_str) {
+            if entry.trim().is_empty() {
+                lines.push(Spans::from(Span::styled(line_buf.clone(), Style::default())));
+                line_buf.clear();
+            }
+
             let start = lines.len();
             let style = if entry.starts_with(Shell::PREFIX_ERROR) {
                 Style::default().fg(Color::Red)
+            } else if entry.starts_with(Shell::PREFIX_INPUT) {
+                Style::default().add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };

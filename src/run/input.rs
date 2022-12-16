@@ -94,7 +94,7 @@ impl From<Key> for &'static str {
 }
 
 impl TryFrom<&str> for Key {
-    type Error = String;
+    type Error = &'static str;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s {
@@ -114,7 +114,7 @@ impl TryFrom<&str> for Key {
             "X" | "x" => Ok(Key::X),
             "C" | "c" => Ok(Key::C),
             "V" | "v" => Ok(Key::V),
-            _ => Err(format!("Invalid key: {}", s)),
+            _ => Err("not a valid key"),
         }
     }
 }

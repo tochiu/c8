@@ -30,6 +30,10 @@ impl History {
         self.recording
     }
 
+    pub(super) fn redo_amount(&self) -> usize {
+        self.fragments.len().abs_diff(self.cursor)
+    }
+
     pub(super) fn start_recording(&mut self) {
         if self.fragments.capacity() < HISTORY_CAPACITY {
             self.fragments
@@ -44,7 +48,7 @@ impl History {
         self.cursor = 0;
     }
 
-    pub(super) fn clear_forward_history(&mut self) {
+    pub(super) fn clear_redo_history(&mut self) {
         self.fragments.truncate(self.cursor);
     }
 
@@ -79,8 +83,6 @@ impl History {
             vm.time_step = self.fragments[self.cursor].time_step;
         }
 
-        vm.handle_inputs();
-
         if self.recording {
             
             let state = VMHistoryFragment::from(&*vm); // get state of vm
@@ -111,6 +113,7 @@ impl History {
             self.cursor = (self.cursor + 1).min(self.fragments.len());
         }
 
+        vm.handle_inputs();
         let vm_result = vm.step();
 
         // edge case: keyboard contains ephemeral state so we must manually restore it

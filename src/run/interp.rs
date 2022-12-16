@@ -6,7 +6,6 @@ use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 
 use std::fmt::Display;
-use std::num::IntErrorKind;
 
 pub const VFLAG: usize = 15;
 
@@ -337,23 +336,6 @@ impl Interpreter {
         } else {
             None
         }
-    }
-
-    pub fn parse_addr(&self, arg: &str) -> Option<u16> {
-        let (arg, radix) = if arg.starts_with("0x") {
-            (arg.trim_start_matches("0x"), 16)
-        } else {
-            (arg, 10)
-        };
-
-        u16::from_str_radix(arg, radix)
-            .or_else(|err| match err.kind() {
-                IntErrorKind::PosOverflow => Ok(self.memory.len() as u16),
-                IntErrorKind::NegOverflow => Ok(0),
-                _ => Err(err),
-            })
-            .ok()
-            .map(|addr| addr.min(self.memory.len().saturating_sub(1) as u16))
     }
 
     pub fn undo(&mut self, prior_state: &InterpreterHistoryFragment) {

@@ -15,12 +15,12 @@ pub struct Cli {
 
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum LogLevel {
+    Off,
     Trace,
     Debug,
     Info,
     Warn,
     Error,
-    Off,
 }
 
 impl LogLevel {
@@ -45,7 +45,7 @@ pub enum CliCommand {
         path: PathBuf,
 
         /// Enable logging
-        #[arg(short, long, value_enum, default_value_t=LogLevel::Off)]
+        #[arg(short, long, value_enum, value_name = "LEVEL", default_value_t=LogLevel::Off)]
         log: LogLevel,
     },
 
@@ -56,7 +56,7 @@ pub enum CliCommand {
         path: PathBuf,
 
         /// Enable logging
-        #[arg(short, long, value_enum, default_value_t=LogLevel::Off)]
+        #[arg(short, long, value_enum, value_name = "LEVEL", default_value_t=LogLevel::Off)]
         log: LogLevel,
     },
 
@@ -75,7 +75,7 @@ pub enum CliCommand {
         hz: u16,
 
         /// Enable logging
-        #[arg(short, long, value_enum, default_value_t=LogLevel::Off)]
+        #[arg(short, long, value_enum, value_name = "LEVEL", default_value_t=LogLevel::Off)]
         log: LogLevel,
     },
 }
