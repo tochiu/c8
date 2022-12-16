@@ -18,7 +18,7 @@ use tui::{
     widgets::{Block, Borders}, Frame,
 };
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, Context};
 
 use std::{
     io::{self, stdout},
@@ -26,6 +26,24 @@ use std::{
 };
 
 type Terminal = tui::Terminal<CrosstermBackend<io::Stdout>>;
+
+fn cleanup_terminal(terminal: &mut Terminal) -> Result<()> {
+    // clean up the terminal so its usable after program exit
+    disable_raw_mode()
+        .context("Failed to disable terminal raw mode")?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)
+        .context("Failed to leave alternate terminal screen")?;
+    terminal.show_cursor()
+        .context("Failed to show terminal cursor")?;
+    Ok(())
+}
+
+pub fn panic_cleanup_terminal() -> Result<()> {
+    cleanup_terminal(
+        &mut tui::Terminal::new(CrosstermBackend::new(stdout()))
+            .context("Failed to create interface to terminal backend")?
+    )
+}
 
 pub fn spawn_render_thread(c8: C8Lock, config: C8Config) -> (Sender<()>, JoinHandle<()>) {
     let (render_sender, render_receiver) = channel::<()>();
@@ -64,14 +82,10 @@ pub fn spawn_render_thread(c8: C8Lock, config: C8Config) -> (Sender<()>, JoinHan
             }
 
             if let Err(TryRecvError::Disconnected) = render_receiver.try_recv() {
-                // clean up the terminal so its usable after program exit
-                disable_raw_mode()
-                    .expect("Failed to disable terminal raw mode");
-                execute!(terminal.backend_mut(), LeaveAlternateScreen)
-                    .expect("Failed to leave alternate terminal screen");
-                terminal.show_cursor()
-                    .expect("Failed to show terminal cursor");
-                return;
+                if let Err(e) = cleanup_terminal(&mut terminal) {
+                    eprintln!("Failed to cleanup terminal: {}", e);
+                }
+                return
             }
 
             renderer.step(&mut terminal, should_redraw, &c8)
