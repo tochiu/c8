@@ -629,22 +629,21 @@ impl Debugger {
                 ShowHideOption::Display => {
                     self.vm_visible = true;
                 }
-                ShowHideOption::Memory => {
+                ShowHideOption::Memory { verbose } => {
                     self.memory_visible = true;
-                }
-                ShowHideOption::Verbose => {
-                    self.memory.verbose = true;
+                    self.memory.verbose = verbose;
                 }
             },
             DebugCliCommand::Hide { view } => match view {
                 ShowHideOption::Display => {
                     self.vm_visible = false;
                 }
-                ShowHideOption::Memory => {
-                    self.memory_visible = false;
-                }
-                ShowHideOption::Verbose => {
-                    self.memory.verbose = false;
+                ShowHideOption::Memory { verbose } => {
+                    if verbose {
+                        self.memory.verbose = false;
+                    } else {
+                        self.memory_visible = true;
+                    }
                 }
             },
             DebugCliCommand::Info { what } => match what {

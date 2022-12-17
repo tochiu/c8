@@ -101,12 +101,13 @@ pub enum ShowHideOption {
     #[clap(visible_aliases = &["d", "disp", "vm"])]
     Display,
 
-    /// Current memory state of the program
+    /// Current memory state of the program (-v for verbose)
     #[clap(visible_aliases = &["m", "mem"])]
-    Memory,
-
-    /// Memory but without address collapsing around instructions and both graphics and instruction descriptions visible
-    Verbose,
+    Memory {
+        /// Memory but without address collapsing around instructions and both graphics and instruction descriptions visible
+        #[clap(long, short)]
+        verbose: bool
+    },
 }
 
 #[derive(Subcommand, Clone)]
