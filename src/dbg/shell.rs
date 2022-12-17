@@ -194,9 +194,8 @@ impl Shell {
         ]));
     }
 
-    pub(super) fn as_output_widget(&self, is_active: bool) -> OutputWidget {
+    pub(super) fn as_output_widget(&self) -> OutputWidget {
         OutputWidget {
-            active: is_active,
             output: self.output.range(..self.output.len().saturating_sub(self.output_offset)),
             output_draw_buffer: &self.output_line_buffer,
         }
@@ -204,7 +203,6 @@ impl Shell {
 }
 
 pub(super) struct OutputWidget<'a> {
-    active: bool,
     output: Iter<'a, Spans<'a>>,
     output_draw_buffer: &'a Cell<Vec<Span<'static>>>,
 }

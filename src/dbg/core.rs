@@ -1020,7 +1020,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         // Output
         let output_block = Block::default().title(" Output ").borders(Borders::TOP);
-        self.dbg.shell.as_output_widget(self.dbg.shell_output_active).render(output_block.inner(output_area), buf);
+        self.dbg.shell.as_output_widget().render(output_block.inner(output_area), buf);
         output_block.render(output_area, buf);
 
         // History
