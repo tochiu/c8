@@ -653,7 +653,7 @@ impl Debugger {
                     if verbose {
                         self.memory.verbose = false;
                     } else {
-                        self.memory_visible = true;
+                        self.memory_visible = false;
                     }
                 }
             },
