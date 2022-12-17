@@ -165,7 +165,8 @@ pub struct Debugger {
     runner_frequency: u16,
 
     shell: Shell,
-    shell_active: bool,
+    shell_input_active: bool,
+    shell_output_active: bool,
 
     vm_visible: bool,
     vm_exception: Option<String>,
@@ -196,7 +197,8 @@ impl Debugger {
             runner_frequency: config.instruction_frequency,
 
             shell: Shell::new(),
-            shell_active: true,
+            shell_input_active: true,
+            shell_output_active: false,
 
             vm_visible: true,
             vm_exception: None,
@@ -376,8 +378,13 @@ impl Debugger {
             };
 
             if self.active {
-                if self.shell_active {
-                    sink_event = self.shell.handle_key_event(key_event);
+                if self.shell_input_active {
+                    sink_event = self.shell.handle_input_key_event(key_event);
+                } else if self.shell_output_active {
+                    sink_event = self.shell.handle_output_key_event(key_event, &mut self.shell_output_active);
+                    if !self.shell_output_active {
+                        self.shell_input_active = true;
+                    }
                 } else if self.memory_active {
                     sink_event = self.memory.handle_key_event(
                         key_event,
@@ -385,7 +392,7 @@ impl Debugger {
                         &mut self.memory_active,
                     );
                     if !self.memory_active {
-                        self.shell_active = true;
+                        self.shell_input_active = true;
                     }
                 } else if self.history_active {
                     let mut payload = (0, false);
@@ -395,7 +402,7 @@ impl Debugger {
                         &mut payload,
                     );
                     if !self.history_active {
-                        self.shell_active = true;
+                        self.shell_input_active = true;
                     }
                     let (seek_amt, seek_forwards) = payload;
                     if seek_amt > 0 {
@@ -549,11 +556,15 @@ impl Debugger {
                     return;
                 }
                 self.history_active = true;
-                self.shell_active = false;
+                self.shell_input_active = false;
+            }
+            DebugCliCommand::Output => {
+                self.shell_output_active = true;
+                self.shell_input_active = false;
             }
             DebugCliCommand::Memory => {
                 self.memory_active = true;
-                self.shell_active = false;
+                self.shell_input_active = false;
             }
             DebugCliCommand::Goto { location } => {
                 let address = match location {
@@ -810,7 +821,7 @@ impl Debugger {
 
 #[derive(Default)]
 pub struct DebuggerWidgetState {
-    cmd_line: CommandLineWidgetState,
+    input: InputWidgetState,
 }
 
 pub struct DebuggerWidget<'a> {
@@ -829,7 +840,7 @@ impl<'a> DebuggerWidget<'a> {
         state: &mut DebuggerWidgetState,
     ) -> Option<(u16, u16)> {
         if self.can_draw_shell(area) {
-            CommandLineWidget::from(&self.dbg.shell).cursor_position(area, &mut state.cmd_line)
+            InputWidget::from(&self.dbg.shell).cursor_position(area, &mut state.input)
         } else {
             None
         }
@@ -854,7 +865,7 @@ impl<'a> DebuggerWidget<'a> {
         let (main, region) = {
             let rects = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints(if self.dbg.vm_visible {
+                .constraints(if self.dbg.vm_visible && !self.dbg.shell_output_active {
                     [
                         Constraint::Length(region.width.saturating_sub(DISPLAY_WINDOW_WIDTH)),
                         Constraint::Length(DISPLAY_WINDOW_WIDTH),
@@ -871,7 +882,7 @@ impl<'a> DebuggerWidget<'a> {
         let (vm, logger) = {
             let rects = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints(if self.dbg.vm_visible && self.logging {
+                .constraints(if self.dbg.vm_visible && !self.dbg.shell_output_active && self.logging {
                     [
                         Constraint::Length(DISPLAY_WINDOW_HEIGHT),
                         Constraint::Length(region.height.saturating_sub(DISPLAY_WINDOW_HEIGHT)),
@@ -889,6 +900,19 @@ impl<'a> DebuggerWidget<'a> {
     }
 
     fn dbg_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
+        if self.dbg.shell_output_active {
+            return (
+                Rect::default(),
+                Rect::default(),
+                Rect::default(),
+                Rect::default(),
+                Rect::default(),
+                Rect::default(),
+                area,
+                Rect::default(),                
+            )
+        }
+
         let mut rects = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(if self.dbg.memory_active {
@@ -919,13 +943,13 @@ impl<'a> DebuggerWidget<'a> {
         let (history_area, output_area) = {
             if self.dbg.history_active {
                 (left_area, Rect::default())
-            } else if self.dbg.history.is_recording() && self.dbg.shell_active {
+            } else if self.dbg.history.is_recording() && self.dbg.shell_input_active {
                 let rects = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .split(left_area);
                 (rects[0], rects[1])
-            } else if self.dbg.shell_active {
+            } else if self.dbg.shell_input_active {
                 (Rect::default(), left_area)
             } else {
                 (Rect::default(), Rect::default())
@@ -960,7 +984,7 @@ impl<'a> DebuggerWidget<'a> {
     }
 
     fn can_draw_shell(&self, area: Rect) -> bool {
-        self.dbg.shell_active && area.area() > 0
+        self.dbg.shell_input_active && area.area() > 0
     }
 }
 
@@ -996,14 +1020,14 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         // Output
         let output_block = Block::default().title(" Output ").borders(Borders::TOP);
-        OutputWidget::from(&self.dbg.shell).render(output_block.inner(output_area), buf);
+        self.dbg.shell.as_output_widget(self.dbg.shell_output_active).render(output_block.inner(output_area), buf);
         output_block.render(output_area, buf);
 
         // History
         HistoryWidget {
             history: &self.dbg.history,
             active: self.dbg.history_active,
-            border: if self.dbg.shell_active {
+            border: if self.dbg.shell_input_active {
                 Borders::TOP
             } else {
                 Borders::TOP.union(Borders::BOTTOM)
@@ -1170,7 +1194,13 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         // Bottom (Command line or messages)
         if self.can_draw_shell(area) {
-            CommandLineWidget::from(&self.dbg.shell).render(bottom_area, buf, &mut state.cmd_line)
+            InputWidget::from(&self.dbg.shell).render(bottom_area, buf, &mut state.input)
+        } else if self.dbg.shell_output_active {
+            let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
+            buf.set_style(bottom_area, bottom_area_style);
+            Paragraph::new("Esc to exit output navigation")
+                .style(bottom_area_style)
+                .render(bottom_area, buf);
         } else if self.dbg.memory_active {
             let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
             buf.set_style(bottom_area, bottom_area_style);

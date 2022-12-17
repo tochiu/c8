@@ -18,7 +18,7 @@ use std::{
     fmt::Write,
 };
 
-const MAX_OUTPUT_MESSAGES: usize = 250;
+const MAX_OUTPUT_MESSAGES: usize = 1000;
 
 #[derive(Default)]
 pub(super) struct Shell {
@@ -26,6 +26,7 @@ pub(super) struct Shell {
 
     input: String,
     output: VecDeque<Spans<'static>>,
+    output_offset: usize,
     output_line_buffer: Cell<Vec<Span<'static>>>,
     cursor_position: usize,
     cmd_queue: Vec<String>,
@@ -45,7 +46,7 @@ impl Shell {
         }
     }
 
-    pub(super) fn handle_key_event(&mut self, event: KeyEvent) -> bool {
+    pub(super) fn handle_input_key_event(&mut self, event: KeyEvent) -> bool {
         if !self.input_enabled {
             return false;
         }
@@ -119,6 +120,29 @@ impl Shell {
         sink_input
     }
 
+    pub(super) fn handle_output_key_event(&mut self, event: KeyEvent, active: &mut bool) -> bool {
+        match event.code {
+            KeyCode::Esc => {
+                *active = false;
+                self.output_offset = 0;
+            }
+            KeyCode::Down | KeyCode::Char('s') | KeyCode::Char('S') => {
+                self.output_offset = self.output_offset.saturating_sub(1);
+            }
+            KeyCode::Up | KeyCode::Char('w') | KeyCode::Char('W') => {
+                self.output_offset = self.output_offset.saturating_add(1).min(self.output.len());
+            }
+            KeyCode::Home => {
+                self.output_offset = self.output.len();
+            }
+            KeyCode::End => {
+                self.output_offset = 0;
+            }
+            _ => return false,
+        }
+        true
+    }
+
     pub(super) fn output_pc(&mut self, interp: &Interpreter) {
         let mut buf = format!("{:#05X?}: ", interp.pc);
         let mut inst_asm = String::new();
@@ -169,20 +193,20 @@ impl Shell {
             Span::styled(content.into(), Style::default().fg(Color::Red)),
         ]));
     }
+
+    pub(super) fn as_output_widget(&self, is_active: bool) -> OutputWidget {
+        OutputWidget {
+            active: is_active,
+            output: self.output.range(..self.output.len().saturating_sub(self.output_offset)),
+            output_draw_buffer: &self.output_line_buffer,
+        }
+    }
 }
 
 pub(super) struct OutputWidget<'a> {
+    active: bool,
     output: Iter<'a, Spans<'a>>,
     output_draw_buffer: &'a Cell<Vec<Span<'static>>>,
-}
-
-impl<'a> From<&'a Shell> for OutputWidget<'a> {
-    fn from(shell: &'a Shell) -> Self {
-        OutputWidget {
-            output: shell.output.iter(),
-            output_draw_buffer: &shell.output_line_buffer,
-        }
-    }
 }
 
 impl<'a> OutputWidget<'_> {
@@ -207,19 +231,12 @@ impl<'a> Widget for OutputWidget<'_> {
         let max_line_width = area.width as usize;
 
         for line in self.output.rev() {
-            if line.0.iter().fold(true, |is_empty, span| {
-                is_empty && span.content.trim().is_empty()
-            }) {
-                lines.push(line.clone());
-                line_buf.clear();
-                line_buf_content_len = 0;
-                continue;
-            }
 
             let start = lines.len();
 
             for span in line.0.iter() {
                 let mut entry = span.content.as_ref();
+                let original_entry_len = entry.len();
                 let style = span.style;
 
                 while let Some(whitespace_len) = entry.find(|c: char| !c.is_whitespace()) {
@@ -252,7 +269,7 @@ impl<'a> Widget for OutputWidget<'_> {
                 }
 
                 // Handle trailing whitespace before next span
-                if !entry.is_empty() {
+                if !entry.is_empty() || original_entry_len == 0 {
                     if line_buf_content_len + entry.len() > max_line_width {
                         OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
                         line_buf_content_len = 0;
@@ -294,14 +311,14 @@ impl<'a> Widget for OutputWidget<'_> {
 }
 
 #[derive(Default)]
-pub(super) struct CommandLineWidgetState {
+pub(super) struct InputWidgetState {
     input_offset: usize,
 }
-pub(super) struct CommandLineWidget<'a> {
+pub(super) struct InputWidget<'a> {
     shell: &'a Shell,
 }
 
-impl<'a> CommandLineWidget<'_> {
+impl<'a> InputWidget<'_> {
     fn compute_draw_params(&self, area: Rect) -> (u16, u16, usize, usize, usize) {
         let cmd_x = area.left();
         let cmd_y = area.bottom().saturating_sub(1);
@@ -315,7 +332,7 @@ impl<'a> CommandLineWidget<'_> {
     pub(super) fn cursor_position(
         &self,
         area: Rect,
-        state: &mut CommandLineWidgetState,
+        state: &mut InputWidgetState,
     ) -> Option<(u16, u16)> {
         if area.area() == 0 || !self.shell.input_enabled {
             None
@@ -354,14 +371,14 @@ impl<'a> CommandLineWidget<'_> {
     }
 }
 
-impl<'a> From<&'a Shell> for CommandLineWidget<'a> {
+impl<'a> From<&'a Shell> for InputWidget<'a> {
     fn from(shell: &'a Shell) -> Self {
-        CommandLineWidget { shell }
+        InputWidget { shell }
     }
 }
 
-impl<'a> StatefulWidget for CommandLineWidget<'a> {
-    type State = CommandLineWidgetState;
+impl<'a> StatefulWidget for InputWidget<'a> {
+    type State = InputWidgetState;
 
     // NOTE: this function assumes that self.shell.cursor_position is within the bounds of 0 and the length of the shell input string inclusive
     //       it also assumes that self.cursor_position() has been called prior to this function call to update the input_offset

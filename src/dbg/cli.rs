@@ -282,6 +282,10 @@ pub enum DebugCliCommand {
     #[clap(visible_aliases = &["hist"])]
     History,
 
+    /// Navigate the output view
+    #[clap(visible_aliases = &["o", "out"])]
+    Output,
+
     /// Navigate the memory view
     #[clap(visible_aliases = &["m", "mem"])]
     Memory,
