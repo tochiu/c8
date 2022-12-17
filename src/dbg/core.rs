@@ -205,6 +205,7 @@ impl Debugger {
         };
         
         dbg.disassembler.run();
+        dbg.history.start_recording();
         dbg.activate(vm);
         dbg
     }
