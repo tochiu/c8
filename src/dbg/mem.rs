@@ -350,8 +350,7 @@ impl<'a> MemoryWidget<'_> {
             Color::Red
         } else if self.watchpoints.contains(&Watchpoint::Address(addr)) {
             Color::Blue
-        } else if addr_is_selected || addr == self.interpreter.pc || addr == self.interpreter.index
-        {
+        } else if addr_is_selected || addr == self.interpreter.pc || addr == self.interpreter.index {
             Color::Black
         } else {
             Color::Reset
@@ -389,7 +388,7 @@ impl<'a> MemoryWidget<'_> {
             spans.push(Span::styled(comment, MemoryWidget::COMMENT_STYLE));
         }
 
-        if addr_is_selected {
+        if addr_is_selected && self.active {
             MemoryWidget::highlight_line(&mut spans, Color::White, highlight, addr_line_width);
         } else if addr == self.interpreter.pc {
             MemoryWidget::highlight_line(&mut spans, Color::LightGreen, highlight, addr_line_width);
@@ -400,6 +399,8 @@ impl<'a> MemoryWidget<'_> {
                 highlight,
                 addr_line_width,
             );
+        } else if addr_is_selected {
+            MemoryWidget::highlight_line(&mut spans, Color::White, highlight, addr_line_width);
         }
 
         Spans::from(spans)
@@ -482,7 +483,7 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
                 lines.push(self.addr_span(
                     addr,
                     area.width,
-                    self.active && lines.len() == 0,
+                    lines.len() == 0,
                     &mut addr_header,
                     &mut addr_opcode,
                     &mut addr_bin,
@@ -504,7 +505,7 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
                     self.addr_span(
                         addr,
                         area.width,
-                        self.active && lines.len() == 0,
+                        lines.len() == 0,
                         &mut addr_header,
                         &mut addr_opcode,
                         &mut addr_bin,
@@ -523,7 +524,7 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
                 lines.push(self.addr_span(
                     addr,
                     area.width,
-                    self.active && lines.len() == 0,
+                    lines.len() == 0,
                     &mut addr_header,
                     &mut addr_opcode,
                     &mut addr_bin,
