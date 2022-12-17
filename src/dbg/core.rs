@@ -195,16 +195,13 @@ impl Debugger {
 
             runner_frequency: config.instruction_frequency,
 
-            shell: Default::default(),
-            shell_active: false,
+            shell: Shell::new(),
+            shell_active: true,
 
-            vm_visible: false,
+            vm_visible: true,
             vm_exception: None,
         };
-
-        dbg.vm_visible = true;
-        dbg.shell_active = true;
-        dbg.shell.input_enabled = true;
+        
         dbg.disassembler.run();
         dbg.activate(vm);
         dbg

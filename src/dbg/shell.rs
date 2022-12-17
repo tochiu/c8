@@ -4,16 +4,28 @@ use crate::{
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
-use tui::{buffer::Buffer, layout::Rect, style::{Style, Color, Modifier}, widgets::{StatefulWidget, Widget, Paragraph}, text::{Spans, Span}};
+use tui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    text::{Span, Spans},
+    widgets::{Paragraph, StatefulWidget, Widget},
+};
 
-use std::{fmt::Write, cell::Cell};
+use std::{
+    cell::Cell,
+    collections::{vec_deque::Iter, VecDeque},
+    fmt::Write,
+};
+
+const MAX_OUTPUT_MESSAGES: usize = 250;
 
 #[derive(Default)]
 pub(super) struct Shell {
     pub(super) input_enabled: bool,
 
     input: String,
-    output: Vec<Spans<'static>>,
+    output: VecDeque<Spans<'static>>,
     output_line_buffer: Cell<Vec<Span<'static>>>,
     cursor_position: usize,
     cmd_queue: Vec<String>,
@@ -24,6 +36,14 @@ pub(super) struct Shell {
 impl Shell {
     const PREFIX_INPUT: &'static str = "(c8db) ";
     const PREFIX_ERROR: &'static str = "ERROR: ";
+
+    pub(super) fn new() -> Self {
+        Self {
+            input_enabled: true,
+            output: VecDeque::with_capacity(MAX_OUTPUT_MESSAGES),
+            ..Default::default()
+        }
+    }
 
     pub(super) fn handle_key_event(&mut self, event: KeyEvent) -> bool {
         if !self.input_enabled {
@@ -106,16 +126,15 @@ impl Shell {
         if let Ok(inst) = interp.fetch().and_then(Instruction::try_from) {
             write_inst_asm(&inst, &mut inst_asm, &mut inst_comment).ok();
             write!(buf, "{}", inst_asm).ok();
-            self.output.push(buf.into());
+            self.print(buf);
             if inst_comment.is_empty() {
-                self.output.push(" ".into());
+                self.print("");
             } else {
-                self.output
-                    .push(format!("{}# {}", " ".repeat(11), inst_comment).into());
+                self.print(format!("{}# {}", " ".repeat(11), inst_comment));
             }
         } else {
             buf.push_str("BAD INSTRUCTION");
-            self.output.push(buf.into());
+            self.print(buf);
         }
     }
 
@@ -124,37 +143,51 @@ impl Shell {
     }
 
     pub(super) fn echo(&mut self, content: &str) {
-        self.output.push(Spans::from(vec![Span::styled(Shell::PREFIX_INPUT, Style::default().add_modifier(Modifier::BOLD)), Span::raw(content.to_string())]));
+        self.print(Spans::from(vec![
+            Span::styled(
+                Shell::PREFIX_INPUT,
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(content.to_string()),
+        ]));
     }
 
     pub(super) fn print<T: Into<Spans<'static>>>(&mut self, content: T) {
-        self.output.push(content.into());
+        if self.output.len() >= MAX_OUTPUT_MESSAGES {
+            self.output.pop_front();
+        }
+
+        self.output.push_back(content.into());
     }
 
     pub(super) fn error<T: Into<String>>(&mut self, content: T) {
-        self.output.push(Spans::from(vec![Span::styled(Shell::PREFIX_INPUT, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)), Span::styled(content.into(), Style::default().fg(Color::Red))]));
+        self.print(Spans::from(vec![
+            Span::styled(
+                Shell::PREFIX_ERROR,
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(content.into(), Style::default().fg(Color::Red)),
+        ]));
     }
 }
 
 pub(super) struct OutputWidget<'a> {
-    output:  &'a [Spans<'static>],
+    output: Iter<'a, Spans<'a>>,
     output_draw_buffer: &'a Cell<Vec<Span<'static>>>,
 }
 
 impl<'a> From<&'a Shell> for OutputWidget<'a> {
     fn from(shell: &'a Shell) -> Self {
-        OutputWidget { output: &shell.output, output_draw_buffer: &shell.output_line_buffer }
+        OutputWidget {
+            output: shell.output.iter(),
+            output_draw_buffer: &shell.output_line_buffer,
+        }
     }
 }
 
 impl<'a> OutputWidget<'_> {
     fn flush_line_buf<'b>(line_buf: &mut Vec<Span<'b>>, lines: &mut Vec<Spans<'b>>) {
         if !line_buf.is_empty() {
-            // let mut s = String::new();
-            // for span in line_buf.iter() {
-            //     s.push_str(&span.content);
-            // }
-            // log::trace!("spans: {}", s);
             lines.push(Spans::from(line_buf.clone()));
             line_buf.clear();
         }
@@ -164,7 +197,7 @@ impl<'a> OutputWidget<'_> {
 impl<'a> Widget for OutputWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.area() == 0 {
-            return
+            return;
         }
 
         let mut lines: Vec<Spans> = Vec::with_capacity(area.height as usize + 4);
@@ -172,26 +205,29 @@ impl<'a> Widget for OutputWidget<'_> {
         let mut line_buf_content_len = 0;
 
         let max_line_width = area.width as usize;
-        
-        for line in self.output.iter().rev() {
-            if line.0.iter().fold(true, |is_empty, span| is_empty && span.content.trim().is_empty()) {
+
+        for line in self.output.rev() {
+            if line.0.iter().fold(true, |is_empty, span| {
+                is_empty && span.content.trim().is_empty()
+            }) {
                 lines.push(line.clone());
                 line_buf.clear();
                 line_buf_content_len = 0;
-                continue
+                continue;
             }
 
             let start = lines.len();
 
             for span in line.0.iter() {
-                
                 let mut entry = span.content.as_ref();
                 let style = span.style;
 
                 while let Some(whitespace_len) = entry.find(|c: char| !c.is_whitespace()) {
                     let rest = &entry[whitespace_len..];
 
-                    let token_len = rest.find(char::is_whitespace).unwrap_or(entry.len() - whitespace_len);
+                    let token_len = rest
+                        .find(char::is_whitespace)
+                        .unwrap_or(entry.len() - whitespace_len);
                     let token = &rest[..token_len];
 
                     if line_buf_content_len + whitespace_len + token_len > max_line_width {
@@ -226,7 +262,7 @@ impl<'a> Widget for OutputWidget<'_> {
                     }
                 }
             }
-            
+
             OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
             line_buf_content_len = 0;
 
@@ -250,7 +286,7 @@ impl<'a> Widget for OutputWidget<'_> {
                 area.x,
                 area.bottom().saturating_sub(line_count as u16),
                 area.width,
-                line_count as u16
+                line_count as u16,
             ),
             buf,
         );
