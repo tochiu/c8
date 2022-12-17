@@ -17,6 +17,7 @@ use crate::{
     },
 };
 
+use ansi_to_tui::IntoText;
 use clap::Parser;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use tui::{
@@ -221,7 +222,7 @@ impl Debugger {
         if self.active {
             return;
         }
-
+        
         self.shell.print("Paused.");
         self.shell.output_pc(vm.interpreter());
         self.active = true;
@@ -443,12 +444,22 @@ impl Debugger {
                 Ok(DebugCli { command }) => {
                     self.handle_command(command, runner, vm);
                 }
-                Err(e) => {
+                Err(cli_err) => {
                     self.shell.print("");
-                    for line in e.to_string().lines() {
-                        self.shell.print(line);
+                    match cli_err.render().ansi().to_string().into_text() {
+                        Ok(text) => {
+                            for line in text {
+                                self.shell.print(line);
+                            }
+                        }
+                        Err(text_err) => {
+                            log::error!("Failed to parse ANSI text to tui::text::Text: {}", text_err);
+                            // TODO: maybe make it not render a string that is immediately parsed and dropped
+                            for line in cli_err.to_string().lines() {
+                                self.shell.print(line.to_string());
+                            }
+                        }
                     }
-                    self.shell.print("");
                 }
             }
         }

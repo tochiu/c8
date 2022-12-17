@@ -13,8 +13,8 @@ pub(super) struct Shell {
     pub(super) input_enabled: bool,
 
     input: String,
-    output: Vec<String>,
-    output_line_buffer: Cell<String>,
+    output: Vec<Spans<'static>>,
+    output_line_buffer: Cell<Vec<Span<'static>>>,
     cursor_position: usize,
     cmd_queue: Vec<String>,
     history: Vec<String>,
@@ -106,16 +106,16 @@ impl Shell {
         if let Ok(inst) = interp.fetch().and_then(Instruction::try_from) {
             write_inst_asm(&inst, &mut inst_asm, &mut inst_comment).ok();
             write!(buf, "{}", inst_asm).ok();
-            self.output.push(buf);
+            self.output.push(buf.into());
             if inst_comment.is_empty() {
                 self.output.push(" ".into());
             } else {
                 self.output
-                    .push(format!("{}# {}", " ".repeat(11), inst_comment));
+                    .push(format!("{}# {}", " ".repeat(11), inst_comment).into());
             }
         } else {
             buf.push_str("BAD INSTRUCTION");
-            self.output.push(buf);
+            self.output.push(buf.into());
         }
     }
 
@@ -124,24 +124,21 @@ impl Shell {
     }
 
     pub(super) fn echo(&mut self, content: &str) {
-        let mut result = String::with_capacity(Shell::PREFIX_INPUT.len() + content.len());
-        result.push_str(Shell::PREFIX_INPUT);
-        result.push_str(content);
-        self.output.push(result);
+        self.output.push(Spans::from(vec![Span::styled(Shell::PREFIX_INPUT, Style::default().add_modifier(Modifier::BOLD)), Span::raw(content.to_string())]));
     }
 
-    pub(super) fn print<T: Into<String>>(&mut self, content: T) {
+    pub(super) fn print<T: Into<Spans<'static>>>(&mut self, content: T) {
         self.output.push(content.into());
     }
 
     pub(super) fn error<T: Into<String>>(&mut self, content: T) {
-        self.output.push(format!("{}{}", Shell::PREFIX_ERROR, content.into()));
+        self.output.push(Spans::from(vec![Span::styled(Shell::PREFIX_INPUT, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)), Span::styled(content.into(), Style::default().fg(Color::Red))]));
     }
 }
 
 pub(super) struct OutputWidget<'a> {
-    output: &'a [String],
-    output_draw_buffer: &'a Cell<String>,
+    output:  &'a [Spans<'static>],
+    output_draw_buffer: &'a Cell<Vec<Span<'static>>>,
 }
 
 impl<'a> From<&'a Shell> for OutputWidget<'a> {
@@ -151,9 +148,14 @@ impl<'a> From<&'a Shell> for OutputWidget<'a> {
 }
 
 impl<'a> OutputWidget<'_> {
-    fn flush_line_buf(line_buf: &mut String, lines: &mut Vec<Spans>, style: Style) {
+    fn flush_line_buf<'b>(line_buf: &mut Vec<Span<'b>>, lines: &mut Vec<Spans<'b>>) {
         if !line_buf.is_empty() {
-            lines.push(Spans::from(Span::styled(line_buf.clone(), style)));
+            // let mut s = String::new();
+            // for span in line_buf.iter() {
+            //     s.push_str(&span.content);
+            // }
+            // log::trace!("spans: {}", s);
+            lines.push(Spans::from(line_buf.clone()));
             line_buf.clear();
         }
     }
@@ -167,51 +169,66 @@ impl<'a> Widget for OutputWidget<'_> {
 
         let mut lines: Vec<Spans> = Vec::with_capacity(area.height as usize + 4);
         let mut line_buf = self.output_draw_buffer.take();
+        let mut line_buf_content_len = 0;
+
         let max_line_width = area.width as usize;
         
-        for mut entry in self.output.iter().rev().map(String::as_str) {
-            if entry.trim().is_empty() {
-                lines.push(Spans::from(Span::styled(line_buf.clone(), Style::default())));
+        for line in self.output.iter().rev() {
+            if line.0.iter().fold(true, |is_empty, span| is_empty && span.content.trim().is_empty()) {
+                lines.push(line.clone());
                 line_buf.clear();
+                line_buf_content_len = 0;
+                continue
             }
 
             let start = lines.len();
-            let style = if entry.starts_with(Shell::PREFIX_ERROR) {
-                Style::default().fg(Color::Red)
-            } else if entry.starts_with(Shell::PREFIX_INPUT) {
-                Style::default().add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
 
-            while let Some(whitespace_len) = entry.find(|c: char| !c.is_whitespace()) {
-                let rest = &entry[whitespace_len..];
+            for span in line.0.iter() {
+                
+                let mut entry = span.content.as_ref();
+                let style = span.style;
 
-                let token_len = rest.find(char::is_whitespace).unwrap_or(entry.len() - whitespace_len);
-                let token = &rest[..token_len];
+                while let Some(whitespace_len) = entry.find(|c: char| !c.is_whitespace()) {
+                    let rest = &entry[whitespace_len..];
 
-                if line_buf.len() + whitespace_len + token_len > max_line_width {
-                    if token_len > max_line_width {
-                        for token_chunk in token.as_bytes().chunks(max_line_width) {
-                            OutputWidget::flush_line_buf(&mut line_buf, &mut lines, style);
-                            line_buf.push_str(std::str::from_utf8(token_chunk).unwrap_or_default());
+                    let token_len = rest.find(char::is_whitespace).unwrap_or(entry.len() - whitespace_len);
+                    let token = &rest[..token_len];
+
+                    if line_buf_content_len + whitespace_len + token_len > max_line_width {
+                        if token_len > max_line_width {
+                            for token_chunk in token.as_bytes().chunks(max_line_width) {
+                                OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
+                                let chunk = std::str::from_utf8(token_chunk).unwrap_or_default();
+                                line_buf.push(Span::styled(chunk, style));
+                                line_buf_content_len = chunk.len();
+                            }
+                        } else {
+                            OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
+                            line_buf.push(Span::styled(token, style));
+                            line_buf_content_len = token.len();
                         }
                     } else {
-                        OutputWidget::flush_line_buf(&mut line_buf, &mut lines, style);
-                        line_buf.push_str(token);
+                        line_buf.push(Span::styled(&entry[..whitespace_len + token_len], style));
+                        line_buf_content_len += whitespace_len + token_len;
                     }
-                } else {
-                    line_buf.push_str(&entry[..whitespace_len + token_len]);
+
+                    entry = &entry[whitespace_len + token_len..];
                 }
 
-                if whitespace_len + token_len < entry.len() {
-                    entry = &entry[whitespace_len + token_len..];
-                } else {
-                    break;
+                // Handle trailing whitespace before next span
+                if !entry.is_empty() {
+                    if line_buf_content_len + entry.len() > max_line_width {
+                        OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
+                        line_buf_content_len = 0;
+                    } else {
+                        line_buf.push(Span::styled(entry, style));
+                        line_buf_content_len += entry.len();
+                    }
                 }
             }
-
-            OutputWidget::flush_line_buf(&mut line_buf, &mut lines, style);
+            
+            OutputWidget::flush_line_buf(&mut line_buf, &mut lines);
+            line_buf_content_len = 0;
 
             if lines.len() > start {
                 lines[start..].reverse();
