@@ -23,7 +23,7 @@ use crossterm::event::{Event, KeyCode, KeyEventKind};
 use tui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Span, Spans},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
@@ -203,7 +203,7 @@ impl Debugger {
             vm_visible: true,
             vm_exception: None,
         };
-        
+
         dbg.disassembler.run();
         dbg.history.start_recording();
         dbg.activate(vm);
@@ -222,7 +222,7 @@ impl Debugger {
         if self.active {
             return;
         }
-        
+
         self.shell.print("Paused.");
         self.shell.output_pc(vm.interpreter());
         self.active = true;
@@ -382,7 +382,9 @@ impl Debugger {
                 if self.shell_input_active {
                     sink_event = self.shell.handle_input_key_event(key_event);
                 } else if self.shell_output_active {
-                    sink_event = self.shell.handle_output_key_event(key_event, &mut self.shell_output_active);
+                    sink_event = self
+                        .shell
+                        .handle_output_key_event(key_event, &mut self.shell_output_active);
                     if !self.shell_output_active {
                         self.shell_input_active = true;
                     }
@@ -441,7 +443,10 @@ impl Debugger {
             // Aliasing that I was too lazy to implement idiomtically in clap
             if args.first().map_or(false, |cmd| cmd == "h") {
                 args[0] = "help".into();
-            } else if args.first().map_or(false, |cmd| cmd == "version" || cmd == "v") {
+            } else if args
+                .first()
+                .map_or(false, |cmd| cmd == "version" || cmd == "v")
+            {
                 args[0] = "--version".into();
             }
 
@@ -456,10 +461,27 @@ impl Debugger {
                             for line in text {
                                 self.shell.print(line);
                             }
+                            self.shell.print(vec![
+                                Span::raw("Execute "),
+                                Span::styled(
+                                    "output",
+                                    Style::default()
+                                        .fg(Color::Yellow)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(
+                                    " [aliases: o, out]",
+                                    Style::default().fg(Color::Yellow),
+                                ),
+                                Span::raw(" to view the full output"),
+                            ]);
+                            self.shell.print("");
                         }
                         Err(text_err) => {
-                            log::error!("Failed to parse ANSI text to tui::text::Text: {}", text_err);
-                            // TODO: maybe make it not render a string that is immediately parsed and dropped
+                            log::error!(
+                                "Failed to parse ANSI text to tui::text::Text: {}",
+                                text_err
+                            );
                             for line in cli_err.to_string().lines() {
                                 self.shell.print(line.to_string());
                             }
@@ -883,16 +905,18 @@ impl<'a> DebuggerWidget<'a> {
         let (vm, logger) = {
             let rects = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints(if self.dbg.vm_visible && !self.dbg.shell_output_active && self.logging {
-                    [
-                        Constraint::Length(DISPLAY_WINDOW_HEIGHT),
-                        Constraint::Length(region.height.saturating_sub(DISPLAY_WINDOW_HEIGHT)),
-                    ]
-                } else if self.logging {
-                    [Constraint::Percentage(0), Constraint::Percentage(100)]
-                } else {
-                    [Constraint::Percentage(100), Constraint::Percentage(0)]
-                })
+                .constraints(
+                    if self.dbg.vm_visible && !self.dbg.shell_output_active && self.logging {
+                        [
+                            Constraint::Length(DISPLAY_WINDOW_HEIGHT),
+                            Constraint::Length(region.height.saturating_sub(DISPLAY_WINDOW_HEIGHT)),
+                        ]
+                    } else if self.logging {
+                        [Constraint::Percentage(0), Constraint::Percentage(100)]
+                    } else {
+                        [Constraint::Percentage(100), Constraint::Percentage(0)]
+                    },
+                )
                 .split(region);
             (rects[0], rects[1])
         };
@@ -910,8 +934,8 @@ impl<'a> DebuggerWidget<'a> {
                 Rect::default(),
                 Rect::default(),
                 area,
-                Rect::default(),                
-            )
+                Rect::default(),
+            );
         }
 
         let mut rects = Layout::default()
@@ -1021,7 +1045,10 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         // Output
         let output_block = Block::default().title(" Output ").borders(Borders::TOP);
-        self.dbg.shell.as_output_widget().render(output_block.inner(output_area), buf);
+        self.dbg
+            .shell
+            .as_output_widget()
+            .render(output_block.inner(output_area), buf);
         output_block.render(output_area, buf);
 
         // History
