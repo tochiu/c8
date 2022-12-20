@@ -1,8 +1,8 @@
 use super::{
-    disp::DisplayBuffer,
+    disp::Display,
     input::{Key, Keyboard},
     interp::{Interpreter, InterpreterHistoryFragment, InterpreterRequest},
-    prog::Program,
+    rom::Rom,
 };
 
 use std::sync::mpsc::Receiver;
@@ -20,7 +20,6 @@ pub enum VMEvent {
     FocusingKeyDown(Key),
 }
 
-#[derive(Debug)]
 pub struct VMHistoryFragment {
     pub time_step: f32,
     pub keyboard: Keyboard,
@@ -84,11 +83,11 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(program: Program, recv: Receiver<VMEvent>) -> Self {
+    pub fn new(rom: Rom, recv: Receiver<VMEvent>) -> Self {
         VM {
             time_step: 0.0,
 
-            interp: Interpreter::from(program),
+            interp: Interpreter::from(rom),
 
             event: recv,
             event_queue: Vec::new(),
@@ -168,16 +167,16 @@ impl VM {
         }
     }
 
-    pub fn extract_new_frame(&mut self) -> Option<DisplayBuffer> {
+    pub fn extract_new_display(&mut self) -> Option<Display> {
         if self.display {
             self.display = false;
-            Some(self.interp.output.display)
+            Some(self.interp.output.display.clone())
         } else {
             None
         }
     }
 
-    pub fn handle_inputs(&mut self) {
+    pub fn step(&mut self) -> Result<bool, String> {
         self.drain_event_queue();
 
         // update timers and clamp between the bounds of a byte because that is the data type
@@ -188,20 +187,18 @@ impl VM {
 
         // update interpreter input
         let delay_timer = self.truncated_delay_timer();
-        let mut input = self.interp.input_mut();
+        let mut input = &mut self.interp.input;
 
         self.keyboard.flush(input); // the keyboard will write its state to the input
         input.delay_timer = delay_timer; // delay timer is ceiled to the nearest 8-bit number
-    }
 
-    pub fn step(&mut self) -> Result<(), String> {
         // interpret next instruction
-        let output = self.interp.step()?;
+        let should_continue = self.interp.step()?;
 
         self.keyboard.clear_ephemeral_state();
 
         // handle any external request by the executed instruction
-        if let Some(request) = output.request {
+        if let Some(request) = self.interp.output.request {
             match request {
                 InterpreterRequest::Display => self.display = true,
                 InterpreterRequest::SetDelayTimer(time) => self.delay_timer = time as f32,
@@ -209,6 +206,6 @@ impl VM {
             }
         }
 
-        Ok(())
+        Ok(should_continue)
     }
 }

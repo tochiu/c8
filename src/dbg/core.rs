@@ -1,16 +1,15 @@
 use super::{
     cli::*,
-    hist::{History, HistoryWidget},
     mem::*,
     shell::*,
+    hist::{History, HistoryWidget},
 };
 
 use crate::{
     asm::Disassembler,
-    config::C8Config,
     run::{
         core::Runner,
-        disp::{Display, DisplayWidget, DISPLAY_WINDOW_HEIGHT, DISPLAY_WINDOW_WIDTH},
+        disp::DisplayWidget,
         input::KEY_ORDERING,
         interp::{Instruction, Interpreter},
         vm::VM,
@@ -66,7 +65,7 @@ impl From<&Interpreter> for WatchState {
             index: interp.index,
             pc: interp.pc,
             addresses: Default::default(),
-            instruction: interp.fetch().and_then(Instruction::try_from).ok(),
+            instruction: interp.try_fetch_decode().ok(),
         }
     }
 }
@@ -133,7 +132,7 @@ impl WatchState {
         self.pc = interp.pc;
         self.index = interp.index;
         self.registers.copy_from_slice(&interp.registers);
-        self.instruction = interp.fetch().and_then(Instruction::try_from).ok();
+        self.instruction = interp.try_fetch_decode().ok();
     }
 }
 
@@ -170,14 +169,15 @@ pub struct Debugger {
 
     vm_visible: bool,
     vm_exception: Option<String>,
+    vm_executing: bool,
 }
 
 impl Debugger {
-    pub fn new(vm: &VM, config: &C8Config) -> Self {
+    pub fn new(vm: &VM, init_hz: u16) -> Self {
         let mut dbg = Debugger {
             active: false,
 
-            history: Default::default(),
+            history: History::new(vm.interpreter().rom.config.kind),
             history_active: false,
 
             breakpoints: Default::default(),
@@ -185,7 +185,7 @@ impl Debugger {
             watch_state: WatchState::from(vm.interpreter()),
             event_queue: Default::default(),
 
-            disassembler: Disassembler::from(vm.interpreter().program.clone()),
+            disassembler: Disassembler::from(vm.interpreter().rom.clone()),
 
             memory: Default::default(),
             memory_active: false,
@@ -194,7 +194,7 @@ impl Debugger {
 
             keyboard_shows_qwerty: true,
 
-            runner_frequency: config.instruction_frequency,
+            runner_frequency: init_hz,
 
             shell: Shell::new(),
             shell_input_active: true,
@@ -202,6 +202,7 @@ impl Debugger {
 
             vm_visible: true,
             vm_exception: None,
+            vm_executing: true
         };
 
         dbg.disassembler.run();
@@ -212,10 +213,6 @@ impl Debugger {
 
     pub fn is_active(&self) -> bool {
         self.active
-    }
-
-    pub fn frequency(&self) -> u16 {
-        self.runner_frequency
     }
 
     fn activate(&mut self, vm: &VM) {
@@ -274,19 +271,36 @@ impl Debugger {
             return false;
         }
 
+        if !self.vm_executing {
+            self.shell.print("Program has finished executing.");
+            self.activate(vm);
+            return false;
+        }
+
         let step_result = if self.history.is_recording() {
             self.history.step(vm)
         } else {
-            vm.handle_inputs();
             vm.step()
         };
 
-        let mut should_continue = step_result.is_ok();
-        if let Err(e) = step_result {
-            self.shell.error(&e);
-            self.vm_exception = Some(e);
-            self.activate(vm);
-        }
+        let mut should_continue = match step_result {
+            Ok(should_continue) => {
+                if !should_continue {
+                    self.shell.print("Program has finished executing.");
+                    self.vm_executing = false;
+                    self.activate(vm);
+                }
+
+                should_continue
+            },
+            Err(e) => {
+                self.shell.error(&e);
+                self.vm_executing = false;
+                self.vm_exception = Some(e);
+                self.activate(vm);
+                false
+            }
+        };
 
         let interp = vm.interpreter();
 
@@ -516,7 +530,7 @@ impl Debugger {
                 let amt_stepped = self.stepn(
                     vm,
                     amount,
-                    1.0 / runner.config().instruction_frequency as f32,
+                    1.0 / self.runner_frequency as f32,
                 );
 
                 if amt_stepped > 1 {
@@ -849,11 +863,8 @@ pub struct DebuggerWidgetState {
 
 pub struct DebuggerWidget<'a> {
     pub logging: bool,
-
     pub dbg: &'a Debugger,
-
     pub vm: &'a VM,
-    pub vm_disp: &'a Display,
 }
 
 impl<'a> DebuggerWidget<'a> {
@@ -874,6 +885,7 @@ impl<'a> DebuggerWidget<'a> {
     }
 
     fn areas(&self, area: Rect) -> (Rect, Rect, Rect, Rect) {
+        let (display_width, display_height) = self.vm.interpreter().output.display.mode.dimensions();
         let (region, bottom) = {
             let rects = Layout::default()
                 .direction(Direction::Vertical)
@@ -890,8 +902,8 @@ impl<'a> DebuggerWidget<'a> {
                 .direction(Direction::Horizontal)
                 .constraints(if self.dbg.vm_visible && !self.dbg.shell_output_active {
                     [
-                        Constraint::Length(region.width.saturating_sub(DISPLAY_WINDOW_WIDTH)),
-                        Constraint::Length(DISPLAY_WINDOW_WIDTH),
+                        Constraint::Length(region.width.saturating_sub(display_width as u16 + 2)),
+                        Constraint::Length(display_width as u16 + 2),
                     ]
                 } else if self.logging {
                     [Constraint::Percentage(80), Constraint::Percentage(20)]
@@ -908,8 +920,8 @@ impl<'a> DebuggerWidget<'a> {
                 .constraints(
                     if self.dbg.vm_visible && !self.dbg.shell_output_active && self.logging {
                         [
-                            Constraint::Length(DISPLAY_WINDOW_HEIGHT),
-                            Constraint::Length(region.height.saturating_sub(DISPLAY_WINDOW_HEIGHT)),
+                            Constraint::Length(display_height as u16/2 + 2),
+                            Constraint::Length(region.height.saturating_sub(display_height as u16/2 + 2)),
                         ]
                     } else if self.logging {
                         [Constraint::Percentage(0), Constraint::Percentage(100)]
@@ -1037,7 +1049,10 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         // VM
         if self.dbg.vm_visible {
             DisplayWidget {
-                display: self.vm_disp,
+                title: &self.vm.interpreter().rom.config.name,
+                display: &self.vm.interpreter().output.display,
+                rom_kind: self.vm.interpreter().rom.config.kind,
+                instruction_frequency: self.dbg.runner_frequency,
                 logging: false,
             }
             .render(vm_area, buf);

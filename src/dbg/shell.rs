@@ -1,6 +1,6 @@
 use crate::{
     asm::write_inst_asm,
-    run::interp::{Instruction, Interpreter},
+    run::interp::Interpreter,
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -147,8 +147,8 @@ impl Shell {
         let mut buf = format!("{:#05X?}: ", interp.pc);
         let mut inst_asm = String::new();
         let mut inst_comment = String::new();
-        if let Ok(inst) = interp.fetch().and_then(Instruction::try_from) {
-            write_inst_asm(&inst, &mut inst_asm, &mut inst_comment).ok();
+        if let Ok(inst) = interp.try_fetch_decode() {
+            write_inst_asm(&inst, interp.rom.config.kind, &mut inst_asm, &mut inst_comment).ok();
             write!(buf, "{}", inst_asm).ok();
             self.print(buf);
             if inst_comment.is_empty() {

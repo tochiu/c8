@@ -1,11 +1,12 @@
+use super::{
+    input::Key,
+    rom::Rom,
+    vm::{VMEvent, VM},
+};
+
 use crate::{
-    config::{C8Config, GOOD_INSTRUCTION_FREQUENCY_DIFF, OKAY_INSTRUCTION_FREQUENCY_DIFF},
     dbg::core::Debugger,
     render::spawn_render_thread,
-    run::{
-        prog::Program,
-        vm::{VMEvent, VM},
-    },
 };
 
 use anyhow::Result;
@@ -30,23 +31,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::input::Key;
-
 pub type C8 = (VM, Option<Debugger>);
 pub type C8Lock = Arc<Mutex<C8>>;
 
 pub type RunResult = Result<RunAnalytics, String>;
 pub type RunControlResult = Result<(), &'static str>;
 
-pub fn spawn_run_threads(
-    program: Program,
-    config: C8Config,
-) -> (JoinHandle<()>, JoinHandle<RunResult>) {
+pub const GOOD_INSTRUCTION_FREQUENCY_DIFF: f64 = 1.0;
+pub const OKAY_INSTRUCTION_FREQUENCY_DIFF: f64 = 10.0;
+
+pub fn spawn_run_threads(rom: Rom, init_hz: u16) -> (JoinHandle<()>, JoinHandle<RunResult>) {
     // runner
-    let mut runner = Runner::spawn(config.clone(), program);
+    let rom_config = rom.config.clone();
+    let mut runner = Runner::spawn(rom, init_hz);
 
     // render
-    let (render_sender, render_thread) = spawn_render_thread(runner.c8(), config.clone());
+    let (render_sender, render_thread) = spawn_render_thread(runner.c8(), rom_config.clone());
 
     // main thread
     let c8 = runner.c8();
@@ -57,7 +57,7 @@ pub fn spawn_run_threads(
         let mut last_keys = HashSet::new();
 
         // start runner
-        if !config.debugging {
+        if !rom_config.debugging {
             runner.resume().expect("Unable to resume runner");
         }
 
@@ -74,7 +74,7 @@ pub fn spawn_run_threads(
                 let event = read().expect("Unable to read terminal event");
                 let mut sink_vm_events = false;
 
-                if config.debugging {
+                if rom_config.debugging {
                     let mut _guard = c8.lock().expect("Unable to lock c8");
                     let (vm, Some(dbg)) = _guard.deref_mut() else {
                         unreachable!("Debug runs should contain a debugger");
@@ -155,7 +155,7 @@ pub fn spawn_run_threads(
             last_keys = keys;
 
             // TODO attach event listener to logger instead of polling to update
-            if config.logging {
+            if rom_config.logging {
                 render_sender.send(()).expect("Unable to send render event");
             }
         }
@@ -180,7 +180,6 @@ fn update_frequency_stats(
 }
 
 pub struct Runner {
-    config: C8Config,
 
     c8: Arc<Mutex<C8>>,
 
@@ -194,10 +193,6 @@ pub struct Runner {
 impl Runner {
     pub fn c8(&self) -> C8Lock {
         Arc::clone(&self.c8)
-    }
-
-    pub fn config(&self) -> &C8Config {
-        &self.config
     }
 
     pub fn vm_event_sender(&self) -> Sender<VMEvent> {
@@ -217,23 +212,22 @@ impl Runner {
     }
 
     pub fn set_instruction_frequency(&mut self, frequency: u16) -> Result<(), &'static str> {
-        self.config.instruction_frequency = frequency;
         self.thread_frequency_sender
             .send(frequency)
             .map_err(|_| "Failed to send instruction frequency to vm thread")
     }
 
-    pub fn spawn(config: C8Config, program: Program) -> Self {
+    pub fn spawn(rom: Rom, init_hz: u16) -> Self {
         let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
         let (thread_continue_sender, thread_continue_receiver) = channel::<bool>();
         let (thread_frequency_sender, thread_frequency_receiver) = channel::<u16>();
 
-        let program_name = program.name.clone();
+        let rom_config = rom.config.clone();
 
         let c8 = Arc::new(Mutex::new({
-            let vm = VM::new(program, vm_event_receiver);
-            let dbg = if config.debugging {
-                Some(Debugger::new(&vm, &config))
+            let vm = VM::new(rom, vm_event_receiver);
+            let dbg = if rom_config.debugging {
+                Some(Debugger::new(&vm, init_hz))
             } else {
                 None
             };
@@ -241,7 +235,7 @@ impl Runner {
             (vm, dbg)
         }));
 
-        let mut frequency = config.instruction_frequency;
+        let mut frequency = init_hz;
         let mut frequency_stats: BTreeMap<u16, (Duration, u64)> = BTreeMap::new();
 
         let thread_handle = {
@@ -275,6 +269,8 @@ impl Runner {
                     let mut _guard = c8.lock().expect("Failed to lock C8 for main loop");
                     let (vm, maybe_dbg) = _guard.deref_mut();
 
+                    let mut step_can_continue = false;
+
                     if continuation.try_cont() {
                         // we can step synchronously
 
@@ -294,20 +290,18 @@ impl Runner {
                         // send the signal to resume the thread from an invalid state.. if it ever resumes
                         // then it must be from a rolled-back state
 
-                        let step_cont = if let Some(dbg) = maybe_dbg {
+                        step_can_continue = if let Some(dbg) = maybe_dbg {
                             dbg.step(vm)
                         } else {
-                            vm.handle_inputs();
-                            vm.step()?;
-                            true
+                            vm.step()?
                         };
 
                         drop(_guard);
 
                         continuation.try_cont();
-                        continuation.cont = continuation.cont && step_cont;
+                        continuation.cont = continuation.cont && step_can_continue;
 
-                        if continuation.try_cont() {
+                        if continuation.cont {
                             interval.sleep();
                             instructions_executed += 1;
                             runtime_burst_duration = runtime_start.elapsed();
@@ -321,7 +315,7 @@ impl Runner {
 
                     // we yield until either we can continue or we must exit
 
-                    if continuation.can_cont() {
+                    if !(step_can_continue && !rom_config.debugging) && continuation.can_cont() {
                         just_resumed = true;
                         runtime_burst_duration = Duration::ZERO;
                         runtime_start = Instant::now();
@@ -348,7 +342,7 @@ impl Runner {
                         );
                         return Ok(RunAnalytics {
                             frequency_stats,
-                            program_name,
+                            rom_name: rom_config.name,
                         });
                     }
                 }
@@ -356,7 +350,6 @@ impl Runner {
         };
 
         Runner {
-            config,
             c8,
             thread_handle,
             vm_event_sender,
@@ -435,7 +428,7 @@ impl RunContinuation {
 
 pub struct RunAnalytics {
     frequency_stats: BTreeMap<u16, (Duration, u64)>,
-    program_name: String,
+    rom_name: String,
 }
 
 impl Display for RunAnalytics {
@@ -444,7 +437,7 @@ impl Display for RunAnalytics {
             f,
             "{} \"{}\" runtime",
             format!("Analyzing").green().bold(),
-            self.program_name
+            self.rom_name
         )?;
 
         for (&target_ips, &(runtime_duration, instructions_executed)) in self.frequency_stats.iter()

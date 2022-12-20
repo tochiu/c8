@@ -1,0 +1,2282 @@
+2022-12-19T14:53:55.176Z INFO  [c8::asm] Disassembling "binding" starting at 0x200
+2022-12-19T14:53:55.176Z INFO  [c8::asm] Disassembled "binding" in 25 us
+0x200: |X| 0x2E96 call 0xE96
+0x202: |X| 0x2A02 call 0xA02
+0x204: |X| 0x29EE call 0x9EE
+0x206: |X| 0xAB8E ld   i 0xB8E      # index = 0xB8E
+0x208: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x20A: |X| 0x8100 ld   v1 v0        # v1 = v0
+0x20C: |X| 0x6007 ld   v0 7         # v0 = 7
+0x20E: |X| 0x4101 sne  v1 1         # skip next if v1 != 1
+0x210: |X| 0x6014 ld   v0 20        # v0 = 20
+0x212: |X| 0x4102 sne  v1 2         # skip next if v1 != 2
+0x214: |X| 0x601E ld   v0 30        # v0 = 30
+0x216: |X| 0x229A call 0x29A
+0x218: |X| 0x22EA call 0x2EA
+0x21A: |X| 0x4C01 sne  vc 1         # skip next if vc != 1
+0x21C: |X| 0x122C jp   0x22C
+0x21E: |X| 0x2852 call 0x852
+0x220: |X| 0x2304 call 0x304
+0x222: |X| 0x274A call 0x74A
+0x224: |X| 0x26F8 call 0x6F8
+0x226: |X| 0x2AB4 call 0xAB4
+0x228: |X| 0x2B5A call 0xB5A
+0x22A: |X| 0x1218 jp   0x218
+0x22C: |X| 0x6C00 ld   vc 0         # vc = 0
+0x22E: |X| 0x6107 ld   v1 7         # v1 = 7
+0x230: |X| 0x81C2 and  v1 vc        # v1 &= vc
+0x232: |X| 0x3100 se   v1 0         # skip next if v1 == 0
+0x234: |X| 0x123C jp   0x23C
+0x236: |X| 0x2B6C call 0xB6C
+0x238: |X| 0xAC46 ld   i 0xC46      # index = 0xC46
+0x23A: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x23C: |X| 0x2B5A call 0xB5A
+0x23E: |X| 0x7C01 add  vc 1         # vc += 1
+0x240: |X| 0x6F5F ld   vf 95        # vf = 95
+0x242: |X| 0x8FC7 subn vf vc        # vf = vc - vf
+0x244: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x246: |X| 0x122E jp   0x22E
+0x248: |X| 0x672A ld   v7 42        # v7 = 42
+0x24A: |X| 0x6825 ld   v8 37        # v8 = 37
+0x24C: |X| 0x00E0 cls               # clear display
+0x24E: |X| 0x6037 ld   v0 55        # v0 = 55
+0x250: |X| 0x610F ld   v1 15        # v1 = 15
+0x252: |X| 0xACDB ld   i 0xCDB      # index = 0xCDB
+0x254: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x256: |X| 0xAD6A ld   i 0xD6A      # index = 0xD6A
+0x258: |X| 0x6605 ld   v6 5         # v6 = 5
+0x25A: |X| 0x6032 ld   v0 50        # v0 = 50
+0x25C: |X| 0x6123 ld   v1 35        # v1 = 35
+0x25E: |X| 0x228A call 0x28A
+0x260: |X| 0x6030 ld   v0 48        # v0 = 48
+0x262: |X| 0x612D ld   v1 45        # v1 = 45
+0x264: |X| 0x228A call 0x28A
+0x266: |X| 0xD781 drw  v7 v8 1      # draw 8x1 sprite at pos (v7, v8)
+0x268: |X| 0x6F05 ld   vf 5         # vf = 5
+0x26A: |X| 0xEFA1 sknp vf           # skip next if vf key is up
+0x26C: |X| 0x6825 ld   v8 37        # v8 = 37
+0x26E: |X| 0x6F08 ld   vf 8         # vf = 8
+0x270: |X| 0xEFA1 sknp vf           # skip next if vf key is up
+0x272: |X| 0x682F ld   v8 47        # v8 = 47
+0x274: |X| 0x6F0E ld   vf 14        # vf = 14
+0x276: |X| 0xEF9E skp  vf           # skip next if vf key is down
+0x278: |X| 0x1286 jp   0x286
+0x27A: |X| 0x3825 se   v8 37        # skip next if v8 == 37
+0x27C: |X| 0x1284 jp   0x284
+0x27E: |X| 0xAB8E ld   i 0xB8E      # index = 0xB8E
+0x280: |X| 0x6000 ld   v0 0         # v0 = 0
+0x282: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x284: |X| 0x1204 jp   0x204
+0x286: |X| 0x2B5A call 0xB5A
+0x288: |X| 0x124C jp   0x24C
+0x28A: |X| 0xD015 drw  v0 v1 5      # draw 8x5 sprite at pos (v0, v1)
+0x28C: |X| 0xF61E add  i 6          # index += 6 (0x006)
+0x28E: |X| 0x7008 add  v0 8         # v0 += 8
+0x290: |X| 0x6F50 ld   vf 80        # vf = 80
+0x292: |X| 0x8F07 subn vf v0        # vf = v0 - vf
+0x294: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x296: |X| 0x128A jp   0x28A
+0x298: |X| 0x00EE ret
+0x29A: |X| 0xAF89 ld   i 0xF89      # index = 0xF89
+0x29C: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x29E: |X| 0xAD96 ld   i 0xD96      # index = 0xD96
+0x2A0: |X| 0x6106 ld   v1 6         # v1 = 6
+0x2A2: |X| 0x6F00 ld   vf 0         # vf = 0
+0x2A4: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x2A6: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x2A8: |X| 0x12B0 jp   0x2B0
+0x2AA: |X| 0x70FF add  v0 255       # v0 += 255
+0x2AC: |X| 0xF11E add  i 1          # index += 1 (0x001)
+0x2AE: |X| 0x12A2 jp   0x2A2
+0x2B0: |X| 0xF565 ld   v5 i         # load 6 bytes into v(0..=5) from memory
+0x2B2: |X| 0xAF8A ld   i 0xF8A      # index = 0xF8A
+0x2B4: |X| 0xF555 ld   i v5         # save 6 bytes from v(0..=5) to memory
+0x2B6: |X| 0x293E call 0x93E
+0x2B8: |X| 0x294E call 0x94E
+0x2BA: |X| 0x2976 call 0x976
+0x2BC: |X| 0x2956 call 0x956
+0x2BE: |X| 0x4506 sne  v5 6         # skip next if v5 != 6
+0x2C0: |X| 0x2930 call 0x930
+0x2C2: |X| 0x4507 sne  v5 7         # skip next if v5 != 7
+0x2C4: |X| 0x2946 call 0x946
+0x2C6: |X| 0x4508 sne  v5 8         # skip next if v5 != 8
+0x2C8: |X| 0x296A call 0x96A
+0x2CA: |X| 0x4505 sne  v5 5         # skip next if v5 != 5
+0x2CC: |X| 0x2960 call 0x960
+0x2CE: |X| 0xABA6 ld   i 0xBA6      # index = 0xBA6
+0x2D0: |X| 0xFD65 ld   vd i         # load 14 bytes into v(0..=13) from memory
+0x2D2: |X| 0xAF6E ld   i 0xF6E      # index = 0xF6E
+0x2D4: |X| 0xFB55 ld   i vb         # save 12 bytes from v(0..=11) to memory
+0x2D6: |X| 0xAF7A ld   i 0xF7A      # index = 0xF7A
+0x2D8: |X| 0xFD55 ld   i vd         # save 14 bytes from v(0..=13) to memory
+0x2DA: |X| 0x2408 call 0x408
+0x2DC: |X| 0x8040 ld   v0 v4        # v0 = v4
+0x2DE: |X| 0x3400 se   v4 0         # skip next if v4 == 0
+0x2E0: |X| 0x297E call 0x97E
+0x2E2: |X| 0xAF94 ld   i 0xF94      # index = 0xF94
+0x2E4: |X| 0x6014 ld   v0 20        # v0 = 20
+0x2E6: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x2E8: |X| 0x00EE ret
+0x2EA: |X| 0x00E0 cls               # clear display
+0x2EC: |X| 0x2540 call 0x540
+0x2EE: |X| 0x256C call 0x56C
+0x2F0: |X| 0x2598 call 0x598
+0x2F2: |X| 0x00E0 cls               # clear display
+0x2F4: |X| 0x25CE call 0x5CE
+0x2F6: |X| 0x00E0 cls               # clear display
+0x2F8: |X| 0x260A call 0x60A
+0x2FA: |X| 0x00E0 cls               # clear display
+0x2FC: |X| 0x6C00 ld   vc 0         # vc = 0
+0x2FE: |X| 0x4C00 sne  vc 0         # skip next if vc != 0
+0x300: |X| 0x25BE call 0x5BE
+0x302: |X| 0x00EE ret
+0x304: |X| 0x6B00 ld   vb 0         # vb = 0
+0x306: |X| 0x2B6C call 0xB6C
+0x308: |X| 0x6F02 ld   vf 2         # vf = 2
+0x30A: |X| 0x8F07 subn vf v0        # vf = v0 - vf
+0x30C: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x30E: |X| 0x132A jp   0x32A
+0x310: |X| 0x6F12 ld   vf 18        # vf = 18
+0x312: |X| 0x8F15 sub  vf v1        # vf -= v1
+0x314: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x316: |X| 0x132A jp   0x32A
+0x318: |X| 0x6F1C ld   vf 28        # vf = 28
+0x31A: |X| 0x8F17 subn vf v1        # vf = v1 - vf
+0x31C: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x31E: |X| 0x132A jp   0x32A
+0x320: |X| 0x2408 call 0x408
+0x322: |X| 0x8800 ld   v8 v0        # v8 = v0
+0x324: |X| 0x6901 ld   v9 1         # v9 = 1
+0x326: |X| 0x6A5A ld   va 90        # va = 90
+0x328: |X| 0x239C call 0x39C
+0x32A: |X| 0x2B6C call 0xB6C
+0x32C: |X| 0x6F5A ld   vf 90        # vf = 90
+0x32E: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x330: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x332: |X| 0x134E jp   0x34E
+0x334: |X| 0x6F12 ld   vf 18        # vf = 18
+0x336: |X| 0x8F15 sub  vf v1        # vf -= v1
+0x338: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x33A: |X| 0x134E jp   0x34E
+0x33C: |X| 0x6F1C ld   vf 28        # vf = 28
+0x33E: |X| 0x8F17 subn vf v1        # vf = v1 - vf
+0x340: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x342: |X| 0x134E jp   0x34E
+0x344: |X| 0x2408 call 0x408
+0x346: |X| 0x8810 ld   v8 v1        # v8 = v1
+0x348: |X| 0x6902 ld   v9 2         # v9 = 2
+0x34A: |X| 0x6AA6 ld   va 166       # va = 166
+0x34C: |X| 0x239C call 0x39C
+0x34E: |X| 0x6A00 ld   va 0         # va = 0
+0x350: |X| 0x2B6C call 0xB6C
+0x352: |X| 0x6F32 ld   vf 50        # vf = 50
+0x354: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x356: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x358: |X| 0x1374 jp   0x374
+0x35A: |X| 0x6F3C ld   vf 60        # vf = 60
+0x35C: |X| 0x8F07 subn vf v0        # vf = v0 - vf
+0x35E: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x360: |X| 0x1374 jp   0x374
+0x362: |X| 0x6F2C ld   vf 44        # vf = 44
+0x364: |X| 0x8F15 sub  vf v1        # vf -= v1
+0x366: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x368: |X| 0x1374 jp   0x374
+0x36A: |X| 0x2408 call 0x408
+0x36C: |X| 0x8830 ld   v8 v3        # v8 = v3
+0x36E: |X| 0x6903 ld   v9 3         # v9 = 3
+0x370: |X| 0x6BD6 ld   vb 214       # vb = 214
+0x372: |X| 0x239C call 0x39C
+0x374: |X| 0x2B6C call 0xB6C
+0x376: |X| 0x6F32 ld   vf 50        # vf = 50
+0x378: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x37A: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x37C: |X| 0x1398 jp   0x398
+0x37E: |X| 0x6F3C ld   vf 60        # vf = 60
+0x380: |X| 0x8F07 subn vf v0        # vf = v0 - vf
+0x382: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x384: |X| 0x1398 jp   0x398
+0x386: |X| 0x6F02 ld   vf 2         # vf = 2
+0x388: |X| 0x8F17 subn vf v1        # vf = v1 - vf
+0x38A: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x38C: |X| 0x1398 jp   0x398
+0x38E: |X| 0x2408 call 0x408
+0x390: |X| 0x8820 ld   v8 v2        # v8 = v2
+0x392: |X| 0x6904 ld   v9 4         # v9 = 4
+0x394: |X| 0x6B2A ld   vb 42        # vb = 42
+0x396: |X| 0x239C call 0x39C
+0x398: |X| 0x23CE call 0x3CE
+0x39A: |X| 0x00EE ret
+0x39C: |X| 0x48FF sne  v8 255       # skip next if v8 != 255
+0x39E: |X| 0x00EE ret
+0x3A0: |X| 0x5590 se   v5 v9        # skip next if v5 == v9
+0x3A2: |X| 0x13AC jp   0x3AC
+0x3A4: |X| 0x23F4 call 0x3F4
+0x3A6: |X| 0x4100 sne  v1 0         # skip next if v1 != 0
+0x3A8: |X| 0x00EE ret
+0x3AA: |X| 0x282E call 0x82E
+0x3AC: |X| 0x2B6C call 0xB6C
+0x3AE: |X| 0x80A4 add  v0 va        # v0 += va
+0x3B0: |X| 0x81B4 add  v1 vb        # v1 += vb
+0x3B2: |X| 0x2B66 call 0xB66
+0x3B4: |X| 0x8080 ld   v0 v8        # v0 = v8
+0x3B6: |X| 0x229A call 0x29A
+0x3B8: |X| 0x00EE ret
+0x3BA: |X| 0xAF94 ld   i 0xF94      # index = 0xF94
+0x3BC: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x3BE: |X| 0x6F00 ld   vf 0         # vf = 0
+0x3C0: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x3C2: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x3C4: |X| 0x13CC jp   0x3CC
+0x3C6: |X| 0x70FF add  v0 255       # v0 += 255
+0x3C8: |X| 0xAF94 ld   i 0xF94      # index = 0xF94
+0x3CA: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x3CC: |X| 0x00EE ret
+0x3CE: |X| 0x2B6C call 0xB6C
+0x3D0: |X| 0x6F01 ld   vf 1         # vf = 1
+0x3D2: |X| 0x8F07 subn vf v0        # vf = v0 - vf
+0x3D4: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x3D6: |X| 0x6001 ld   v0 1         # v0 = 1
+0x3D8: |X| 0x6F62 ld   vf 98        # vf = 98
+0x3DA: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x3DC: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x3DE: |X| 0x6062 ld   v0 98        # v0 = 98
+0x3E0: |X| 0x6F01 ld   vf 1         # vf = 1
+0x3E2: |X| 0x8F17 subn vf v1        # vf = v1 - vf
+0x3E4: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x3E6: |X| 0x6101 ld   v1 1         # v1 = 1
+0x3E8: |X| 0x6F2E ld   vf 46        # vf = 46
+0x3EA: |X| 0x8F15 sub  vf v1        # vf -= v1
+0x3EC: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x3EE: |X| 0x612E ld   v1 46        # v1 = 46
+0x3F0: |X| 0x2B66 call 0xB66
+0x3F2: |X| 0x00EE ret
+0x3F4: |X| 0xAB8F ld   i 0xB8F      # index = 0xB8F
+0x3F6: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x3F8: |X| 0x8100 ld   v1 v0        # v1 = v0
+0x3FA: |X| 0x6F00 ld   vf 0         # vf = 0
+0x3FC: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x3FE: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x400: |X| 0x70FF add  v0 255       # v0 += 255
+0x402: |X| 0xAB8F ld   i 0xB8F      # index = 0xB8F
+0x404: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x406: |X| 0x00EE ret
+0x408: |X| 0xAF8A ld   i 0xF8A      # index = 0xF8A
+0x40A: |X| 0xF565 ld   v5 i         # load 6 bytes into v(0..=5) from memory
+0x40C: |X| 0x00EE ret
+0x40E: |X| 0xAB8F ld   i 0xB8F      # index = 0xB8F
+0x410: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x412: |X| 0xACCE ld   i 0xCCE      # index = 0xCCE
+0x414: |X| 0x6176 ld   v1 118       # v1 = 118
+0x416: |X| 0x6204 ld   v2 4         # v2 = 4
+0x418: |X| 0x6F00 ld   vf 0         # vf = 0
+0x41A: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x41C: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x41E: |X| 0xD127 drw  v1 v2 7      # draw 8x7 sprite at pos (v1, v2)
+0x420: |X| 0x00EE ret
+0x422: |X| 0xAB91 ld   i 0xB91      # index = 0xB91
+0x424: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x426: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x428: |X| 0x00EE ret
+0x42A: |X| 0x6C75 ld   vc 117       # vc = 117
+0x42C: |X| 0x6D14 ld   vd 20        # vd = 20
+0x42E: |X| 0xACCA ld   i 0xCCA      # index = 0xCCA
+0x430: |X| 0x4002 sne  v0 2         # skip next if v0 != 2
+0x432: |X| 0xACC6 ld   i 0xCC6      # index = 0xCC6
+0x434: |X| 0xDCD4 drw  vc vd 4      # draw 8x4 sprite at pos (vc, vd)
+0x436: |X| 0x00EE ret
+0x438: |X| 0xAE92 ld   i 0xE92      # index = 0xE92
+0x43A: |X| 0x6075 ld   v0 117       # v0 = 117
+0x43C: |X| 0x610F ld   v1 15        # v1 = 15
+0x43E: |X| 0xD011 drw  v0 v1 1      # draw 8x1 sprite at pos (v0, v1)
+0x440: |X| 0x611C ld   v1 28        # v1 = 28
+0x442: |X| 0xD011 drw  v0 v1 1      # draw 8x1 sprite at pos (v0, v1)
+0x444: |X| 0xAB90 ld   i 0xB90      # index = 0xB90
+0x446: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x448: |X| 0xAF90 ld   i 0xF90      # index = 0xF90
+0x44A: |X| 0xF033 ld   b v0         # save binary-coded decimal v0
+0x44C: |X| 0xAF90 ld   i 0xF90      # index = 0xF90
+0x44E: |X| 0xF265 ld   v2 i         # load 3 bytes into v(0..=2) from memory
+0x450: |X| 0x6377 ld   v3 119       # v3 = 119
+0x452: |X| 0x6428 ld   v4 40        # v4 = 40
+0x454: |X| 0x6F00 ld   vf 0         # vf = 0
+0x456: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x458: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x45A: |X| 0x1464 jp   0x464
+0x45C: |X| 0x8500 ld   v5 v0        # v5 = v0
+0x45E: |X| 0x247C call 0x47C
+0x460: |X| 0xD345 drw  v3 v4 5      # draw 8x5 sprite at pos (v3, v4)
+0x462: |X| 0x7407 add  v4 7         # v4 += 7
+0x464: |X| 0x6F00 ld   vf 0         # vf = 0
+0x466: |X| 0x8F15 sub  vf v1        # vf -= v1
+0x468: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x46A: |X| 0x1474 jp   0x474
+0x46C: |X| 0x8510 ld   v5 v1        # v5 = v1
+0x46E: |X| 0x247C call 0x47C
+0x470: |X| 0xD345 drw  v3 v4 5      # draw 8x5 sprite at pos (v3, v4)
+0x472: |X| 0x7407 add  v4 7         # v4 += 7
+0x474: |X| 0x8520 ld   v5 v2        # v5 = v2
+0x476: |X| 0x247C call 0x47C
+0x478: |X| 0xD345 drw  v3 v4 5      # draw 8x5 sprite at pos (v3, v4)
+0x47A: |X| 0x00EE ret
+0x47C: |X| 0xA000 ld   i 0x000      # index = 0x000
+0x47E: |X| 0x6905 ld   v9 5         # v9 = 5
+0x480: |X| 0x4500 sne  v5 0         # skip next if v5 != 0
+0x482: |X| 0x00EE ret
+0x484: |X| 0x75FF add  v5 255       # v5 += 255
+0x486: |X| 0xF91E add  i 9          # index += 9 (0x009)
+0x488: |X| 0x1480 jp   0x480
+0x48A: |?| 0x00EE                   # 2X GRAPHIC ................
+0x48B: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0x48C: |X| 0x6600 ld   v6 0         # v6 = 0
+0x48E: |X| 0xAF7A ld   i 0xF7A      # index = 0xF7A
+0x490: |X| 0xF61E add  i 6          # index += 6 (0x006)
+0x492: |X| 0xF265 ld   v2 i         # load 3 bytes into v(0..=2) from memory
+0x494: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x496: |X| 0x149C jp   0x49C
+0x498: |X| 0xACD5 ld   i 0xCD5      # index = 0xCD5
+0x49A: |X| 0xD126 drw  v1 v2 6      # draw 8x6 sprite at pos (v1, v2)
+0x49C: |X| 0x7603 add  v6 3         # v6 += 3
+0x49E: |X| 0x6F0F ld   vf 15        # vf = 15
+0x4A0: |X| 0x8F67 subn vf v6        # vf = v6 - vf
+0x4A2: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x4A4: |X| 0x148E jp   0x48E
+0x4A6: |X| 0x24AA call 0x4AA
+0x4A8: |X| 0x00EE ret
+0x4AA: |X| 0xAF99 ld   i 0xF99      # index = 0xF99
+0x4AC: |X| 0xF165 ld   v1 i         # load 2 bytes into v(0..=1) from memory
+0x4AE: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x4B0: |X| 0x00EE ret
+0x4B2: |X| 0x8C00 ld   vc v0        # vc = v0
+0x4B4: |X| 0x8D10 ld   vd v1        # vd = v1
+0x4B6: |X| 0xAD1B ld   i 0xD1B      # index = 0xD1B
+0x4B8: |X| 0xC101 rnd  v1 1         # v1 = rand in range [0, 1]
+0x4BA: |X| 0x4100 sne  v1 0         # skip next if v1 != 0
+0x4BC: |X| 0xAD3B ld   i 0xD3B      # index = 0xD3B
+0x4BE: |X| 0xDCD0 drw  vc vd 0      # draw 16x16 sprite at pos (vc, vd)
+0x4C0: |X| 0x00EE ret
+0x4C2: |X| 0xAB8D ld   i 0xB8D      # index = 0xB8D
+0x4C4: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x4C6: |X| 0x6F00 ld   vf 0         # vf = 0
+0x4C8: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x4CA: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x4CC: |X| 0x14D4 jp   0x4D4
+0x4CE: |X| 0x70FF add  v0 255       # v0 += 255
+0x4D0: |X| 0xAB8D ld   i 0xB8D      # index = 0xB8D
+0x4D2: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x4D4: |X| 0x00EE ret
+0x4D6: |X| 0xAB8D ld   i 0xB8D      # index = 0xB8D
+0x4D8: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x4DA: |X| 0x6F00 ld   vf 0         # vf = 0
+0x4DC: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x4DE: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x4E0: |X| 0x00EE ret
+0x4E2: |X| 0x2B72 call 0xB72
+0x4E4: |X| 0x8C00 ld   vc v0        # vc = v0
+0x4E6: |X| 0x8D10 ld   vd v1        # vd = v1
+0x4E8: |X| 0x7C06 add  vc 6         # vc += 6
+0x4EA: |X| 0x7D06 add  vd 6         # vd += 6
+0x4EC: |X| 0x8A20 ld   va v2        # va = v2
+0x4EE: |X| 0x6400 ld   v4 0         # v4 = 0
+0x4F0: |X| 0xAF6E ld   i 0xF6E      # index = 0xF6E
+0x4F2: |X| 0xF41E add  i 4          # index += 4 (0x004)
+0x4F4: |X| 0xF365 ld   v3 i         # load 4 bytes into v(0..=3) from memory
+0x4F6: |X| 0x3000 se   v0 0         # skip next if v0 == 0
+0x4F8: |X| 0x1520 jp   0x520
+0x4FA: |X| 0x80C0 ld   v0 vc        # v0 = vc
+0x4FC: |X| 0x81D0 ld   v1 vd        # v1 = vd
+0x4FE: |X| 0x6200 ld   v2 0         # v2 = 0
+0x500: |X| 0x6300 ld   v3 0         # v3 = 0
+0x502: |X| 0x4A05 sne  va 5         # skip next if va != 5
+0x504: |X| 0x63FE ld   v3 254       # v3 = 254
+0x506: |X| 0x4A08 sne  va 8         # skip next if va != 8
+0x508: |X| 0x6302 ld   v3 2         # v3 = 2
+0x50A: |X| 0x4A07 sne  va 7         # skip next if va != 7
+0x50C: |X| 0x62FE ld   v2 254       # v2 = 254
+0x50E: |X| 0x4A09 sne  va 9         # skip next if va != 9
+0x510: |X| 0x6202 ld   v2 2         # v2 = 2
+0x512: |X| 0xAF6E ld   i 0xF6E      # index = 0xF6E
+0x514: |X| 0xF41E add  i 4          # index += 4 (0x004)
+0x516: |X| 0xF355 ld   i v3         # save 4 bytes from v(0..=3) to memory
+0x518: |X| 0xAB8D ld   i 0xB8D      # index = 0xB8D
+0x51A: |X| 0x600A ld   v0 10        # v0 = 10
+0x51C: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x51E: |X| 0x00EE ret
+0x520: |X| 0x7404 add  v4 4         # v4 += 4
+0x522: |X| 0x6F0C ld   vf 12        # vf = 12
+0x524: |X| 0x8F47 subn vf v4        # vf = v4 - vf
+0x526: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x528: |X| 0x14F0 jp   0x4F0
+0x52A: |X| 0x00EE ret
+0x52C: |X| 0xAF6E ld   i 0xF6E      # index = 0xF6E
+0x52E: |X| 0xFB65 ld   vb i         # load 12 bytes into v(0..=11) from memory
+0x530: |X| 0xAD92 ld   i 0xD92      # index = 0xD92
+0x532: |X| 0x3000 se   v0 0         # skip next if v0 == 0
+0x534: |X| 0xD014 drw  v0 v1 4      # draw 8x4 sprite at pos (v0, v1)
+0x536: |X| 0x3400 se   v4 0         # skip next if v4 == 0
+0x538: |X| 0xD454 drw  v4 v5 4      # draw 8x4 sprite at pos (v4, v5)
+0x53A: |X| 0x3800 se   v8 0         # skip next if v8 == 0
+0x53C: |X| 0xD894 drw  v8 v9 4      # draw 8x4 sprite at pos (v8, v9)
+0x53E: |X| 0x00EE ret
+0x540: |X| 0xAB93 ld   i 0xB93      # index = 0xB93
+0x542: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x544: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x546: |X| 0x00EE ret
+0x548: |X| 0x286C call 0x86C
+0x54A: |X| 0x2B6C call 0xB6C
+0x54C: |X| 0xAC46 ld   i 0xC46      # index = 0xC46
+0x54E: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x550: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x552: |X| 0x156A jp   0x56A
+0x554: |X| 0x287E call 0x87E
+0x556: |X| 0xAB8E ld   i 0xB8E      # index = 0xB8E
+0x558: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x55A: |X| 0x6114 ld   v1 20        # v1 = 20
+0x55C: |X| 0x4001 sne  v0 1         # skip next if v0 != 1
+0x55E: |X| 0x611E ld   v1 30        # v1 = 30
+0x560: |X| 0x7001 add  v0 1         # v0 += 1
+0x562: |X| 0xAB8E ld   i 0xB8E      # index = 0xB8E
+0x564: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x566: |X| 0x8010 ld   v0 v1        # v0 = v1
+0x568: |X| 0x229A call 0x29A
+0x56A: |X| 0x00EE ret
+0x56C: |X| 0xAF95 ld   i 0xF95      # index = 0xF95
+0x56E: |X| 0xF165 ld   v1 i         # load 2 bytes into v(0..=1) from memory
+0x570: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x572: |X| 0x00EE ret
+0x574: |X| 0xACCE ld   i 0xCCE      # index = 0xCCE
+0x576: |X| 0xD017 drw  v0 v1 7      # draw 8x7 sprite at pos (v0, v1)
+0x578: |X| 0x2B6C call 0xB6C
+0x57A: |X| 0xAC46 ld   i 0xC46      # index = 0xC46
+0x57C: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x57E: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x580: |X| 0x1596 jp   0x596
+0x582: |X| 0xAF95 ld   i 0xF95      # index = 0xF95
+0x584: |X| 0x6000 ld   v0 0         # v0 = 0
+0x586: |X| 0x6100 ld   v1 0         # v1 = 0
+0x588: |X| 0xF155 ld   i v1         # save 2 bytes from v(0..=1) to memory
+0x58A: |X| 0xAB8F ld   i 0xB8F      # index = 0xB8F
+0x58C: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x58E: |X| 0x7001 add  v0 1         # v0 += 1
+0x590: |X| 0xAB8F ld   i 0xB8F      # index = 0xB8F
+0x592: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x594: |X| 0x282E call 0x82E
+0x596: |X| 0x00EE ret
+0x598: |X| 0xAF97 ld   i 0xF97      # index = 0xF97
+0x59A: |X| 0xF165 ld   v1 i         # load 2 bytes into v(0..=1) from memory
+0x59C: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x59E: |X| 0x00EE ret
+0x5A0: |X| 0xACFB ld   i 0xCFB      # index = 0xCFB
+0x5A2: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x5A4: |X| 0x2B6C call 0xB6C
+0x5A6: |X| 0xAC46 ld   i 0xC46      # index = 0xC46
+0x5A8: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x5AA: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x5AC: |X| 0x15BC jp   0x5BC
+0x5AE: |X| 0x2956 call 0x956
+0x5B0: |X| 0xAB91 ld   i 0xB91      # index = 0xB91
+0x5B2: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x5B4: |X| 0x7001 add  v0 1         # v0 += 1
+0x5B6: |X| 0xAB91 ld   i 0xB91      # index = 0xB91
+0x5B8: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x5BA: |X| 0x282E call 0x82E
+0x5BC: |X| 0x00EE ret
+0x5BE: |X| 0x248C call 0x48C
+0x5C0: |X| 0x2B6C call 0xB6C
+0x5C2: |X| 0xAC46 ld   i 0xC46      # index = 0xC46
+0x5C4: |X| 0x6C00 ld   vc 0         # vc = 0
+0x5C6: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x5C8: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x5CA: |X| 0x6C01 ld   vc 1         # vc = 1
+0x5CC: |X| 0x00EE ret
+0x5CE: |X| 0x252C call 0x52C
+0x5D0: |X| 0x6600 ld   v6 0         # v6 = 0
+0x5D2: |X| 0x6F0F ld   vf 15        # vf = 15
+0x5D4: |X| 0x8F67 subn vf v6        # vf = v6 - vf
+0x5D6: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x5D8: |X| 0x1608 jp   0x608
+0x5DA: |X| 0xAF7A ld   i 0xF7A      # index = 0xF7A
+0x5DC: |X| 0xF61E add  i 6          # index += 6 (0x006)
+0x5DE: |X| 0xF265 ld   v2 i         # load 3 bytes into v(0..=2) from memory
+0x5E0: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x5E2: |X| 0x1604 jp   0x604
+0x5E4: |X| 0xACD5 ld   i 0xCD5      # index = 0xCD5
+0x5E6: |X| 0xD126 drw  v1 v2 6      # draw 8x6 sprite at pos (v1, v2)
+0x5E8: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x5EA: |X| 0x15F2 jp   0x5F2
+0x5EC: |X| 0x6F0A ld   vf 10        # vf = 10
+0x5EE: |X| 0xFF18 ld   st vf        # sound timer = vf
+0x5F0: |X| 0x6000 ld   v0 0         # v0 = 0
+0x5F2: |X| 0xD126 drw  v1 v2 6      # draw 8x6 sprite at pos (v1, v2)
+0x5F4: |X| 0xAF7A ld   i 0xF7A      # index = 0xF7A
+0x5F6: |X| 0xF61E add  i 6          # index += 6 (0x006)
+0x5F8: |X| 0xF255 ld   i v2         # save 3 bytes from v(0..=2) to memory
+0x5FA: |X| 0x3000 se   v0 0         # skip next if v0 == 0
+0x5FC: |X| 0x1604 jp   0x604
+0x5FE: |X| 0x26D2 call 0x6D2
+0x600: |X| 0x2B7E call 0xB7E
+0x602: |X| 0x00EE ret
+0x604: |X| 0x7603 add  v6 3         # v6 += 3
+0x606: |X| 0x15D2 jp   0x5D2
+0x608: |X| 0x00EE ret
+0x60A: |X| 0xAF99 ld   i 0xF99      # index = 0xF99
+0x60C: |X| 0xF165 ld   v1 i         # load 2 bytes into v(0..=1) from memory
+0x60E: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x610: |X| 0x00EE ret
+0x612: |X| 0xAD1B ld   i 0xD1B      # index = 0xD1B
+0x614: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x616: |X| 0x6C00 ld   vc 0         # vc = 0
+0x618: |X| 0xAF6E ld   i 0xF6E      # index = 0xF6E
+0x61A: |X| 0xFB65 ld   vb i         # load 12 bytes into v(0..=11) from memory
+0x61C: |X| 0xAD92 ld   i 0xD92      # index = 0xD92
+0x61E: |X| 0xD014 drw  v0 v1 4      # draw 8x4 sprite at pos (v0, v1)
+0x620: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x622: |X| 0x1628 jp   0x628
+0x624: |X| 0x6000 ld   v0 0         # v0 = 0
+0x626: |X| 0x6C01 ld   vc 1         # vc = 1
+0x628: |X| 0xD014 drw  v0 v1 4      # draw 8x4 sprite at pos (v0, v1)
+0x62A: |X| 0xD454 drw  v4 v5 4      # draw 8x4 sprite at pos (v4, v5)
+0x62C: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x62E: |X| 0x1634 jp   0x634
+0x630: |X| 0x6400 ld   v4 0         # v4 = 0
+0x632: |X| 0x6C01 ld   vc 1         # vc = 1
+0x634: |X| 0xD454 drw  v4 v5 4      # draw 8x4 sprite at pos (v4, v5)
+0x636: |X| 0xD894 drw  v8 v9 4      # draw 8x4 sprite at pos (v8, v9)
+0x638: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x63A: |X| 0x1640 jp   0x640
+0x63C: |X| 0x6800 ld   v8 0         # v8 = 0
+0x63E: |X| 0x6C01 ld   vc 1         # vc = 1
+0x640: |X| 0xD894 drw  v8 v9 4      # draw 8x4 sprite at pos (v8, v9)
+0x642: |X| 0xAF6E ld   i 0xF6E      # index = 0xF6E
+0x644: |X| 0xFB55 ld   i vb         # save 12 bytes from v(0..=11) to memory
+0x646: |X| 0x6F00 ld   vf 0         # vf = 0
+0x648: |X| 0x8FC5 sub  vf vc        # vf -= vc
+0x64A: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x64C: |X| 0x1660 jp   0x660
+0x64E: |X| 0xAB92 ld   i 0xB92      # index = 0xB92
+0x650: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x652: |X| 0x7001 add  v0 1         # v0 += 1
+0x654: |X| 0xAB92 ld   i 0xB92      # index = 0xB92
+0x656: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x658: |X| 0x6F0A ld   vf 10        # vf = 10
+0x65A: |X| 0xFF18 ld   st vf        # sound timer = vf
+0x65C: |X| 0x4014 sne  v0 20        # skip next if v0 != 20
+0x65E: |X| 0x2662 call 0x662
+0x660: |X| 0x00EE ret
+0x662: |X| 0x6900 ld   v9 0         # v9 = 0
+0x664: |X| 0x7901 add  v9 1         # v9 += 1
+0x666: |X| 0x6808 ld   v8 8         # v8 = 8
+0x668: |X| 0x8892 and  v8 v9        # v8 &= v9
+0x66A: |X| 0x00E0 cls               # clear display
+0x66C: |X| 0x4800 sne  v8 0         # skip next if v8 != 0
+0x66E: |X| 0x24AA call 0x4AA
+0x670: |X| 0x2A3E call 0xA3E
+0x672: |X| 0x2B5A call 0xB5A
+0x674: |X| 0x6FC8 ld   vf 200       # vf = 200
+0x676: |X| 0x8F97 subn vf v9        # vf = v9 - vf
+0x678: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x67A: |X| 0x1664 jp   0x664
+0x67C: |X| 0xAF99 ld   i 0xF99      # index = 0xF99
+0x67E: |X| 0xF165 ld   v1 i         # load 2 bytes into v(0..=1) from memory
+0x680: |X| 0x6900 ld   v9 0         # v9 = 0
+0x682: |X| 0x7901 add  v9 1         # v9 += 1
+0x684: |X| 0xA1F4 ld   i 0x1F4      # index = 0x1F4
+0x686: |X| 0xC8FF rnd  v8 255       # v8 = rand in range [0, 255]
+0x688: |X| 0xF81E add  i 8          # index += 8 (0x008)
+0x68A: |X| 0xC301 rnd  v3 1         # v3 = rand in range [0, 1]
+0x68C: |X| 0xC401 rnd  v4 1         # v4 = rand in range [0, 1]
+0x68E: |X| 0x8034 add  v0 v3        # v0 += v3
+0x690: |X| 0x8045 sub  v0 v4        # v0 -= v4
+0x692: |X| 0x8144 add  v1 v4        # v1 += v4
+0x694: |X| 0x8135 sub  v1 v3        # v1 -= v3
+0x696: |X| 0x6F28 ld   vf 40        # vf = 40
+0x698: |X| 0x8F97 subn vf v9        # vf = v9 - vf
+0x69A: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x69C: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x69E: |X| 0x3928 se   v9 40        # skip next if v9 == 40
+0x6A0: |X| 0x16A6 jp   0x6A6
+0x6A2: |X| 0x00E0 cls               # clear display
+0x6A4: |X| 0x2A3E call 0xA3E
+0x6A6: |X| 0x2B5A call 0xB5A
+0x6A8: |X| 0x6FC8 ld   vf 200       # vf = 200
+0x6AA: |X| 0x8F97 subn vf v9        # vf = v9 - vf
+0x6AC: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x6AE: |X| 0x1682 jp   0x682
+0x6B0: |X| 0x00E0 cls               # clear display
+0x6B2: |X| 0x2B6C call 0xB6C
+0x6B4: |X| 0x6208 ld   v2 8         # v2 = 8
+0x6B6: |X| 0x2B78 call 0xB78
+0x6B8: |X| 0x2A3E call 0xA3E
+0x6BA: |X| 0x7C05 add  vc 5         # vc += 5
+0x6BC: |X| 0x7D08 add  vd 8         # vd += 8
+0x6BE: |X| 0x69FA ld   v9 250       # v9 = 250
+0x6C0: |X| 0x7901 add  v9 1         # v9 += 1
+0x6C2: |X| 0x2B5A call 0xB5A
+0x6C4: |X| 0xAB94 ld   i 0xB94      # index = 0xB94
+0x6C6: |X| 0x4932 sne  v9 50        # skip next if v9 != 50
+0x6C8: |X| 0xDCD2 drw  vc vd 2      # draw 8x2 sprite at pos (vc, vd)
+0x6CA: |X| 0x39FA se   v9 250       # skip next if v9 == 250
+0x6CC: |X| 0x16C0 jp   0x6C0
+0x6CE: |X| 0x00E0 cls               # clear display
+0x6D0: |X| 0x16D0 jp   0x6D0
+0x6D2: |X| 0x2408 call 0x408
+0x6D4: |X| 0x74FF add  v4 255       # v4 += 255
+0x6D6: |X| 0xAF8A ld   i 0xF8A      # index = 0xF8A
+0x6D8: |X| 0xF555 ld   i v5         # save 6 bytes from v(0..=5) to memory
+0x6DA: |X| 0xAF89 ld   i 0xF89      # index = 0xF89
+0x6DC: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x6DE: |X| 0x8D00 ld   vd v0        # vd = v0
+0x6E0: |X| 0x2408 call 0x408
+0x6E2: |X| 0xAD96 ld   i 0xD96      # index = 0xD96
+0x6E4: |X| 0x6F00 ld   vf 0         # vf = 0
+0x6E6: |X| 0x8FD5 sub  vf vd        # vf -= vd
+0x6E8: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x6EA: |X| 0x16F4 jp   0x6F4
+0x6EC: |X| 0x7DFF add  vd 255       # vd += 255
+0x6EE: |X| 0x6F06 ld   vf 6         # vf = 6
+0x6F0: |X| 0xFF1E add  i 15         # index += 15 (0x00F)
+0x6F2: |X| 0x16E4 jp   0x6E4
+0x6F4: |X| 0xF555 ld   i v5         # save 6 bytes from v(0..=5) to memory
+0x6F6: |X| 0x00EE ret
+0x6F8: |X| 0xAF6E ld   i 0xF6E      # index = 0xF6E
+0x6FA: |X| 0xFB65 ld   vb i         # load 12 bytes into v(0..=11) from memory
+0x6FC: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x6FE: |X| 0x1714 jp   0x714
+0x700: |X| 0x8024 add  v0 v2        # v0 += v2
+0x702: |X| 0x8134 add  v1 v3        # v1 += v3
+0x704: |X| 0x6F6E ld   vf 110       # vf = 110
+0x706: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x708: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x70A: |X| 0x6000 ld   v0 0         # v0 = 0
+0x70C: |X| 0x6F40 ld   vf 64        # vf = 64
+0x70E: |X| 0x8F15 sub  vf v1        # vf -= v1
+0x710: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x712: |X| 0x6000 ld   v0 0         # v0 = 0
+0x714: |X| 0x4400 sne  v4 0         # skip next if v4 != 0
+0x716: |X| 0x172C jp   0x72C
+0x718: |X| 0x8464 add  v4 v6        # v4 += v6
+0x71A: |X| 0x8574 add  v5 v7        # v5 += v7
+0x71C: |X| 0x6F6E ld   vf 110       # vf = 110
+0x71E: |X| 0x8F45 sub  vf v4        # vf -= v4
+0x720: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x722: |X| 0x6400 ld   v4 0         # v4 = 0
+0x724: |X| 0x6F40 ld   vf 64        # vf = 64
+0x726: |X| 0x8F55 sub  vf v5        # vf -= v5
+0x728: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x72A: |X| 0x6400 ld   v4 0         # v4 = 0
+0x72C: |X| 0x4800 sne  v8 0         # skip next if v8 != 0
+0x72E: |X| 0x1744 jp   0x744
+0x730: |X| 0x88A4 add  v8 va        # v8 += va
+0x732: |X| 0x89B4 add  v9 vb        # v9 += vb
+0x734: |X| 0x6F6E ld   vf 110       # vf = 110
+0x736: |X| 0x8F85 sub  vf v8        # vf -= v8
+0x738: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x73A: |X| 0x6800 ld   v8 0         # v8 = 0
+0x73C: |X| 0x6F40 ld   vf 64        # vf = 64
+0x73E: |X| 0x8F95 sub  vf v9        # vf -= v9
+0x740: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x742: |X| 0x6800 ld   v8 0         # v8 = 0
+0x744: |X| 0xAF6E ld   i 0xF6E      # index = 0xF6E
+0x746: |X| 0xFB55 ld   i vb         # save 12 bytes from v(0..=11) to memory
+0x748: |X| 0x00EE ret
+0x74A: |X| 0x23BA call 0x3BA
+0x74C: |X| 0x3000 se   v0 0         # skip next if v0 == 0
+0x74E: |X| 0x00EE ret
+0x750: |X| 0x2B6C call 0xB6C
+0x752: |X| 0x8800 ld   v8 v0        # v8 = v0
+0x754: |X| 0x8910 ld   v9 v1        # v9 = v1
+0x756: |X| 0x6600 ld   v6 0         # v6 = 0
+0x758: |X| 0xAF7A ld   i 0xF7A      # index = 0xF7A
+0x75A: |X| 0xF265 ld   v2 i         # load 3 bytes into v(0..=2) from memory
+0x75C: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x75E: |X| 0x17B2 jp   0x7B2
+0x760: |X| 0xC701 rnd  v7 1         # v7 = rand in range [0, 1]
+0x762: |X| 0x8274 add  v2 v7        # v2 += v7
+0x764: |X| 0xC701 rnd  v7 1         # v7 = rand in range [0, 1]
+0x766: |X| 0x8275 sub  v2 v7        # v2 -= v7
+0x768: |X| 0xCF01 rnd  vf 1         # vf = rand in range [0, 1]
+0x76A: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x76C: |X| 0x177E jp   0x77E
+0x76E: |X| 0x8F10 ld   vf v1        # vf = v1
+0x770: |X| 0x8F85 sub  vf v8        # vf -= v8
+0x772: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x774: |X| 0x177A jp   0x77A
+0x776: |X| 0x8174 add  v1 v7        # v1 += v7
+0x778: |X| 0x177C jp   0x77C
+0x77A: |X| 0x8175 sub  v1 v7        # v1 -= v7
+0x77C: |X| 0x178C jp   0x78C
+0x77E: |X| 0x8F20 ld   vf v2        # vf = v2
+0x780: |X| 0x8F95 sub  vf v9        # vf -= v9
+0x782: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x784: |X| 0x178A jp   0x78A
+0x786: |X| 0x8274 add  v2 v7        # v2 += v7
+0x788: |X| 0x178C jp   0x78C
+0x78A: |X| 0x8275 sub  v2 v7        # v2 -= v7
+0x78C: |X| 0x6F04 ld   vf 4         # vf = 4
+0x78E: |X| 0x8F17 subn vf v1        # vf = v1 - vf
+0x790: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x792: |X| 0x6104 ld   v1 4         # v1 = 4
+0x794: |X| 0x6F04 ld   vf 4         # vf = 4
+0x796: |X| 0x8F27 subn vf v2        # vf = v2 - vf
+0x798: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x79A: |X| 0x6204 ld   v2 4         # v2 = 4
+0x79C: |X| 0x6F62 ld   vf 98        # vf = 98
+0x79E: |X| 0x8F15 sub  vf v1        # vf -= v1
+0x7A0: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x7A2: |X| 0x6162 ld   v1 98        # v1 = 98
+0x7A4: |X| 0x6F37 ld   vf 55        # vf = 55
+0x7A6: |X| 0x8F25 sub  vf v2        # vf -= v2
+0x7A8: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x7AA: |X| 0x6237 ld   v2 55        # v2 = 55
+0x7AC: |X| 0xAF7A ld   i 0xF7A      # index = 0xF7A
+0x7AE: |X| 0xF61E add  i 6          # index += 6 (0x006)
+0x7B0: |X| 0xF255 ld   i v2         # save 3 bytes from v(0..=2) to memory
+0x7B2: |X| 0x7603 add  v6 3         # v6 += 3
+0x7B4: |X| 0x6F0F ld   vf 15        # vf = 15
+0x7B6: |X| 0x8F67 subn vf v6        # vf = v6 - vf
+0x7B8: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x7BA: |X| 0x175A jp   0x75A
+0x7BC: |X| 0x27C0 call 0x7C0
+0x7BE: |X| 0x00EE ret
+0x7C0: |X| 0xAF99 ld   i 0xF99      # index = 0xF99
+0x7C2: |X| 0xF265 ld   v2 i         # load 3 bytes into v(0..=2) from memory
+0x7C4: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x7C6: |X| 0x00EE ret
+0x7C8: |X| 0x3200 se   v2 0         # skip next if v2 == 0
+0x7CA: |X| 0x17E0 jp   0x7E0
+0x7CC: |X| 0x7001 add  v0 1         # v0 += 1
+0x7CE: |X| 0x6F40 ld   vf 64        # vf = 64
+0x7D0: |X| 0x8F05 sub  vf v0        # vf -= v0
+0x7D2: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x7D4: |X| 0x17E0 jp   0x7E0
+0x7D6: |X| 0xC31F rnd  v3 31        # v3 = rand in range [0, 31]
+0x7D8: |X| 0x4300 sne  v3 0         # skip next if v3 != 0
+0x7DA: |X| 0x6201 ld   v2 1         # v2 = 1
+0x7DC: |X| 0x405A sne  v0 90        # skip next if v0 != 90
+0x7DE: |X| 0x6201 ld   v2 1         # v2 = 1
+0x7E0: |X| 0x3201 se   v2 1         # skip next if v2 == 1
+0x7E2: |X| 0x17F8 jp   0x7F8
+0x7E4: |X| 0x7101 add  v1 1         # v1 += 1
+0x7E6: |X| 0x6F14 ld   vf 20        # vf = 20
+0x7E8: |X| 0x8F15 sub  vf v1        # vf -= v1
+0x7EA: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x7EC: |X| 0x17F8 jp   0x7F8
+0x7EE: |X| 0xC30F rnd  v3 15        # v3 = rand in range [0, 15]
+0x7F0: |X| 0x4300 sne  v3 0         # skip next if v3 != 0
+0x7F2: |X| 0x6202 ld   v2 2         # v2 = 2
+0x7F4: |X| 0x4128 sne  v1 40        # skip next if v1 != 40
+0x7F6: |X| 0x6202 ld   v2 2         # v2 = 2
+0x7F8: |X| 0x3202 se   v2 2         # skip next if v2 == 2
+0x7FA: |X| 0x1810 jp   0x810
+0x7FC: |X| 0x70FF add  v0 255       # v0 += 255
+0x7FE: |X| 0x6F40 ld   vf 64        # vf = 64
+0x800: |X| 0x8F07 subn vf v0        # vf = v0 - vf
+0x802: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x804: |X| 0x1810 jp   0x810
+0x806: |X| 0xC31F rnd  v3 31        # v3 = rand in range [0, 31]
+0x808: |X| 0x4300 sne  v3 0         # skip next if v3 != 0
+0x80A: |X| 0x6203 ld   v2 3         # v2 = 3
+0x80C: |X| 0x400C sne  v0 12        # skip next if v0 != 12
+0x80E: |X| 0x6203 ld   v2 3         # v2 = 3
+0x810: |X| 0x3203 se   v2 3         # skip next if v2 == 3
+0x812: |X| 0x1828 jp   0x828
+0x814: |X| 0x71FF add  v1 255       # v1 += 255
+0x816: |X| 0x6F14 ld   vf 20        # vf = 20
+0x818: |X| 0x8F17 subn vf v1        # vf = v1 - vf
+0x81A: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x81C: |X| 0x1828 jp   0x828
+0x81E: |X| 0xC30F rnd  v3 15        # v3 = rand in range [0, 15]
+0x820: |X| 0x4300 sne  v3 0         # skip next if v3 != 0
+0x822: |X| 0x6200 ld   v2 0         # v2 = 0
+0x824: |X| 0x410C sne  v1 12        # skip next if v1 != 12
+0x826: |X| 0x6200 ld   v2 0         # v2 = 0
+0x828: |X| 0xAF99 ld   i 0xF99      # index = 0xF99
+0x82A: |X| 0xF255 ld   i v2         # save 3 bytes from v(0..=2) to memory
+0x82C: |X| 0x00EE ret
+0x82E: |X| 0xAF89 ld   i 0xF89      # index = 0xF89
+0x830: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x832: |X| 0x8700 ld   v7 v0        # v7 = v0
+0x834: |X| 0x2408 call 0x408
+0x836: |X| 0xAD96 ld   i 0xD96      # index = 0xD96
+0x838: |X| 0x6F00 ld   vf 0         # vf = 0
+0x83A: |X| 0x8F75 sub  vf v7        # vf -= v7
+0x83C: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x83E: |X| 0x1848 jp   0x848
+0x840: |X| 0x77FF add  v7 255       # v7 += 255
+0x842: |X| 0x6F06 ld   vf 6         # vf = 6
+0x844: |X| 0xFF1E add  i 15         # index += 15 (0x00F)
+0x846: |X| 0x1838 jp   0x838
+0x848: |X| 0x65FF ld   v5 255       # v5 = 255
+0x84A: |X| 0xF555 ld   i v5         # save 6 bytes from v(0..=5) to memory
+0x84C: |X| 0xAF8A ld   i 0xF8A      # index = 0xF8A
+0x84E: |X| 0xF555 ld   i v5         # save 6 bytes from v(0..=5) to memory
+0x850: |X| 0x00EE ret
+0x852: |X| 0x00E0 cls               # clear display
+0x854: |X| 0x2A3E call 0xA3E
+0x856: |X| 0x2AFA call 0xAFA
+0x858: |X| 0x28CE call 0x8CE
+0x85A: |X| 0x28DC call 0x8DC
+0x85C: |X| 0x248C call 0x48C
+0x85E: |X| 0x252C call 0x52C
+0x860: |X| 0x240E call 0x40E
+0x862: |X| 0x2422 call 0x422
+0x864: |X| 0x2438 call 0x438
+0x866: |X| 0x28C0 call 0x8C0
+0x868: |X| 0x286C call 0x86C
+0x86A: |X| 0x00EE ret
+0x86C: |X| 0xAB93 ld   i 0xB93      # index = 0xB93
+0x86E: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0x870: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x872: |X| 0x00EE ret
+0x874: |X| 0xAB96 ld   i 0xB96      # index = 0xB96
+0x876: |X| 0x6037 ld   v0 55        # v0 = 55
+0x878: |X| 0x611B ld   v1 27        # v1 = 27
+0x87A: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x87C: |X| 0x00EE ret
+0x87E: |X| 0x00E0 cls               # clear display
+0x880: |X| 0xAF93 ld   i 0xF93      # index = 0xF93
+0x882: |X| 0x6000 ld   v0 0         # v0 = 0
+0x884: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x886: |X| 0x2AFA call 0xAFA
+0x888: |X| 0x28DC call 0x8DC
+0x88A: |X| 0x286C call 0x86C
+0x88C: |X| 0x6037 ld   v0 55        # v0 = 55
+0x88E: |X| 0x6112 ld   v1 18        # v1 = 18
+0x890: |X| 0x6208 ld   v2 8         # v2 = 8
+0x892: |X| 0x2B78 call 0xB78
+0x894: |X| 0x2A3E call 0xA3E
+0x896: |X| 0x6000 ld   v0 0         # v0 = 0
+0x898: |X| 0x7001 add  v0 1         # v0 += 1
+0x89A: |X| 0x2B5A call 0xB5A
+0x89C: |X| 0x6F3C ld   vf 60        # vf = 60
+0x89E: |X| 0x8F07 subn vf v0        # vf = v0 - vf
+0x8A0: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x8A2: |X| 0x1898 jp   0x898
+0x8A4: |X| 0x00E0 cls               # clear display
+0x8A6: |X| 0x2A3E call 0xA3E
+0x8A8: |X| 0x2B5A call 0xB5A
+0x8AA: |X| 0x2A3E call 0xA3E
+0x8AC: |X| 0x2B6C call 0xB6C
+0x8AE: |X| 0x7101 add  v1 1         # v1 += 1
+0x8B0: |X| 0x2B66 call 0xB66
+0x8B2: |X| 0x6F7E ld   vf 126       # vf = 126
+0x8B4: |X| 0x8F17 subn vf v1        # vf = v1 - vf
+0x8B6: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x8B8: |X| 0x18A6 jp   0x8A6
+0x8BA: |X| 0x6112 ld   v1 18        # v1 = 18
+0x8BC: |X| 0x2B66 call 0xB66
+0x8BE: |X| 0x00EE ret
+0x8C0: |X| 0xAF97 ld   i 0xF97      # index = 0xF97
+0x8C2: |X| 0xF165 ld   v1 i         # load 2 bytes into v(0..=1) from memory
+0x8C4: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x8C6: |X| 0x18CC jp   0x8CC
+0x8C8: |X| 0xACFB ld   i 0xCFB      # index = 0xCFB
+0x8CA: |X| 0xD010 drw  v0 v1 0      # draw 16x16 sprite at pos (v0, v1)
+0x8CC: |X| 0x00EE ret
+0x8CE: |X| 0xAF95 ld   i 0xF95      # index = 0xF95
+0x8D0: |X| 0xF165 ld   v1 i         # load 2 bytes into v(0..=1) from memory
+0x8D2: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0x8D4: |X| 0x18DA jp   0x8DA
+0x8D6: |X| 0xACCE ld   i 0xCCE      # index = 0xCCE
+0x8D8: |X| 0xD017 drw  v0 v1 7      # draw 8x7 sprite at pos (v0, v1)
+0x8DA: |X| 0x00EE ret
+0x8DC: |X| 0x2408 call 0x408
+0x8DE: |X| 0x40FF sne  v0 255       # skip next if v0 != 255
+0x8E0: |X| 0x18F2 jp   0x8F2
+0x8E2: |X| 0xABB6 ld   i 0xBB6      # index = 0xBB6
+0x8E4: |X| 0x4501 sne  v5 1         # skip next if v5 != 1
+0x8E6: |X| 0xABBE ld   i 0xBBE      # index = 0xBBE
+0x8E8: |X| 0x6E00 ld   ve 0         # ve = 0
+0x8EA: |X| 0x6D18 ld   vd 24        # vd = 24
+0x8EC: |X| 0xDED8 drw  ve vd 8      # draw 8x8 sprite at pos (ve, vd)
+0x8EE: |X| 0x7D08 add  vd 8         # vd += 8
+0x8F0: |X| 0xDED8 drw  ve vd 8      # draw 8x8 sprite at pos (ve, vd)
+0x8F2: |X| 0x41FF sne  v1 255       # skip next if v1 != 255
+0x8F4: |X| 0x1906 jp   0x906
+0x8F6: |X| 0xABB6 ld   i 0xBB6      # index = 0xBB6
+0x8F8: |X| 0x4502 sne  v5 2         # skip next if v5 != 2
+0x8FA: |X| 0xABBE ld   i 0xBBE      # index = 0xBBE
+0x8FC: |X| 0x6E70 ld   ve 112       # ve = 112
+0x8FE: |X| 0x6D18 ld   vd 24        # vd = 24
+0x900: |X| 0xDED8 drw  ve vd 8      # draw 8x8 sprite at pos (ve, vd)
+0x902: |X| 0x7D08 add  vd 8         # vd += 8
+0x904: |X| 0xDED8 drw  ve vd 8      # draw 8x8 sprite at pos (ve, vd)
+0x906: |X| 0x42FF sne  v2 255       # skip next if v2 != 255
+0x908: |X| 0x191A jp   0x91A
+0x90A: |X| 0xAE92 ld   i 0xE92      # index = 0xE92
+0x90C: |X| 0x4504 sne  v5 4         # skip next if v5 != 4
+0x90E: |X| 0xAE94 ld   i 0xE94      # index = 0xE94
+0x910: |X| 0x6E38 ld   ve 56        # ve = 56
+0x912: |X| 0x6D00 ld   vd 0         # vd = 0
+0x914: |X| 0xDED2 drw  ve vd 2      # draw 8x2 sprite at pos (ve, vd)
+0x916: |X| 0x7E08 add  ve 8         # ve += 8
+0x918: |X| 0xDED2 drw  ve vd 2      # draw 8x2 sprite at pos (ve, vd)
+0x91A: |X| 0x43FF sne  v3 255       # skip next if v3 != 255
+0x91C: |X| 0x192E jp   0x92E
+0x91E: |X| 0xAE92 ld   i 0xE92      # index = 0xE92
+0x920: |X| 0x4503 sne  v5 3         # skip next if v5 != 3
+0x922: |X| 0xAE94 ld   i 0xE94      # index = 0xE94
+0x924: |X| 0x6E38 ld   ve 56        # ve = 56
+0x926: |X| 0x6D3E ld   vd 62        # vd = 62
+0x928: |X| 0xDED2 drw  ve vd 2      # draw 8x2 sprite at pos (ve, vd)
+0x92A: |X| 0x7E08 add  ve 8         # ve += 8
+0x92C: |X| 0xDED2 drw  ve vd 2      # draw 8x2 sprite at pos (ve, vd)
+0x92E: |X| 0x00EE ret
+0x930: |X| 0xC01F rnd  v0 31        # v0 = rand in range [0, 31]
+0x932: |X| 0x7028 add  v0 40        # v0 += 40
+0x934: |X| 0xC107 rnd  v1 7         # v1 = rand in range [0, 7]
+0x936: |X| 0x7114 add  v1 20        # v1 += 20
+0x938: |X| 0xAF95 ld   i 0xF95      # index = 0xF95
+0x93A: |X| 0xF155 ld   i v1         # save 2 bytes from v(0..=1) to memory
+0x93C: |X| 0x00EE ret
+0x93E: |X| 0x6000 ld   v0 0         # v0 = 0
+0x940: |X| 0xAF95 ld   i 0xF95      # index = 0xF95
+0x942: |X| 0xF155 ld   i v1         # save 2 bytes from v(0..=1) to memory
+0x944: |X| 0x00EE ret
+0x946: |X| 0x6001 ld   v0 1         # v0 = 1
+0x948: |X| 0xAB93 ld   i 0xB93      # index = 0xB93
+0x94A: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x94C: |X| 0x00EE ret
+0x94E: |X| 0x6000 ld   v0 0         # v0 = 0
+0x950: |X| 0xAB93 ld   i 0xB93      # index = 0xB93
+0x952: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x954: |X| 0x00EE ret
+0x956: |X| 0x6000 ld   v0 0         # v0 = 0
+0x958: |X| 0x6100 ld   v1 0         # v1 = 0
+0x95A: |X| 0xAF97 ld   i 0xF97      # index = 0xF97
+0x95C: |X| 0xF155 ld   i v1         # save 2 bytes from v(0..=1) to memory
+0x95E: |X| 0x00EE ret
+0x960: |X| 0x6032 ld   v0 50        # v0 = 50
+0x962: |X| 0x6119 ld   v1 25        # v1 = 25
+0x964: |X| 0xAF97 ld   i 0xF97      # index = 0xF97
+0x966: |X| 0xF155 ld   i v1         # save 2 bytes from v(0..=1) to memory
+0x968: |X| 0x00EE ret
+0x96A: |X| 0xAF99 ld   i 0xF99      # index = 0xF99
+0x96C: |X| 0x600A ld   v0 10        # v0 = 10
+0x96E: |X| 0x610A ld   v1 10        # v1 = 10
+0x970: |X| 0x6200 ld   v2 0         # v2 = 0
+0x972: |X| 0xF255 ld   i v2         # save 3 bytes from v(0..=2) to memory
+0x974: |X| 0x00EE ret
+0x976: |X| 0xAF99 ld   i 0xF99      # index = 0xF99
+0x978: |X| 0x6000 ld   v0 0         # v0 = 0
+0x97A: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0x97C: |X| 0x00EE ret
+0x97E: |X| 0x8B00 ld   vb v0        # vb = v0
+0x980: |X| 0x7BFF add  vb 255       # vb += 255
+0x982: |X| 0x298A call 0x98A
+0x984: |X| 0x3B00 se   vb 0         # skip next if vb == 0
+0x986: |X| 0x1980 jp   0x980
+0x988: |X| 0x00EE ret
+0x98A: |X| 0x6500 ld   v5 0         # v5 = 0
+0x98C: |X| 0x6600 ld   v6 0         # v6 = 0
+0x98E: |X| 0xAF7A ld   i 0xF7A      # index = 0xF7A
+0x990: |X| 0x6F05 ld   vf 5         # vf = 5
+0x992: |X| 0x8F57 subn vf v5        # vf = v5 - vf
+0x994: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0x996: |X| 0x19B4 jp   0x9B4
+0x998: |X| 0xAF7A ld   i 0xF7A      # index = 0xF7A
+0x99A: |X| 0xF61E add  i 6          # index += 6 (0x006)
+0x99C: |X| 0xF265 ld   v2 i         # load 3 bytes into v(0..=2) from memory
+0x99E: |X| 0x3000 se   v0 0         # skip next if v0 == 0
+0x9A0: |X| 0x19AE jp   0x9AE
+0x9A2: |X| 0x6001 ld   v0 1         # v0 = 1
+0x9A4: |X| 0x29B6 call 0x9B6
+0x9A6: |X| 0xAF7A ld   i 0xF7A      # index = 0xF7A
+0x9A8: |X| 0xF61E add  i 6          # index += 6 (0x006)
+0x9AA: |X| 0xF255 ld   i v2         # save 3 bytes from v(0..=2) to memory
+0x9AC: |X| 0x00EE ret
+0x9AE: |X| 0x7603 add  v6 3         # v6 += 3
+0x9B0: |X| 0x7501 add  v5 1         # v5 += 1
+0x9B2: |X| 0x1990 jp   0x990
+0x9B4: |X| 0x00EE ret
+0x9B6: |X| 0xCA07 rnd  va 7         # va = rand in range [0, 7]
+0x9B8: |X| 0x6F03 ld   vf 3         # vf = 3
+0x9BA: |X| 0x8FA5 sub  vf va        # vf -= va
+0x9BC: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0x9BE: |X| 0x19B6 jp   0x9B6
+0x9C0: |X| 0x3A00 se   va 0         # skip next if va == 0
+0x9C2: |X| 0x19C8 jp   0x9C8
+0x9C4: |X| 0x6105 ld   v1 5         # v1 = 5
+0x9C6: |X| 0x6205 ld   v2 5         # v2 = 5
+0x9C8: |X| 0x3A01 se   va 1         # skip next if va == 1
+0x9CA: |X| 0x19D0 jp   0x9D0
+0x9CC: |X| 0x615A ld   v1 90        # v1 = 90
+0x9CE: |X| 0x6205 ld   v2 5         # v2 = 5
+0x9D0: |X| 0x3A02 se   va 2         # skip next if va == 2
+0x9D2: |X| 0x19D8 jp   0x9D8
+0x9D4: |X| 0x6105 ld   v1 5         # v1 = 5
+0x9D6: |X| 0x6235 ld   v2 53        # v2 = 53
+0x9D8: |X| 0x3A03 se   va 3         # skip next if va == 3
+0x9DA: |X| 0x19E0 jp   0x9E0
+0x9DC: |X| 0x615A ld   v1 90        # v1 = 90
+0x9DE: |X| 0x6235 ld   v2 53        # v2 = 53
+0x9E0: |X| 0xCA07 rnd  va 7         # va = rand in range [0, 7]
+0x9E2: |X| 0x7AFD add  va 253       # va += 253
+0x9E4: |X| 0x81A4 add  v1 va        # v1 += va
+0x9E6: |X| 0xCA07 rnd  va 7         # va = rand in range [0, 7]
+0x9E8: |X| 0x7AFD add  va 253       # va += 253
+0x9EA: |X| 0x82A4 add  v2 va        # v2 += va
+0x9EC: |X| 0x00EE ret
+0x9EE: |X| 0x2A20 call 0xA20
+0x9F0: |X| 0x6040 ld   v0 64        # v0 = 64
+0x9F2: |X| 0x6110 ld   v1 16        # v1 = 16
+0x9F4: |X| 0x6207 ld   v2 7         # v2 = 7
+0x9F6: |X| 0x2B66 call 0xB66
+0x9F8: |X| 0xABA6 ld   i 0xBA6      # index = 0xBA6
+0x9FA: |X| 0xF465 ld   v4 i         # load 5 bytes into v(0..=4) from memory
+0x9FC: |X| 0xAB8F ld   i 0xB8F      # index = 0xB8F
+0x9FE: |X| 0xF455 ld   i v4         # save 5 bytes from v(0..=4) to memory
+0xA00: |X| 0x00EE ret
+0xA02: |X| 0x6900 ld   v9 0         # v9 = 0
+0xA04: |X| 0x6A00 ld   va 0         # va = 0
+0xA06: |X| 0xAD96 ld   i 0xD96      # index = 0xD96
+0xA08: |X| 0xF91E add  i 9          # index += 9 (0x009)
+0xA0A: |X| 0xF565 ld   v5 i         # load 6 bytes into v(0..=5) from memory
+0xA0C: |X| 0x8040 ld   v0 v4        # v0 = v4
+0xA0E: |X| 0x8150 ld   v1 v5        # v1 = v5
+0xA10: |X| 0xAE96 ld   i 0xE96      # index = 0xE96
+0xA12: |X| 0xFA1E add  i 10         # index += 10 (0x00A)
+0xA14: |X| 0xF155 ld   i v1         # save 2 bytes from v(0..=1) to memory
+0xA16: |X| 0x7906 add  v9 6         # v9 += 6
+0xA18: |X| 0x7A02 add  va 2         # va += 2
+0xA1A: |X| 0x39FC se   v9 252       # skip next if v9 == 252
+0xA1C: |X| 0x1A06 jp   0xA06
+0xA1E: |X| 0x00EE ret
+0xA20: |X| 0x6900 ld   v9 0         # v9 = 0
+0xA22: |X| 0x6A00 ld   va 0         # va = 0
+0xA24: |X| 0x6B04 ld   vb 4         # vb = 4
+0xA26: |X| 0xAE96 ld   i 0xE96      # index = 0xE96
+0xA28: |X| 0xFA1E add  i 10         # index += 10 (0x00A)
+0xA2A: |X| 0xF165 ld   v1 i         # load 2 bytes into v(0..=1) from memory
+0xA2C: |X| 0xAD96 ld   i 0xD96      # index = 0xD96
+0xA2E: |X| 0xF91E add  i 9          # index += 9 (0x009)
+0xA30: |X| 0xFB1E add  i 11         # index += 11 (0x00B)
+0xA32: |X| 0xF155 ld   i v1         # save 2 bytes from v(0..=1) to memory
+0xA34: |X| 0x7906 add  v9 6         # v9 += 6
+0xA36: |X| 0x7A02 add  va 2         # va += 2
+0xA38: |X| 0x39FC se   v9 252       # skip next if v9 == 252
+0xA3A: |X| 0x1A26 jp   0xA26
+0xA3C: |X| 0x00EE ret
+0xA3E: |X| 0x2B6C call 0xB6C
+0xA40: |X| 0x8C00 ld   vc v0        # vc = v0
+0xA42: |X| 0x8D10 ld   vd v1        # vd = v1
+0xA44: |X| 0x2A5C call 0xA5C
+0xA46: |X| 0xDCD0 drw  vc vd 0      # draw 16x16 sprite at pos (vc, vd)
+0xA48: |X| 0xAB91 ld   i 0xB91      # index = 0xB91
+0xA4A: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0xA4C: |X| 0x4000 sne  v0 0         # skip next if v0 != 0
+0xA4E: |X| 0x00EE ret
+0xA50: |X| 0x7C04 add  vc 4         # vc += 4
+0xA52: |X| 0xACCA ld   i 0xCCA      # index = 0xCCA
+0xA54: |X| 0x4002 sne  v0 2         # skip next if v0 != 2
+0xA56: |X| 0xACC6 ld   i 0xCC6      # index = 0xCC6
+0xA58: |X| 0xDCD4 drw  vc vd 4      # draw 8x4 sprite at pos (vc, vd)
+0xA5A: |X| 0x00EE ret
+0xA5C: |X| 0x2B72 call 0xB72
+0xA5E: |X| 0xAF93 ld   i 0xF93      # index = 0xF93
+0xA60: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0xA62: |X| 0x3205 se   v2 5         # skip next if v2 == 5
+0xA64: |X| 0x1A76 jp   0xA76
+0xA66: |X| 0xAC46 ld   i 0xC46      # index = 0xC46
+0xA68: |X| 0x6F00 ld   vf 0         # vf = 0
+0xA6A: |X| 0x8F05 sub  vf v0        # vf -= v0
+0xA6C: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0xA6E: |X| 0x1A76 jp   0xA76
+0xA70: |X| 0xC101 rnd  v1 1         # v1 = rand in range [0, 1]
+0xA72: |X| 0x4100 sne  v1 0         # skip next if v1 != 0
+0xA74: |X| 0xAC66 ld   i 0xC66      # index = 0xC66
+0xA76: |X| 0x3208 se   v2 8         # skip next if v2 == 8
+0xA78: |X| 0x1A8A jp   0xA8A
+0xA7A: |X| 0xAC86 ld   i 0xC86      # index = 0xC86
+0xA7C: |X| 0x6F00 ld   vf 0         # vf = 0
+0xA7E: |X| 0x8F05 sub  vf v0        # vf -= v0
+0xA80: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0xA82: |X| 0x1A8A jp   0xA8A
+0xA84: |X| 0xC101 rnd  v1 1         # v1 = rand in range [0, 1]
+0xA86: |X| 0x4100 sne  v1 0         # skip next if v1 != 0
+0xA88: |X| 0xACA6 ld   i 0xCA6      # index = 0xCA6
+0xA8A: |X| 0x3207 se   v2 7         # skip next if v2 == 7
+0xA8C: |X| 0x1A9E jp   0xA9E
+0xA8E: |X| 0xABC6 ld   i 0xBC6      # index = 0xBC6
+0xA90: |X| 0x6F00 ld   vf 0         # vf = 0
+0xA92: |X| 0x8F05 sub  vf v0        # vf -= v0
+0xA94: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0xA96: |X| 0x1A9E jp   0xA9E
+0xA98: |X| 0xC101 rnd  v1 1         # v1 = rand in range [0, 1]
+0xA9A: |X| 0x4100 sne  v1 0         # skip next if v1 != 0
+0xA9C: |X| 0xABE6 ld   i 0xBE6      # index = 0xBE6
+0xA9E: |X| 0x3209 se   v2 9         # skip next if v2 == 9
+0xAA0: |X| 0x1AB2 jp   0xAB2
+0xAA2: |X| 0xAC06 ld   i 0xC06      # index = 0xC06
+0xAA4: |X| 0x6F00 ld   vf 0         # vf = 0
+0xAA6: |X| 0x8F05 sub  vf v0        # vf -= v0
+0xAA8: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0xAAA: |X| 0x1AB2 jp   0xAB2
+0xAAC: |X| 0xC101 rnd  v1 1         # v1 = rand in range [0, 1]
+0xAAE: |X| 0x4100 sne  v1 0         # skip next if v1 != 0
+0xAB0: |X| 0xAC26 ld   i 0xC26      # index = 0xC26
+0xAB2: |X| 0x00EE ret
+0xAB4: |X| 0x6300 ld   v3 0         # v3 = 0
+0xAB6: |X| 0x2B72 call 0xB72
+0xAB8: |X| 0x6F08 ld   vf 8         # vf = 8
+0xABA: |X| 0xEF9E skp  vf           # skip next if vf key is down
+0xABC: |X| 0x1AC4 jp   0xAC4
+0xABE: |X| 0x7101 add  v1 1         # v1 += 1
+0xAC0: |X| 0x6208 ld   v2 8         # v2 = 8
+0xAC2: |X| 0x6301 ld   v3 1         # v3 = 1
+0xAC4: |X| 0x6F05 ld   vf 5         # vf = 5
+0xAC6: |X| 0xEF9E skp  vf           # skip next if vf key is down
+0xAC8: |X| 0x1AD0 jp   0xAD0
+0xACA: |X| 0x71FF add  v1 255       # v1 += 255
+0xACC: |X| 0x6205 ld   v2 5         # v2 = 5
+0xACE: |X| 0x6301 ld   v3 1         # v3 = 1
+0xAD0: |X| 0x6F09 ld   vf 9         # vf = 9
+0xAD2: |X| 0xEF9E skp  vf           # skip next if vf key is down
+0xAD4: |X| 0x1ADC jp   0xADC
+0xAD6: |X| 0x7001 add  v0 1         # v0 += 1
+0xAD8: |X| 0x6209 ld   v2 9         # v2 = 9
+0xADA: |X| 0x6301 ld   v3 1         # v3 = 1
+0xADC: |X| 0x6F07 ld   vf 7         # vf = 7
+0xADE: |X| 0xEF9E skp  vf           # skip next if vf key is down
+0xAE0: |X| 0x1AE8 jp   0xAE8
+0xAE2: |X| 0x70FF add  v0 255       # v0 += 255
+0xAE4: |X| 0x6207 ld   v2 7         # v2 = 7
+0xAE6: |X| 0x6301 ld   v3 1         # v3 = 1
+0xAE8: |X| 0x2B78 call 0xB78
+0xAEA: |X| 0x6F0E ld   vf 14        # vf = 14
+0xAEC: |X| 0xEFA1 sknp vf           # skip next if vf key is up
+0xAEE: |X| 0x24D6 call 0x4D6
+0xAF0: |X| 0x8030 ld   v0 v3        # v0 = v3
+0xAF2: |X| 0xAF93 ld   i 0xF93      # index = 0xF93
+0xAF4: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0xAF6: |X| 0x24C2 call 0x4C2
+0xAF8: |X| 0x00EE ret
+0xAFA: |X| 0xAE92 ld   i 0xE92      # index = 0xE92
+0xAFC: |X| 0x6000 ld   v0 0         # v0 = 0
+0xAFE: |X| 0x6100 ld   v1 0         # v1 = 0
+0xB00: |X| 0x623E ld   v2 62        # v2 = 62
+0xB02: |X| 0xD012 drw  v0 v1 2      # draw 8x2 sprite at pos (v0, v1)
+0xB04: |X| 0xD022 drw  v0 v2 2      # draw 8x2 sprite at pos (v0, v2)
+0xB06: |X| 0x7008 add  v0 8         # v0 += 8
+0xB08: |X| 0x6F70 ld   vf 112       # vf = 112
+0xB0A: |X| 0x8F07 subn vf v0        # vf = v0 - vf
+0xB0C: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0xB0E: |X| 0x1B02 jp   0xB02
+0xB10: |X| 0xABB6 ld   i 0xBB6      # index = 0xBB6
+0xB12: |X| 0x6000 ld   v0 0         # v0 = 0
+0xB14: |X| 0x6270 ld   v2 112       # v2 = 112
+0xB16: |X| 0xD108 drw  v1 v0 8      # draw 8x8 sprite at pos (v1, v0)
+0xB18: |X| 0xD208 drw  v2 v0 8      # draw 8x8 sprite at pos (v2, v0)
+0xB1A: |X| 0x7008 add  v0 8         # v0 += 8
+0xB1C: |X| 0x6F40 ld   vf 64        # vf = 64
+0xB1E: |X| 0x8F07 subn vf v0        # vf = v0 - vf
+0xB20: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0xB22: |X| 0x1B16 jp   0xB16
+0xB24: |X| 0xAF89 ld   i 0xF89      # index = 0xF89
+0xB26: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0xB28: |X| 0x6500 ld   v5 0         # v5 = 0
+0xB2A: |X| 0x4007 sne  v0 7         # skip next if v0 != 7
+0xB2C: |X| 0x6501 ld   v5 1         # v5 = 1
+0xB2E: |X| 0x4014 sne  v0 20        # skip next if v0 != 20
+0xB30: |X| 0x6502 ld   v5 2         # v5 = 2
+0xB32: |X| 0x401E sne  v0 30        # skip next if v0 != 30
+0xB34: |X| 0x6503 ld   v5 3         # v5 = 3
+0xB36: |X| 0x3500 se   v5 0         # skip next if v5 == 0
+0xB38: |X| 0x2B3C call 0xB3C
+0xB3A: |X| 0x00EE ret
+0xB3C: |X| 0xAD5B ld   i 0xD5B      # index = 0xD5B
+0xB3E: |X| 0x6003 ld   v0 3         # v0 = 3
+0xB40: |X| 0x6103 ld   v1 3         # v1 = 3
+0xB42: |X| 0x6305 ld   v3 5         # v3 = 5
+0xB44: |X| 0xD005 drw  v0 v0 5      # draw 8x5 sprite at pos (v0, v0)
+0xB46: |X| 0xF31E add  i 3          # index += 3 (0x003)
+0xB48: |X| 0x7008 add  v0 8         # v0 += 8
+0xB4A: |X| 0xD015 drw  v0 v1 5      # draw 8x5 sprite at pos (v0, v1)
+0xB4C: |X| 0xF31E add  i 3          # index += 3 (0x003)
+0xB4E: |X| 0x7008 add  v0 8         # v0 += 8
+0xB50: |X| 0xD015 drw  v0 v1 5      # draw 8x5 sprite at pos (v0, v1)
+0xB52: |X| 0x247C call 0x47C
+0xB54: |X| 0x7006 add  v0 6         # v0 += 6
+0xB56: |X| 0xD015 drw  v0 v1 5      # draw 8x5 sprite at pos (v0, v1)
+0xB58: |X| 0x00EE ret
+0xB5A: |X| 0xFF07 ld   vf dt        # vf = delay timer
+0xB5C: |X| 0x3F00 se   vf 0         # skip next if vf == 0
+0xB5E: |X| 0x1B5A jp   0xB5A
+0xB60: |X| 0x6F01 ld   vf 1         # vf = 1
+0xB62: |X| 0xFF15 ld   dt vf        # delay timer = vf
+0xB64: |X| 0x00EE ret
+0xB66: |X| 0xAB8A ld   i 0xB8A      # index = 0xB8A
+0xB68: |X| 0xF155 ld   i v1         # save 2 bytes from v(0..=1) to memory
+0xB6A: |X| 0x00EE ret
+0xB6C: |X| 0xAB8A ld   i 0xB8A      # index = 0xB8A
+0xB6E: |X| 0xF165 ld   v1 i         # load 2 bytes into v(0..=1) from memory
+0xB70: |X| 0x00EE ret
+0xB72: |X| 0xAB8A ld   i 0xB8A      # index = 0xB8A
+0xB74: |X| 0xF265 ld   v2 i         # load 3 bytes into v(0..=2) from memory
+0xB76: |X| 0x00EE ret
+0xB78: |X| 0xAB8A ld   i 0xB8A      # index = 0xB8A
+0xB7A: |X| 0xF255 ld   i v2         # save 3 bytes from v(0..=2) to memory
+0xB7C: |X| 0x00EE ret
+0xB7E: |X| 0xAB90 ld   i 0xB90      # index = 0xB90
+0xB80: |X| 0xF065 ld   v0 i         # load 1 byte into v(0..=0) from memory
+0xB82: |X| 0xAB90 ld   i 0xB90      # index = 0xB90
+0xB84: |X| 0x7001 add  v0 1         # v0 += 1
+0xB86: |X| 0xF055 ld   i v0         # save 1 byte from v(0..=0) to memory
+0xB88: |X| 0x00EE ret
+0xB8A: | | 0x00                     # 2X GRAPHIC ................
+0xB8B: | | 0x00                     # 2X GRAPHIC ................
+0xB8C: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xB8D: | | 0x00                     # 2X GRAPHIC ................
+0xB8E: | | 0x00                     # 2X GRAPHIC ................
+0xB8F: | | 0x00                     # 2X GRAPHIC ................
+0xB90: | | 0x00                     # 2X GRAPHIC ................
+0xB91: | | 0x00                     # 2X GRAPHIC ................
+0xB92: | | 0x00                     # 2X GRAPHIC ................
+0xB93: |?| 0x00E0                   # 2X GRAPHIC ................
+0xB94: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xB95: |?| 0x603F                   # 2X GRAPHIC ..@@@@..........
+0xB96: |?| 0x3FE0                   # 2X GRAPHIC ....@@@@@@@@@@@@
+0xB97: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xB98: |?| 0x7FF0                   # 2X GRAPHIC ..@@@@@@@@@@@@@@
+0xB99: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xB9A: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xB9B: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xB9C: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xB9D: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xB9E: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xB9F: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xBA0: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xBA1: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xBA2: |?| 0x7FF0                   # 2X GRAPHIC ..@@@@@@@@@@@@@@
+0xBA3: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xBA4: |?| 0x3FE0                   # 2X GRAPHIC ....@@@@@@@@@@@@
+0xBA5: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xBA6: | | 0x00                     # 2X GRAPHIC ................
+0xBA7: | | 0x00                     # 2X GRAPHIC ................
+0xBA8: | | 0x00                     # 2X GRAPHIC ................
+0xBA9: | | 0x00                     # 2X GRAPHIC ................
+0xBAA: | | 0x00                     # 2X GRAPHIC ................
+0xBAB: | | 0x00                     # 2X GRAPHIC ................
+0xBAC: | | 0x00                     # 2X GRAPHIC ................
+0xBAD: | | 0x00                     # 2X GRAPHIC ................
+0xBAE: | | 0x00                     # 2X GRAPHIC ................
+0xBAF: | | 0x00                     # 2X GRAPHIC ................
+0xBB0: | | 0x00                     # 2X GRAPHIC ................
+0xBB1: | | 0x00                     # 2X GRAPHIC ................
+0xBB2: | | 0x00                     # 2X GRAPHIC ................
+0xBB3: | | 0x00                     # 2X GRAPHIC ................
+0xBB4: | | 0x00                     # 2X GRAPHIC ................
+0xBB5: |?| 0x00C0                   # 2X GRAPHIC ................
+0xBB6: |?| 0xC0C0                   # 2X GRAPHIC @@@@............
+0xBB7: |?| 0xC0C0                   # 2X GRAPHIC @@@@............
+0xBB8: |?| 0xC0C0                   # 2X GRAPHIC @@@@............
+0xBB9: |?| 0xC0C0                   # 2X GRAPHIC @@@@............
+0xBBA: |?| 0xC0C0                   # 2X GRAPHIC @@@@............
+0xBBB: |?| 0xC0C0                   # 2X GRAPHIC @@@@............
+0xBBC: |?| 0xC0C0                   # 2X GRAPHIC @@@@............
+0xBBD: |?| 0xC080                   # 2X GRAPHIC @@@@............
+0xBBE: |?| 0x8040                   # 2X GRAPHIC @@..............
+0xBBF: |?| 0x4080                   # 2X GRAPHIC ..@@............
+0xBC0: |?| 0x8040                   # 2X GRAPHIC @@..............
+0xBC1: |?| 0x4080                   # 2X GRAPHIC ..@@............
+0xBC2: |?| 0x8040                   # 2X GRAPHIC @@..............
+0xBC3: |?| 0x4080                   # 2X GRAPHIC ..@@............
+0xBC4: |?| 0x8040                   # 2X GRAPHIC @@..............
+0xBC5: |?| 0x4000                   # 2X GRAPHIC ..@@............
+0xBC6: | | 0x00                     # 2X GRAPHIC ................
+0xBC7: | | 0x00                     # 2X GRAPHIC ................
+0xBC8: | | 0x00                     # 2X GRAPHIC ................
+0xBC9: | | 0x00                     # 2X GRAPHIC ................
+0xBCA: | | 0x00                     # 2X GRAPHIC ................
+0xBCB: | | 0x00                     # 2X GRAPHIC ................
+0xBCC: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xBCD: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xBCE: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xBCF: |?| 0x2008                   # 2X GRAPHIC ....@@..........
+0xBD0: | | 0x08                     # 2X GRAPHIC ........@@......
+0xBD1: |?| 0x301A                   # 2X GRAPHIC ....@@@@........
+0xBD2: |?| 0x1A90                   # 2X GRAPHIC ......@@@@..@@..
+0xBD3: |?| 0x9010                   # 2X GRAPHIC @@....@@........
+0xBD4: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xBD5: |?| 0x1030                   # 2X GRAPHIC ......@@........
+0xBD6: |?| 0x3030                   # 2X GRAPHIC ....@@@@........
+0xBD7: |?| 0x3013                   # 2X GRAPHIC ....@@@@........
+0xBD8: |?| 0x1328                   # 2X GRAPHIC ......@@....@@@@
+0xBD9: |?| 0x2818                   # 2X GRAPHIC ....@@..@@......
+0xBDA: |?| 0x1860                   # 2X GRAPHIC ......@@@@......
+0xBDB: |?| 0x600F                   # 2X GRAPHIC ..@@@@..........
+0xBDC: |?| 0x0FC0                   # 2X GRAPHIC ........@@@@@@@@
+0xBDD: |?| 0xC004                   # 2X GRAPHIC @@@@............
+0xBDE: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xBDF: |?| 0x4004                   # 2X GRAPHIC ..@@............
+0xBE0: |?| 0x04C0                   # 2X GRAPHIC ..........@@....
+0xBE1: |?| 0xC00C                   # 2X GRAPHIC @@@@............
+0xBE2: | | 0x0C                     # 2X GRAPHIC ........@@@@....
+0xBE3: | | 0x00                     # 2X GRAPHIC ................
+0xBE4: | | 0x00                     # 2X GRAPHIC ................
+0xBE5: | | 0x00                     # 2X GRAPHIC ................
+0xBE6: | | 0x00                     # 2X GRAPHIC ................
+0xBE7: | | 0x00                     # 2X GRAPHIC ................
+0xBE8: | | 0x00                     # 2X GRAPHIC ................
+0xBE9: | | 0x00                     # 2X GRAPHIC ................
+0xBEA: | | 0x00                     # 2X GRAPHIC ................
+0xBEB: | | 0x00                     # 2X GRAPHIC ................
+0xBEC: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xBED: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xBEE: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xBEF: |?| 0x2008                   # 2X GRAPHIC ....@@..........
+0xBF0: | | 0x08                     # 2X GRAPHIC ........@@......
+0xBF1: |?| 0x301A                   # 2X GRAPHIC ....@@@@........
+0xBF2: |?| 0x1A90                   # 2X GRAPHIC ......@@@@..@@..
+0xBF3: |?| 0x9010                   # 2X GRAPHIC @@....@@........
+0xBF4: |?| 0x1018                   # 2X GRAPHIC ......@@........
+0xBF5: |?| 0x1810                   # 2X GRAPHIC ......@@@@......
+0xBF6: |?| 0x1030                   # 2X GRAPHIC ......@@........
+0xBF7: |?| 0x3033                   # 2X GRAPHIC ....@@@@........
+0xBF8: |?| 0x3320                   # 2X GRAPHIC ....@@@@....@@@@
+0xBF9: |?| 0x2018                   # 2X GRAPHIC ....@@..........
+0xBFA: |?| 0x1860                   # 2X GRAPHIC ......@@@@......
+0xBFB: |?| 0x600F                   # 2X GRAPHIC ..@@@@..........
+0xBFC: |?| 0x0FC0                   # 2X GRAPHIC ........@@@@@@@@
+0xBFD: |?| 0xC004                   # 2X GRAPHIC @@@@............
+0xBFE: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xBFF: |?| 0x400C                   # 2X GRAPHIC ..@@............
+0xC00: | | 0x0C                     # 2X GRAPHIC ........@@@@....
+0xC01: |?| 0x4000                   # 2X GRAPHIC ..@@............
+0xC02: |?| 0x00C0                   # 2X GRAPHIC ................
+0xC03: |?| 0xC000                   # 2X GRAPHIC @@@@............
+0xC04: | | 0x00                     # 2X GRAPHIC ................
+0xC05: | | 0x00                     # 2X GRAPHIC ................
+0xC06: | | 0x00                     # 2X GRAPHIC ................
+0xC07: | | 0x00                     # 2X GRAPHIC ................
+0xC08: | | 0x00                     # 2X GRAPHIC ................
+0xC09: | | 0x00                     # 2X GRAPHIC ................
+0xC0A: | | 0x00                     # 2X GRAPHIC ................
+0xC0B: | | 0x00                     # 2X GRAPHIC ................
+0xC0C: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xC0D: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xC0E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC0F: |?| 0x2008                   # 2X GRAPHIC ....@@..........
+0xC10: | | 0x08                     # 2X GRAPHIC ........@@......
+0xC11: |?| 0x301A                   # 2X GRAPHIC ....@@@@........
+0xC12: |?| 0x1A90                   # 2X GRAPHIC ......@@@@..@@..
+0xC13: |?| 0x9010                   # 2X GRAPHIC @@....@@........
+0xC14: |?| 0x1018                   # 2X GRAPHIC ......@@........
+0xC15: |?| 0x1810                   # 2X GRAPHIC ......@@@@......
+0xC16: |?| 0x1030                   # 2X GRAPHIC ......@@........
+0xC17: |?| 0x3031                   # 2X GRAPHIC ....@@@@........
+0xC18: |?| 0x31A0                   # 2X GRAPHIC ....@@@@......@@
+0xC19: |?| 0xA018                   # 2X GRAPHIC @@..@@..........
+0xC1A: |?| 0x1860                   # 2X GRAPHIC ......@@@@......
+0xC1B: |?| 0x600F                   # 2X GRAPHIC ..@@@@..........
+0xC1C: |?| 0x0FC0                   # 2X GRAPHIC ........@@@@@@@@
+0xC1D: |?| 0xC004                   # 2X GRAPHIC @@@@............
+0xC1E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC1F: |?| 0x4006                   # 2X GRAPHIC ..@@............
+0xC20: | | 0x06                     # 2X GRAPHIC ..........@@@@..
+0xC21: |?| 0x4000                   # 2X GRAPHIC ..@@............
+0xC22: | | 0x00                     # 2X GRAPHIC ................
+0xC23: |?| 0x6000                   # 2X GRAPHIC ..@@@@..........
+0xC24: | | 0x00                     # 2X GRAPHIC ................
+0xC25: | | 0x00                     # 2X GRAPHIC ................
+0xC26: | | 0x00                     # 2X GRAPHIC ................
+0xC27: | | 0x00                     # 2X GRAPHIC ................
+0xC28: | | 0x00                     # 2X GRAPHIC ................
+0xC29: | | 0x00                     # 2X GRAPHIC ................
+0xC2A: | | 0x00                     # 2X GRAPHIC ................
+0xC2B: | | 0x00                     # 2X GRAPHIC ................
+0xC2C: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xC2D: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xC2E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC2F: |?| 0x2008                   # 2X GRAPHIC ....@@..........
+0xC30: | | 0x08                     # 2X GRAPHIC ........@@......
+0xC31: |?| 0x301A                   # 2X GRAPHIC ....@@@@........
+0xC32: |?| 0x1A90                   # 2X GRAPHIC ......@@@@..@@..
+0xC33: |?| 0x9010                   # 2X GRAPHIC @@....@@........
+0xC34: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xC35: |?| 0x1030                   # 2X GRAPHIC ......@@........
+0xC36: |?| 0x3030                   # 2X GRAPHIC ....@@@@........
+0xC37: |?| 0x3011                   # 2X GRAPHIC ....@@@@........
+0xC38: |?| 0x11A8                   # 2X GRAPHIC ......@@......@@
+0xC39: |?| 0xA818                   # 2X GRAPHIC @@..@@..@@......
+0xC3A: |?| 0x1860                   # 2X GRAPHIC ......@@@@......
+0xC3B: |?| 0x600F                   # 2X GRAPHIC ..@@@@..........
+0xC3C: |?| 0x0FC0                   # 2X GRAPHIC ........@@@@@@@@
+0xC3D: |?| 0xC004                   # 2X GRAPHIC @@@@............
+0xC3E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC3F: |?| 0x4004                   # 2X GRAPHIC ..@@............
+0xC40: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC41: |?| 0x6006                   # 2X GRAPHIC ..@@@@..........
+0xC42: | | 0x06                     # 2X GRAPHIC ..........@@@@..
+0xC43: | | 0x00                     # 2X GRAPHIC ................
+0xC44: | | 0x00                     # 2X GRAPHIC ................
+0xC45: | | 0x00                     # 2X GRAPHIC ................
+0xC46: | | 0x00                     # 2X GRAPHIC ................
+0xC47: | | 0x00                     # 2X GRAPHIC ................
+0xC48: | | 0x00                     # 2X GRAPHIC ................
+0xC49: | | 0x00                     # 2X GRAPHIC ................
+0xC4A: | | 0x00                     # 2X GRAPHIC ................
+0xC4B: | | 0x00                     # 2X GRAPHIC ................
+0xC4C: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xC4D: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xC4E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC4F: |?| 0x2008                   # 2X GRAPHIC ....@@..........
+0xC50: | | 0x08                     # 2X GRAPHIC ........@@......
+0xC51: |?| 0x3018                   # 2X GRAPHIC ....@@@@........
+0xC52: |?| 0x1810                   # 2X GRAPHIC ......@@@@......
+0xC53: |?| 0x1030                   # 2X GRAPHIC ......@@........
+0xC54: |?| 0x3010                   # 2X GRAPHIC ....@@@@........
+0xC55: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xC56: |?| 0x1030                   # 2X GRAPHIC ......@@........
+0xC57: |?| 0x3010                   # 2X GRAPHIC ....@@@@........
+0xC58: |?| 0x1028                   # 2X GRAPHIC ......@@........
+0xC59: |?| 0x2818                   # 2X GRAPHIC ....@@..@@......
+0xC5A: |?| 0x1860                   # 2X GRAPHIC ......@@@@......
+0xC5B: |?| 0x600F                   # 2X GRAPHIC ..@@@@..........
+0xC5C: |?| 0x0FC0                   # 2X GRAPHIC ........@@@@@@@@
+0xC5D: |?| 0xC004                   # 2X GRAPHIC @@@@............
+0xC5E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC5F: |?| 0x4004                   # 2X GRAPHIC ..@@............
+0xC60: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC61: |?| 0x4000                   # 2X GRAPHIC ..@@............
+0xC62: | | 0x00                     # 2X GRAPHIC ................
+0xC63: |?| 0x4000                   # 2X GRAPHIC ..@@............
+0xC64: | | 0x00                     # 2X GRAPHIC ................
+0xC65: | | 0x00                     # 2X GRAPHIC ................
+0xC66: | | 0x00                     # 2X GRAPHIC ................
+0xC67: | | 0x00                     # 2X GRAPHIC ................
+0xC68: | | 0x00                     # 2X GRAPHIC ................
+0xC69: | | 0x00                     # 2X GRAPHIC ................
+0xC6A: | | 0x00                     # 2X GRAPHIC ................
+0xC6B: | | 0x00                     # 2X GRAPHIC ................
+0xC6C: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xC6D: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xC6E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC6F: |?| 0x2008                   # 2X GRAPHIC ....@@..........
+0xC70: | | 0x08                     # 2X GRAPHIC ........@@......
+0xC71: |?| 0x3018                   # 2X GRAPHIC ....@@@@........
+0xC72: |?| 0x1810                   # 2X GRAPHIC ......@@@@......
+0xC73: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xC74: |?| 0x1018                   # 2X GRAPHIC ......@@........
+0xC75: |?| 0x1830                   # 2X GRAPHIC ......@@@@......
+0xC76: |?| 0x3030                   # 2X GRAPHIC ....@@@@........
+0xC77: |?| 0x3010                   # 2X GRAPHIC ....@@@@........
+0xC78: |?| 0x1020                   # 2X GRAPHIC ......@@........
+0xC79: |?| 0x2018                   # 2X GRAPHIC ....@@..........
+0xC7A: |?| 0x1860                   # 2X GRAPHIC ......@@@@......
+0xC7B: |?| 0x600F                   # 2X GRAPHIC ..@@@@..........
+0xC7C: |?| 0x0FC0                   # 2X GRAPHIC ........@@@@@@@@
+0xC7D: |?| 0xC004                   # 2X GRAPHIC @@@@............
+0xC7E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC7F: |?| 0x4004                   # 2X GRAPHIC ..@@............
+0xC80: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC81: |?| 0x4004                   # 2X GRAPHIC ..@@............
+0xC82: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC83: | | 0x00                     # 2X GRAPHIC ................
+0xC84: | | 0x00                     # 2X GRAPHIC ................
+0xC85: | | 0x00                     # 2X GRAPHIC ................
+0xC86: | | 0x00                     # 2X GRAPHIC ................
+0xC87: | | 0x00                     # 2X GRAPHIC ................
+0xC88: | | 0x00                     # 2X GRAPHIC ................
+0xC89: | | 0x00                     # 2X GRAPHIC ................
+0xC8A: | | 0x00                     # 2X GRAPHIC ................
+0xC8B: | | 0x00                     # 2X GRAPHIC ................
+0xC8C: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xC8D: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xC8E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC8F: |?| 0x2008                   # 2X GRAPHIC ....@@..........
+0xC90: | | 0x08                     # 2X GRAPHIC ........@@......
+0xC91: |?| 0x301A                   # 2X GRAPHIC ....@@@@........
+0xC92: |?| 0x1A90                   # 2X GRAPHIC ......@@@@..@@..
+0xC93: |?| 0x9010                   # 2X GRAPHIC @@....@@........
+0xC94: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xC95: |?| 0x1033                   # 2X GRAPHIC ......@@........
+0xC96: |?| 0x33B0                   # 2X GRAPHIC ....@@@@....@@@@
+0xC97: |?| 0xB010                   # 2X GRAPHIC @@..@@@@........
+0xC98: |?| 0x1028                   # 2X GRAPHIC ......@@........
+0xC99: |?| 0x2818                   # 2X GRAPHIC ....@@..@@......
+0xC9A: |?| 0x1860                   # 2X GRAPHIC ......@@@@......
+0xC9B: |?| 0x600F                   # 2X GRAPHIC ..@@@@..........
+0xC9C: |?| 0x0FC0                   # 2X GRAPHIC ........@@@@@@@@
+0xC9D: |?| 0xC004                   # 2X GRAPHIC @@@@............
+0xC9E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xC9F: |?| 0x4004                   # 2X GRAPHIC ..@@............
+0xCA0: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xCA1: |?| 0x4000                   # 2X GRAPHIC ..@@............
+0xCA2: | | 0x00                     # 2X GRAPHIC ................
+0xCA3: |?| 0x4000                   # 2X GRAPHIC ..@@............
+0xCA4: | | 0x00                     # 2X GRAPHIC ................
+0xCA5: | | 0x00                     # 2X GRAPHIC ................
+0xCA6: | | 0x00                     # 2X GRAPHIC ................
+0xCA7: | | 0x00                     # 2X GRAPHIC ................
+0xCA8: | | 0x00                     # 2X GRAPHIC ................
+0xCA9: | | 0x00                     # 2X GRAPHIC ................
+0xCAA: | | 0x00                     # 2X GRAPHIC ................
+0xCAB: | | 0x00                     # 2X GRAPHIC ................
+0xCAC: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xCAD: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xCAE: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xCAF: |?| 0x2008                   # 2X GRAPHIC ....@@..........
+0xCB0: | | 0x08                     # 2X GRAPHIC ........@@......
+0xCB1: |?| 0x301A                   # 2X GRAPHIC ....@@@@........
+0xCB2: |?| 0x1A90                   # 2X GRAPHIC ......@@@@..@@..
+0xCB3: |?| 0x9010                   # 2X GRAPHIC @@....@@........
+0xCB4: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xCB5: |?| 0x1013                   # 2X GRAPHIC ......@@........
+0xCB6: |?| 0x13B8                   # 2X GRAPHIC ......@@....@@@@
+0xCB7: |?| 0xB830                   # 2X GRAPHIC @@..@@@@@@......
+0xCB8: |?| 0x3020                   # 2X GRAPHIC ....@@@@........
+0xCB9: |?| 0x2018                   # 2X GRAPHIC ....@@..........
+0xCBA: |?| 0x1860                   # 2X GRAPHIC ......@@@@......
+0xCBB: |?| 0x600F                   # 2X GRAPHIC ..@@@@..........
+0xCBC: |?| 0x0FC0                   # 2X GRAPHIC ........@@@@@@@@
+0xCBD: |?| 0xC004                   # 2X GRAPHIC @@@@............
+0xCBE: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xCBF: |?| 0x4004                   # 2X GRAPHIC ..@@............
+0xCC0: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xCC1: |?| 0x4004                   # 2X GRAPHIC ..@@............
+0xCC2: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xCC3: | | 0x00                     # 2X GRAPHIC ................
+0xCC4: | | 0x00                     # 2X GRAPHIC ................
+0xCC5: | | 0x00                     # 2X GRAPHIC ................
+0xCC6: |?| 0x7E7E                   # 2X GRAPHIC ..@@@@@@@@@@@@..
+0xCC7: |?| 0x7E7E                   # 2X GRAPHIC ..@@@@@@@@@@@@..
+0xCC8: |?| 0x7E81                   # 2X GRAPHIC ..@@@@@@@@@@@@..
+0xCC9: |?| 0x8110                   # 2X GRAPHIC @@............@@
+0xCCA: |?| 0x103C                   # 2X GRAPHIC ......@@........
+0xCCB: |?| 0x3C7E                   # 2X GRAPHIC ....@@@@@@@@....
+0xCCC: |?| 0x7E00                   # 2X GRAPHIC ..@@@@@@@@@@@@..
+0xCCD: | | 0x00                     # 2X GRAPHIC ................
+0xCCE: |?| 0x3828                   # 2X GRAPHIC ....@@@@@@......
+0xCCF: |?| 0x2838                   # 2X GRAPHIC ....@@..@@......
+0xCD0: |?| 0x3810                   # 2X GRAPHIC ....@@@@@@......
+0xCD1: |?| 0x1030                   # 2X GRAPHIC ......@@........
+0xCD2: |?| 0x3010                   # 2X GRAPHIC ....@@@@........
+0xCD3: |?| 0x1070                   # 2X GRAPHIC ......@@........
+0xCD4: |?| 0x705E                   # 2X GRAPHIC ..@@@@@@........
+0xCD5: |?| 0x5E62                   # 2X GRAPHIC ..@@..@@@@@@@@..
+0xCD6: |?| 0x62D6                   # 2X GRAPHIC ..@@@@......@@..
+0xCD7: |?| 0xD643                   # 2X GRAPHIC @@@@..@@..@@@@..
+0xCD8: |?| 0x437E                   # 2X GRAPHIC ..@@........@@@@
+0xCD9: |?| 0x7E24                   # 2X GRAPHIC ..@@@@@@@@@@@@..
+0xCDA: |?| 0x24EE                   # 2X GRAPHIC ....@@....@@....
+0xCDB: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xCDC: |?| 0xAE8A                   # 2X GRAPHIC @@..@@..@@@@@@..
+0xCDD: | | 0x8A                     # 2X GRAPHIC @@......@@..@@..
+0xCDE: | | 0xE8                     # 2X GRAPHIC @@@@@@..@@......
+0xCDF: |?| 0xAEAC                   # 2X GRAPHIC @@..@@..@@@@@@..
+0xCE0: |?| 0xACEA                   # 2X GRAPHIC @@..@@..@@@@....
+0xCE1: | | 0xEA                     # 2X GRAPHIC @@@@@@..@@..@@..
+0xCE2: |?| 0xAE00                   # 2X GRAPHIC @@..@@..@@@@@@..
+0xCE3: | | 0x00                     # 2X GRAPHIC ................
+0xCE4: | | 0x00                     # 2X GRAPHIC ................
+0xCE5: | | 0xEA                     # 2X GRAPHIC @@@@@@..@@..@@..
+0xCE6: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xCE7: |?| 0xAA8E                   # 2X GRAPHIC @@..@@..@@..@@..
+0xCE8: | | 0x8E                     # 2X GRAPHIC @@......@@@@@@..
+0xCE9: |?| 0xAACC                   # 2X GRAPHIC @@..@@..@@..@@..
+0xCEA: |?| 0xCCE4                   # 2X GRAPHIC @@@@....@@@@....
+0xCEB: | | 0xE4                     # 2X GRAPHIC @@@@@@....@@....
+0xCEC: | | 0xEA                     # 2X GRAPHIC @@@@@@..@@..@@..
+0xCED: | | 0x00                     # 2X GRAPHIC ................
+0xCEE: | | 0x00                     # 2X GRAPHIC ................
+0xCEF: | | 0x00                     # 2X GRAPHIC ................
+0xCF0: | | 0x00                     # 2X GRAPHIC ................
+0xCF1: | | 0x00                     # 2X GRAPHIC ................
+0xCF2: | | 0x00                     # 2X GRAPHIC ................
+0xCF3: | | 0x00                     # 2X GRAPHIC ................
+0xCF4: | | 0x00                     # 2X GRAPHIC ................
+0xCF5: | | 0x00                     # 2X GRAPHIC ................
+0xCF6: | | 0x00                     # 2X GRAPHIC ................
+0xCF7: | | 0x00                     # 2X GRAPHIC ................
+0xCF8: | | 0x00                     # 2X GRAPHIC ................
+0xCF9: | | 0x00                     # 2X GRAPHIC ................
+0xCFA: | | 0x00                     # 2X GRAPHIC ................
+0xCFB: | | 0x00                     # 2X GRAPHIC ................
+0xCFC: | | 0x00                     # 2X GRAPHIC ................
+0xCFD: | | 0x00                     # 2X GRAPHIC ................
+0xCFE: | | 0x00                     # 2X GRAPHIC ................
+0xCFF: | | 0x00                     # 2X GRAPHIC ................
+0xD00: | | 0x00                     # 2X GRAPHIC ................
+0xD01: | | 0x0F                     # 2X GRAPHIC ........@@@@@@@@
+0xD02: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xD03: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xD04: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xD05: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xD06: |?| 0x101F                   # 2X GRAPHIC ......@@........
+0xD07: |?| 0x1FF0                   # 2X GRAPHIC ......@@@@@@@@@@
+0xD08: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xD09: |?| 0x1110                   # 2X GRAPHIC ......@@......@@
+0xD0A: |?| 0x1011                   # 2X GRAPHIC ......@@........
+0xD0B: |?| 0x1110                   # 2X GRAPHIC ......@@......@@
+0xD0C: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xD0D: |?| 0x1010                   # 2X GRAPHIC ......@@........
+0xD0E: |?| 0x101F                   # 2X GRAPHIC ......@@........
+0xD0F: |?| 0x1FF0                   # 2X GRAPHIC ......@@@@@@@@@@
+0xD10: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xD11: | | 0x00                     # 2X GRAPHIC ................
+0xD12: | | 0x00                     # 2X GRAPHIC ................
+0xD13: | | 0x00                     # 2X GRAPHIC ................
+0xD14: | | 0x00                     # 2X GRAPHIC ................
+0xD15: | | 0x00                     # 2X GRAPHIC ................
+0xD16: | | 0x00                     # 2X GRAPHIC ................
+0xD17: | | 0x00                     # 2X GRAPHIC ................
+0xD18: | | 0x00                     # 2X GRAPHIC ................
+0xD19: | | 0x00                     # 2X GRAPHIC ................
+0xD1A: | | 0x00                     # 2X GRAPHIC ................
+0xD1B: | | 0x00                     # 2X GRAPHIC ................
+0xD1C: | | 0x00                     # 2X GRAPHIC ................
+0xD1D: | | 0x00                     # 2X GRAPHIC ................
+0xD1E: | | 0x00                     # 2X GRAPHIC ................
+0xD1F: | | 0x08                     # 2X GRAPHIC ........@@......
+0xD20: |?| 0x1004                   # 2X GRAPHIC ......@@........
+0xD21: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xD22: |?| 0x201E                   # 2X GRAPHIC ....@@..........
+0xD23: |?| 0x1E78                   # 2X GRAPHIC ......@@@@@@@@..
+0xD24: |?| 0x7813                   # 2X GRAPHIC ..@@@@@@@@......
+0xD25: |?| 0x13C8                   # 2X GRAPHIC ......@@....@@@@
+0xD26: |?| 0xC812                   # 2X GRAPHIC @@@@....@@......
+0xD27: |?| 0x1248                   # 2X GRAPHIC ......@@....@@..
+0xD28: |?| 0x481E                   # 2X GRAPHIC ..@@....@@......
+0xD29: |?| 0x1E78                   # 2X GRAPHIC ......@@@@@@@@..
+0xD2A: |?| 0x7807                   # 2X GRAPHIC ..@@@@@@@@......
+0xD2B: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xD2C: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xD2D: |?| 0x2AA8                   # 2X GRAPHIC ....@@..@@..@@..
+0xD2E: |?| 0xA81F                   # 2X GRAPHIC @@..@@..@@......
+0xD2F: |?| 0x1FF8                   # 2X GRAPHIC ......@@@@@@@@@@
+0xD30: |?| 0xF80A                   # 2X GRAPHIC @@@@@@@@@@......
+0xD31: | | 0x0A                     # 2X GRAPHIC ........@@..@@..
+0xD32: |?| 0xAC0F                   # 2X GRAPHIC @@..@@..@@@@....
+0xD33: | | 0x0F                     # 2X GRAPHIC ........@@@@@@@@
+0xD34: | | 0xFA                     # 2X GRAPHIC @@@@@@@@@@..@@..
+0xD35: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xD36: |?| 0x1004                   # 2X GRAPHIC ......@@........
+0xD37: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xD38: | | 0x00                     # 2X GRAPHIC ................
+0xD39: | | 0x00                     # 2X GRAPHIC ................
+0xD3A: | | 0x00                     # 2X GRAPHIC ................
+0xD3B: | | 0x00                     # 2X GRAPHIC ................
+0xD3C: | | 0x00                     # 2X GRAPHIC ................
+0xD3D: | | 0x00                     # 2X GRAPHIC ................
+0xD3E: | | 0x00                     # 2X GRAPHIC ................
+0xD3F: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xD40: | | 0x08                     # 2X GRAPHIC ........@@......
+0xD41: | | 0x02                     # 2X GRAPHIC ............@@..
+0xD42: |?| 0x100F                   # 2X GRAPHIC ......@@........
+0xD43: | | 0x0F                     # 2X GRAPHIC ........@@@@@@@@
+0xD44: |?| 0x3C09                   # 2X GRAPHIC ....@@@@@@@@....
+0xD45: | | 0x09                     # 2X GRAPHIC ........@@....@@
+0xD46: | | 0xE4                     # 2X GRAPHIC @@@@@@....@@....
+0xD47: | | 0x09                     # 2X GRAPHIC ........@@....@@
+0xD48: |?| 0x240F                   # 2X GRAPHIC ....@@....@@....
+0xD49: | | 0x0F                     # 2X GRAPHIC ........@@@@@@@@
+0xD4A: |?| 0x3C07                   # 2X GRAPHIC ....@@@@@@@@....
+0xD4B: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xD4C: |?| 0xF00A                   # 2X GRAPHIC @@@@@@@@........
+0xD4D: | | 0x0A                     # 2X GRAPHIC ........@@..@@..
+0xD4E: |?| 0xA82F                   # 2X GRAPHIC @@..@@..@@......
+0xD4F: |?| 0x2FFC                   # 2X GRAPHIC ....@@..@@@@@@@@
+0xD50: | | 0xFC                     # 2X GRAPHIC @@@@@@@@@@@@....
+0xD51: |?| 0x1AAA                   # 2X GRAPHIC ......@@@@..@@..
+0xD52: |?| 0xAA0F                   # 2X GRAPHIC @@..@@..@@..@@..
+0xD53: | | 0x0F                     # 2X GRAPHIC ........@@@@@@@@
+0xD54: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xD55: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xD56: |?| 0x1000                   # 2X GRAPHIC ......@@........
+0xD57: | | 0x00                     # 2X GRAPHIC ................
+0xD58: |?| 0x1000                   # 2X GRAPHIC ......@@........
+0xD59: | | 0x00                     # 2X GRAPHIC ................
+0xD5A: | | 0x00                     # 2X GRAPHIC ................
+0xD5B: | | 0xE8                     # 2X GRAPHIC @@@@@@..@@......
+0xD5C: | | 0x88                     # 2X GRAPHIC @@......@@......
+0xD5D: |?| 0xC888                   # 2X GRAPHIC @@@@....@@......
+0xD5E: |?| 0x888E                   # 2X GRAPHIC @@......@@......
+0xD5F: |?| 0x8EEE                   # 2X GRAPHIC @@......@@@@@@..
+0xD60: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xD61: |?| 0xAAAA                   # 2X GRAPHIC @@..@@..@@..@@..
+0xD62: |?| 0xAAAA                   # 2X GRAPHIC @@..@@..@@..@@..
+0xD63: |?| 0xAAEE                   # 2X GRAPHIC @@..@@..@@..@@..
+0xD64: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xD65: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xD66: |?| 0xA0E0                   # 2X GRAPHIC @@..@@..........
+0xD67: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xD68: |?| 0xC0A0                   # 2X GRAPHIC @@@@............
+0xD69: |?| 0xA0EE                   # 2X GRAPHIC @@..@@..........
+0xD6A: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xD6B: |?| 0xA8CC                   # 2X GRAPHIC @@..@@..@@......
+0xD6C: |?| 0xCCA8                   # 2X GRAPHIC @@@@....@@@@....
+0xD6D: |?| 0xA8AE                   # 2X GRAPHIC @@..@@..@@......
+0xD6E: |?| 0xAEEE                   # 2X GRAPHIC @@..@@..@@@@@@..
+0xD6F: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xD70: |?| 0x84E4                   # 2X GRAPHIC @@........@@....
+0xD71: | | 0xE4                     # 2X GRAPHIC @@@@@@....@@....
+0xD72: |?| 0x24E4                   # 2X GRAPHIC ....@@....@@....
+0xD73: | | 0xE4                     # 2X GRAPHIC @@@@@@....@@....
+0xD74: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xD75: |?| 0xAAEC                   # 2X GRAPHIC @@..@@..@@..@@..
+0xD76: | | 0xEC                     # 2X GRAPHIC @@@@@@..@@@@....
+0xD77: |?| 0xAAAA                   # 2X GRAPHIC @@..@@..@@..@@..
+0xD78: |?| 0xAAE0                   # 2X GRAPHIC @@..@@..@@..@@..
+0xD79: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xD7A: |?| 0x4040                   # 2X GRAPHIC ..@@............
+0xD7B: |?| 0x4040                   # 2X GRAPHIC ..@@............
+0xD7C: |?| 0x4040                   # 2X GRAPHIC ..@@............
+0xD7D: |?| 0x40EE                   # 2X GRAPHIC ..@@............
+0xD7E: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xD7F: | | 0x8A                     # 2X GRAPHIC @@......@@..@@..
+0xD80: | | 0x8A                     # 2X GRAPHIC @@......@@..@@..
+0xD81: |?| 0x8AEE                   # 2X GRAPHIC @@......@@..@@..
+0xD82: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xD83: | | 0x97                     # 2X GRAPHIC @@....@@..@@@@@@
+0xD84: |?| 0xD2F2                   # 2X GRAPHIC @@@@..@@....@@..
+0xD85: | | 0xF2                     # 2X GRAPHIC @@@@@@@@....@@..
+0xD86: |?| 0xB292                   # 2X GRAPHIC @@..@@@@....@@..
+0xD87: | | 0x92                     # 2X GRAPHIC @@....@@....@@..
+0xD88: |?| 0x525A                   # 2X GRAPHIC ..@@..@@....@@..
+0xD89: |?| 0x5A5E                   # 2X GRAPHIC ..@@..@@@@..@@..
+0xD8A: |?| 0x5E56                   # 2X GRAPHIC ..@@..@@@@@@@@..
+0xD8B: |?| 0x5652                   # 2X GRAPHIC ..@@..@@..@@@@..
+0xD8C: |?| 0x52AE                   # 2X GRAPHIC ..@@..@@....@@..
+0xD8D: |?| 0xAEA8                   # 2X GRAPHIC @@..@@..@@@@@@..
+0xD8E: |?| 0xA8AC                   # 2X GRAPHIC @@..@@..@@......
+0xD8F: |?| 0xACA8                   # 2X GRAPHIC @@..@@..@@@@....
+0xD90: |?| 0xA8EE                   # 2X GRAPHIC @@..@@..@@......
+0xD91: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xD92: |?| 0x60B0                   # 2X GRAPHIC ..@@@@..........
+0xD93: |?| 0xB0D0                   # 2X GRAPHIC @@..@@@@........
+0xD94: |?| 0xD060                   # 2X GRAPHIC @@@@..@@........
+0xD95: |?| 0x60FF                   # 2X GRAPHIC ..@@@@..........
+0xD96: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xD97: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xD98: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xD99: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xD9A: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xD9B: | | 0x00                     # 2X GRAPHIC ................
+0xD9C: | | 0x0C                     # 2X GRAPHIC ........@@@@....
+0xD9D: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xD9E: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xD9F: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDA0: | | 0x02                     # 2X GRAPHIC ............@@..
+0xDA1: | | 0x05                     # 2X GRAPHIC ..........@@..@@
+0xDA2: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDA3: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDA4: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDA5: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xDA6: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xDA7: | | 0x06                     # 2X GRAPHIC ..........@@@@..
+0xDA8: | | 0x00                     # 2X GRAPHIC ................
+0xDA9: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xDAA: | | 0x02                     # 2X GRAPHIC ............@@..
+0xDAB: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDAC: | | 0x01                     # 2X GRAPHIC ..............@@
+0xDAD: | | 0x00                     # 2X GRAPHIC ................
+0xDAE: |?| 0x2909                   # 2X GRAPHIC ....@@..@@....@@
+0xDAF: | | 0x09                     # 2X GRAPHIC ........@@....@@
+0xDB0: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDB1: | | 0x05                     # 2X GRAPHIC ..........@@..@@
+0xDB2: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xDB3: |?| 0x00FF                   # 2X GRAPHIC ................
+0xDB4: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDB5: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDB6: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xDB7: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDB8: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xDB9: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xDBA: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDBB: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDBC: |?| 0xFF07                   # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDBD: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xDBE: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xDBF: | | 0x00                     # 2X GRAPHIC ................
+0xDC0: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xDC1: | | 0x0A                     # 2X GRAPHIC ........@@..@@..
+0xDC2: | | 0x06                     # 2X GRAPHIC ..........@@@@..
+0xDC3: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDC4: | | 0x00                     # 2X GRAPHIC ................
+0xDC5: | | 0x02                     # 2X GRAPHIC ............@@..
+0xDC6: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDC7: | | 0x0B                     # 2X GRAPHIC ........@@..@@@@
+0xDC8: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDC9: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDCA: | | 0x02                     # 2X GRAPHIC ............@@..
+0xDCB: | | 0x06                     # 2X GRAPHIC ..........@@@@..
+0xDCC: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xDCD: | | 0x0C                     # 2X GRAPHIC ........@@@@....
+0xDCE: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDCF: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDD0: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xDD1: | | 0x01                     # 2X GRAPHIC ..............@@
+0xDD2: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xDD3: | | 0x0E                     # 2X GRAPHIC ........@@@@@@..
+0xDD4: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDD5: | | 0x0B                     # 2X GRAPHIC ........@@..@@@@
+0xDD6: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xDD7: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDD8: | | 0x08                     # 2X GRAPHIC ........@@......
+0xDD9: |?| 0xFF0A                   # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDDA: | | 0x0A                     # 2X GRAPHIC ........@@..@@..
+0xDDB: | | 0x0C                     # 2X GRAPHIC ........@@@@....
+0xDDC: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xDDD: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDDE: | | 0x09                     # 2X GRAPHIC ........@@....@@
+0xDDF: | | 0x01                     # 2X GRAPHIC ..............@@
+0xDE0: | | 0x0B                     # 2X GRAPHIC ........@@..@@@@
+0xDE1: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDE2: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xDE3: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDE4: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDE5: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDE6: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDE7: | | 0x0E                     # 2X GRAPHIC ........@@@@@@..
+0xDE8: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xDE9: |?| 0xFF0A                   # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDEA: | | 0x0A                     # 2X GRAPHIC ........@@..@@..
+0xDEB: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDEC: | | 0x0D                     # 2X GRAPHIC ........@@@@..@@
+0xDED: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDEE: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xDEF: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDF0: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDF1: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDF2: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDF3: |?| 0x1005                   # 2X GRAPHIC ......@@........
+0xDF4: | | 0x05                     # 2X GRAPHIC ..........@@..@@
+0xDF5: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDF6: |?| 0x2813                   # 2X GRAPHIC ....@@..@@......
+0xDF7: |?| 0x130F                   # 2X GRAPHIC ......@@....@@@@
+0xDF8: | | 0x0F                     # 2X GRAPHIC ........@@@@@@@@
+0xDF9: |?| 0x1103                   # 2X GRAPHIC ......@@......@@
+0xDFA: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xDFB: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDFC: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xDFD: |?| 0x1410                   # 2X GRAPHIC ......@@..@@....
+0xDFE: |?| 0x10FF                   # 2X GRAPHIC ......@@........
+0xDFF: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE00: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xE01: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE02: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE03: |?| 0x16FF                   # 2X GRAPHIC ......@@..@@@@..
+0xE04: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE05: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE06: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xE07: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE08: |?| 0x10FF                   # 2X GRAPHIC ......@@........
+0xE09: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE0A: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE0B: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE0C: | | 0x01                     # 2X GRAPHIC ..............@@
+0xE0D: | | 0x06                     # 2X GRAPHIC ..........@@@@..
+0xE0E: |?| 0x11FF                   # 2X GRAPHIC ......@@......@@
+0xE0F: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE10: |?| 0xFF15                   # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE11: |?| 0x1500                   # 2X GRAPHIC ......@@..@@..@@
+0xE12: |?| 0x00FF                   # 2X GRAPHIC ................
+0xE13: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE14: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE15: |?| 0x1914                   # 2X GRAPHIC ......@@@@....@@
+0xE16: |?| 0x14FF                   # 2X GRAPHIC ......@@..@@....
+0xE17: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE18: | | 0x02                     # 2X GRAPHIC ............@@..
+0xE19: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE1A: |?| 0x12FF                   # 2X GRAPHIC ......@@....@@..
+0xE1B: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE1C: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE1D: |?| 0x1704                   # 2X GRAPHIC ......@@..@@@@@@
+0xE1E: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xE1F: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE20: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE21: |?| 0x1A16                   # 2X GRAPHIC ......@@@@..@@..
+0xE22: |?| 0x1618                   # 2X GRAPHIC ......@@..@@@@..
+0xE23: |?| 0x1803                   # 2X GRAPHIC ......@@@@......
+0xE24: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xE25: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE26: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE27: |?| 0x1B17                   # 2X GRAPHIC ......@@@@..@@@@
+0xE28: |?| 0x1719                   # 2X GRAPHIC ......@@..@@@@@@
+0xE29: |?| 0x1902                   # 2X GRAPHIC ......@@@@....@@
+0xE2A: | | 0x02                     # 2X GRAPHIC ............@@..
+0xE2B: |?| 0xFF15                   # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE2C: |?| 0x151C                   # 2X GRAPHIC ......@@..@@..@@
+0xE2D: |?| 0x1C18                   # 2X GRAPHIC ......@@@@@@....
+0xE2E: |?| 0x18FF                   # 2X GRAPHIC ......@@@@......
+0xE2F: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE30: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xE31: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xE32: |?| 0x171D                   # 2X GRAPHIC ......@@..@@@@@@
+0xE33: |?| 0x1DFF                   # 2X GRAPHIC ......@@@@@@..@@
+0xE34: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE35: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE36: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xE37: |?| 0xFF18                   # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE38: |?| 0x18FF                   # 2X GRAPHIC ......@@@@......
+0xE39: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE3A: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE3B: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE3C: | | 0x05                     # 2X GRAPHIC ..........@@..@@
+0xE3D: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE3E: |?| 0x19FF                   # 2X GRAPHIC ......@@@@....@@
+0xE3F: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE40: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE41: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE42: | | 0x02                     # 2X GRAPHIC ............@@..
+0xE43: | | 0x05                     # 2X GRAPHIC ..........@@..@@
+0xE44: |?| 0x1AFF                   # 2X GRAPHIC ......@@@@..@@..
+0xE45: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE46: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE47: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE48: | | 0x00                     # 2X GRAPHIC ................
+0xE49: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xE4A: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE4B: |?| 0x20FF                   # 2X GRAPHIC ....@@..........
+0xE4C: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE4D: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE4E: |?| 0x00FF                   # 2X GRAPHIC ................
+0xE4F: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE50: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE51: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE52: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE53: |?| 0x2004                   # 2X GRAPHIC ....@@..........
+0xE54: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xE55: | | 0x06                     # 2X GRAPHIC ..........@@@@..
+0xE56: |?| 0x1E22                   # 2X GRAPHIC ......@@@@@@@@..
+0xE57: |?| 0x221F                   # 2X GRAPHIC ....@@......@@..
+0xE58: |?| 0x1F21                   # 2X GRAPHIC ......@@@@@@@@@@
+0xE59: |?| 0x2103                   # 2X GRAPHIC ....@@........@@
+0xE5A: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xE5B: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE5C: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE5D: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE5E: |?| 0x20FF                   # 2X GRAPHIC ....@@..........
+0xE5F: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE60: | | 0x02                     # 2X GRAPHIC ............@@..
+0xE61: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE62: |?| 0x2023                   # 2X GRAPHIC ....@@..........
+0xE63: |?| 0x23FF                   # 2X GRAPHIC ....@@......@@@@
+0xE64: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE65: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE66: | | 0x02                     # 2X GRAPHIC ............@@..
+0xE67: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE68: |?| 0x2225                   # 2X GRAPHIC ....@@......@@..
+0xE69: |?| 0x25FF                   # 2X GRAPHIC ....@@....@@..@@
+0xE6A: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE6B: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE6C: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xE6D: | | 0x02                     # 2X GRAPHIC ............@@..
+0xE6E: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE6F: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE70: |?| 0x2725                   # 2X GRAPHIC ....@@....@@@@@@
+0xE71: |?| 0x2500                   # 2X GRAPHIC ....@@....@@..@@
+0xE72: |?| 0x00FF                   # 2X GRAPHIC ................
+0xE73: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE74: |?| 0x23FF                   # 2X GRAPHIC ....@@......@@@@
+0xE75: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE76: |?| 0x2426                   # 2X GRAPHIC ....@@....@@....
+0xE77: |?| 0x2603                   # 2X GRAPHIC ....@@....@@@@..
+0xE78: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xE79: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE7A: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE7B: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE7C: |?| 0x25FF                   # 2X GRAPHIC ....@@....@@..@@
+0xE7D: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE7E: | | 0x05                     # 2X GRAPHIC ..........@@..@@
+0xE7F: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE80: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE81: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE82: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE83: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE84: | | 0x00                     # 2X GRAPHIC ................
+0xE85: | | 0x08                     # 2X GRAPHIC ........@@......
+0xE86: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE87: |?| 0x10FF                   # 2X GRAPHIC ......@@........
+0xE88: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE89: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE8A: | | 0x02                     # 2X GRAPHIC ............@@..
+0xE8B: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE8C: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE8D: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xE8E: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE8F: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE90: | | 0x04                     # 2X GRAPHIC ..........@@....
+0xE91: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE92: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE93: |?| 0xFF55                   # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xE94: |?| 0x55AA                   # 2X GRAPHIC ..@@..@@..@@..@@
+0xE95: |?| 0xAA00                   # 2X GRAPHIC @@..@@..@@..@@..
+0xE96: |X| 0x00FF high              # switch to hi-res display mode
+0xE98: |X| 0x6013 ld   v0 19        # v0 = 19
+0xE9A: |X| 0x6114 ld   v1 20        # v1 = 20
+0xE9C: |X| 0x81A4 add  v1 va        # v1 += va
+0xE9E: |X| 0xAF00 ld   i 0xF00      # index = 0xF00
+0xEA0: |X| 0xF21E add  i 2          # index += 2 (0x002)
+0xEA2: |X| 0xD015 drw  v0 v1 5      # draw 8x5 sprite at pos (v0, v1)
+0xEA4: |X| 0x7008 add  v0 8         # v0 += 8
+0xEA6: |X| 0x7205 add  v2 5         # v2 += 5
+0xEA8: |X| 0x322D se   v2 45        # skip next if v2 == 45
+0xEAA: |X| 0x1EB0 jp   0xEB0
+0xEAC: |X| 0x70E1 add  v0 225       # v0 += 225
+0xEAE: |X| 0x7115 add  v1 21        # v1 += 21
+0xEB0: |X| 0x6F50 ld   vf 80        # vf = 80
+0xEB2: |X| 0x8F27 subn vf v2        # vf = v2 - vf
+0xEB4: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0xEB6: |X| 0x1E9E jp   0xE9E
+0xEB8: |X| 0x709C add  v0 156       # v0 += 156
+0xEBA: |X| 0x71F2 add  v1 242       # v1 += 242
+0xEBC: |X| 0x6200 ld   v2 0         # v2 = 0
+0xEBE: |X| 0xAF50 ld   i 0xF50      # index = 0xF50
+0xEC0: |X| 0xF21E add  i 2          # index += 2 (0x002)
+0xEC2: |X| 0xD01C drw  v0 v1 12     # draw 8x12 sprite at pos (v0, v1)
+0xEC4: |X| 0x7008 add  v0 8         # v0 += 8
+0xEC6: |X| 0x720C add  v2 12        # v2 += 12
+0xEC8: |X| 0x6F90 ld   vf 144       # vf = 144
+0xECA: |X| 0x8F27 subn vf v2        # vf = v2 - vf
+0xECC: |X| 0x4F00 sne  vf 0         # skip next if vf != 0
+0xECE: |X| 0x1EBE jp   0xEBE
+0xED0: |X| 0x6100 ld   v1 0         # v1 = 0
+0xED2: |X| 0xA0E9 ld   i 0x0E9      # index = 0x0E9
+0xED4: |X| 0x7003 add  v0 3         # v0 += 3
+0xED6: |X| 0xC107 rnd  v1 7         # v1 = rand in range [0, 7]
+0xED8: |X| 0xD019 drw  v0 v1 9      # draw 8x9 sprite at pos (v0, v1)
+0xEDA: |X| 0x7134 add  v1 52        # v1 += 52
+0xEDC: |X| 0xD019 drw  v0 v1 9      # draw 8x9 sprite at pos (v0, v1)
+0xEDE: |X| 0x6F0E ld   vf 14        # vf = 14
+0xEE0: |X| 0xEFA1 sknp vf           # skip next if vf key is up
+0xEE2: |X| 0x00EE ret
+0xEE4: |X| 0x6F05 ld   vf 5         # vf = 5
+0xEE6: |X| 0xEFA1 sknp vf           # skip next if vf key is up
+0xEE8: |X| 0x00EE ret
+0xEEA: |X| 0x6F08 ld   vf 8         # vf = 8
+0xEEC: |X| 0xEFA1 sknp vf           # skip next if vf key is up
+0xEEE: |X| 0x00EE ret
+0xEF0: |X| 0x6F07 ld   vf 7         # vf = 7
+0xEF2: |X| 0xEFA1 sknp vf           # skip next if vf key is up
+0xEF4: |X| 0x00EE ret
+0xEF6: |X| 0x6F07 ld   vf 7         # vf = 7
+0xEF8: |X| 0xEFA1 sknp vf           # skip next if vf key is up
+0xEFA: |X| 0x00EE ret
+0xEFC: |X| 0x1ED4 jp   0xED4
+0xEFE: |?| 0x00EE                   # 2X GRAPHIC ................
+0xEFF: | | 0xEE                     # 2X GRAPHIC @@@@@@..@@@@@@..
+0xF00: |?| 0xFB33                   # 2X GRAPHIC @@@@@@@@@@..@@@@
+0xF01: |?| 0x3333                   # 2X GRAPHIC ....@@@@....@@@@
+0xF02: |?| 0x3333                   # 2X GRAPHIC ....@@@@....@@@@
+0xF03: |?| 0x3333                   # 2X GRAPHIC ....@@@@....@@@@
+0xF04: |?| 0x3367                   # 2X GRAPHIC ....@@@@....@@@@
+0xF05: |?| 0x676C                   # 2X GRAPHIC ..@@@@....@@@@@@
+0xF06: |?| 0x6CEF                   # 2X GRAPHIC ..@@@@..@@@@....
+0xF07: | | 0xEF                     # 2X GRAPHIC @@@@@@..@@@@@@@@
+0xF08: |?| 0x6C67                   # 2X GRAPHIC ..@@@@..@@@@....
+0xF09: |?| 0x6787                   # 2X GRAPHIC ..@@@@....@@@@@@
+0xF0A: |?| 0x8706                   # 2X GRAPHIC @@........@@@@@@
+0xF0B: | | 0x06                     # 2X GRAPHIC ..........@@@@..
+0xF0C: |?| 0x8706                   # 2X GRAPHIC @@........@@@@@@
+0xF0D: | | 0x06                     # 2X GRAPHIC ..........@@@@..
+0xF0E: | | 0x87                     # 2X GRAPHIC @@........@@@@@@
+0xF0F: | | 0x9B                     # 2X GRAPHIC @@....@@@@..@@@@
+0xF10: |?| 0x5B9B                   # 2X GRAPHIC ..@@..@@@@..@@@@
+0xF11: | | 0x9B                     # 2X GRAPHIC @@....@@@@..@@@@
+0xF12: |?| 0x5B9B                   # 2X GRAPHIC ..@@..@@@@..@@@@
+0xF13: | | 0x9B                     # 2X GRAPHIC @@....@@@@..@@@@
+0xF14: |?| 0xCF6D                   # 2X GRAPHIC @@@@....@@@@@@@@
+0xF15: |?| 0x6D6D                   # 2X GRAPHIC ..@@@@..@@@@..@@
+0xF16: |?| 0x6D6D                   # 2X GRAPHIC ..@@@@..@@@@..@@
+0xF17: |?| 0x6D6F                   # 2X GRAPHIC ..@@@@..@@@@..@@
+0xF18: |?| 0x6F37                   # 2X GRAPHIC ..@@@@..@@@@@@@@
+0xF19: |?| 0x37B6                   # 2X GRAPHIC ....@@@@..@@@@@@
+0xF1A: |?| 0xB6B6                   # 2X GRAPHIC @@..@@@@..@@@@..
+0xF1B: |?| 0xB6B6                   # 2X GRAPHIC @@..@@@@..@@@@..
+0xF1C: |?| 0xB636                   # 2X GRAPHIC @@..@@@@..@@@@..
+0xF1D: |?| 0x368F                   # 2X GRAPHIC ....@@@@..@@@@..
+0xF1E: | | 0x8F                     # 2X GRAPHIC @@......@@@@@@@@
+0xF1F: |?| 0xD8DB                   # 2X GRAPHIC @@@@..@@@@......
+0xF20: |?| 0xDBDB                   # 2X GRAPHIC @@@@..@@@@..@@@@
+0xF21: |?| 0xDBCF                   # 2X GRAPHIC @@@@..@@@@..@@@@
+0xF22: |?| 0xCF07                   # 2X GRAPHIC @@@@....@@@@@@@@
+0xF23: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xF24: | | 0x0D                     # 2X GRAPHIC ........@@@@..@@
+0xF25: | | 0x0D                     # 2X GRAPHIC ........@@@@..@@
+0xF26: | | 0x0D                     # 2X GRAPHIC ........@@@@..@@
+0xF27: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xF28: |?| 0x1EB0                   # 2X GRAPHIC ......@@@@@@@@..
+0xF29: |?| 0xB0B8                   # 2X GRAPHIC @@..@@@@........
+0xF2A: |?| 0xB8B0                   # 2X GRAPHIC @@..@@@@@@......
+0xF2B: |?| 0xB030                   # 2X GRAPHIC @@..@@@@........
+0xF2C: |?| 0x3071                   # 2X GRAPHIC ....@@@@........
+0xF2D: |?| 0x71DB                   # 2X GRAPHIC ..@@@@@@......@@
+0xF2E: |?| 0xDBDB                   # 2X GRAPHIC @@@@..@@@@..@@@@
+0xF2F: |?| 0xDBDB                   # 2X GRAPHIC @@@@..@@@@..@@@@
+0xF30: |?| 0xDB71                   # 2X GRAPHIC @@@@..@@@@..@@@@
+0xF31: |?| 0x71EF                   # 2X GRAPHIC ..@@@@@@......@@
+0xF32: | | 0xEF                     # 2X GRAPHIC @@@@@@..@@@@@@@@
+0xF33: | | 0x02                     # 2X GRAPHIC ............@@..
+0xF34: | | 0x02                     # 2X GRAPHIC ............@@..
+0xF35: | | 0x02                     # 2X GRAPHIC ............@@..
+0xF36: | | 0xE2                     # 2X GRAPHIC @@@@@@......@@..
+0xF37: | | 0x9C                     # 2X GRAPHIC @@....@@@@@@....
+0xF38: |?| 0x3636                   # 2X GRAPHIC ....@@@@..@@@@..
+0xF39: |?| 0x3636                   # 2X GRAPHIC ....@@@@..@@@@..
+0xF3A: |?| 0x361C                   # 2X GRAPHIC ....@@@@..@@@@..
+0xF3B: |?| 0x1CF1                   # 2X GRAPHIC ......@@@@@@....
+0xF3C: | | 0xF1                     # 2X GRAPHIC @@@@@@@@......@@
+0xF3D: |?| 0xDBF3                   # 2X GRAPHIC @@@@..@@@@..@@@@
+0xF3E: | | 0xF3                     # 2X GRAPHIC @@@@@@@@....@@@@
+0xF3F: |?| 0xDBF1                   # 2X GRAPHIC @@@@..@@@@..@@@@
+0xF40: | | 0xF1                     # 2X GRAPHIC @@@@@@@@......@@
+0xF41: | | 0xEF                     # 2X GRAPHIC @@@@@@..@@@@@@@@
+0xF42: |?| 0x0DCF                   # 2X GRAPHIC ........@@@@..@@
+0xF43: |?| 0xCF0D                   # 2X GRAPHIC @@@@....@@@@@@@@
+0xF44: | | 0x0D                     # 2X GRAPHIC ........@@@@..@@
+0xF45: | | 0xED                     # 2X GRAPHIC @@@@@@..@@@@..@@
+0xF46: |?| 0x3E88                   # 2X GRAPHIC ....@@@@@@@@@@..
+0xF47: | | 0x88                     # 2X GRAPHIC @@......@@......
+0xF48: | | 0x08                     # 2X GRAPHIC ........@@......
+0xF49: | | 0x88                     # 2X GRAPHIC @@......@@......
+0xF4A: | | 0x88                     # 2X GRAPHIC @@......@@......
+0xF4B: |?| 0xD8D8                   # 2X GRAPHIC @@@@..@@@@......
+0xF4C: |?| 0xD8F8                   # 2X GRAPHIC @@@@..@@@@......
+0xF4D: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xF4E: |?| 0xD8D8                   # 2X GRAPHIC @@@@..@@@@......
+0xF4F: |?| 0xD80F                   # 2X GRAPHIC @@@@..@@@@......
+0xF50: | | 0x0F                     # 2X GRAPHIC ........@@@@@@@@
+0xF51: |?| 0x1F3E                   # 2X GRAPHIC ......@@@@@@@@@@
+0xF52: |?| 0x3E3C                   # 2X GRAPHIC ....@@@@@@@@@@..
+0xF53: |?| 0x3C3C                   # 2X GRAPHIC ....@@@@@@@@....
+0xF54: |?| 0x3C7C                   # 2X GRAPHIC ....@@@@@@@@....
+0xF55: |?| 0x7C7C                   # 2X GRAPHIC ..@@@@@@@@@@....
+0xF56: |?| 0x7C7C                   # 2X GRAPHIC ..@@@@@@@@@@....
+0xF57: |?| 0x7C78                   # 2X GRAPHIC ..@@@@@@@@@@....
+0xF58: |?| 0x78F8                   # 2X GRAPHIC ..@@@@@@@@......
+0xF59: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xF5A: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xF5B: |?| 0x7FFC                   # 2X GRAPHIC ..@@@@@@@@@@@@@@
+0xF5C: | | 0xFC                     # 2X GRAPHIC @@@@@@@@@@@@....
+0xF5D: | | 0xFC                     # 2X GRAPHIC @@@@@@@@@@@@....
+0xF5E: | | 0x00                     # 2X GRAPHIC ................
+0xF5F: | | 0x00                     # 2X GRAPHIC ................
+0xF60: | | 0x00                     # 2X GRAPHIC ................
+0xF61: | | 0x00                     # 2X GRAPHIC ................
+0xF62: | | 0x00                     # 2X GRAPHIC ................
+0xF63: | | 0x00                     # 2X GRAPHIC ................
+0xF64: | | 0x01                     # 2X GRAPHIC ..............@@
+0xF65: | | 0x01                     # 2X GRAPHIC ..............@@
+0xF66: | | 0xF9                     # 2X GRAPHIC @@@@@@@@@@....@@
+0xF67: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xF68: |?| 0x3F7F                   # 2X GRAPHIC ....@@@@@@@@@@@@
+0xF69: |?| 0x7F78                   # 2X GRAPHIC ..@@@@@@@@@@@@@@
+0xF6A: |?| 0x7878                   # 2X GRAPHIC ..@@@@@@@@......
+0xF6B: |?| 0x78F8                   # 2X GRAPHIC ..@@@@@@@@......
+0xF6C: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xF6D: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xF6E: | | 0xF1                     # 2X GRAPHIC @@@@@@@@......@@
+0xF6F: | | 0xF1                     # 2X GRAPHIC @@@@@@@@......@@
+0xF70: | | 0xF1                     # 2X GRAPHIC @@@@@@@@......@@
+0xF71: | | 0xF1                     # 2X GRAPHIC @@@@@@@@......@@
+0xF72: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xF73: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xF74: | | 0xE0                     # 2X GRAPHIC @@@@@@..........
+0xF75: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xF76: | | 0xF1                     # 2X GRAPHIC @@@@@@@@......@@
+0xF77: | | 0xF1                     # 2X GRAPHIC @@@@@@@@......@@
+0xF78: | | 0xF1                     # 2X GRAPHIC @@@@@@@@......@@
+0xF79: | | 0xF1                     # 2X GRAPHIC @@@@@@@@......@@
+0xF7A: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xF7B: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xF7C: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xF7D: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xF7E: | | 0xE1                     # 2X GRAPHIC @@@@@@........@@
+0xF7F: |?| 0xC17F                   # 2X GRAPHIC @@@@..........@@
+0xF80: |?| 0x7FFF                   # 2X GRAPHIC ..@@@@@@@@@@@@@@
+0xF81: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xF82: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xF83: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xF84: | | 0xF0                     # 2X GRAPHIC @@@@@@@@........
+0xF85: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xF86: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xF87: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xF88: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xF89: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xF8A: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xF8B: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xF8C: | | 0xE3                     # 2X GRAPHIC @@@@@@......@@@@
+0xF8D: | | 0xE3                     # 2X GRAPHIC @@@@@@......@@@@
+0xF8E: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xF8F: | | 0x03                     # 2X GRAPHIC ............@@@@
+0xF90: |?| 0x03C3                   # 2X GRAPHIC ............@@@@
+0xF91: |?| 0xC3E3                   # 2X GRAPHIC @@@@........@@@@
+0xF92: | | 0xE3                     # 2X GRAPHIC @@@@@@......@@@@
+0xF93: | | 0xE3                     # 2X GRAPHIC @@@@@@......@@@@
+0xF94: | | 0xE3                     # 2X GRAPHIC @@@@@@......@@@@
+0xF95: | | 0xE3                     # 2X GRAPHIC @@@@@@......@@@@
+0xF96: |?| 0xC383                   # 2X GRAPHIC @@@@........@@@@
+0xF97: | | 0x83                     # 2X GRAPHIC @@..........@@@@
+0xF98: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xF99: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xF9A: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xF9B: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xF9C: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xF9D: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xF9E: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xF9F: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xFA0: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xFA1: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xFA2: |?| 0xC7C3                   # 2X GRAPHIC @@@@......@@@@@@
+0xFA3: |?| 0xC3FE                   # 2X GRAPHIC @@@@........@@@@
+0xFA4: | | 0xFE                     # 2X GRAPHIC @@@@@@@@@@@@@@..
+0xFA5: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xFA6: |?| 0xCFCF                   # 2X GRAPHIC @@@@....@@@@@@@@
+0xFA7: |?| 0xCFCF                   # 2X GRAPHIC @@@@....@@@@@@@@
+0xFA8: |?| 0xCFCF                   # 2X GRAPHIC @@@@....@@@@@@@@
+0xFA9: |?| 0xCFCF                   # 2X GRAPHIC @@@@....@@@@@@@@
+0xFAA: |?| 0xCFCF                   # 2X GRAPHIC @@@@....@@@@@@@@
+0xFAB: |?| 0xCFC7                   # 2X GRAPHIC @@@@....@@@@@@@@
+0xFAC: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xFAD: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xFAE: |?| 0xC7C7                   # 2X GRAPHIC @@@@......@@@@@@
+0xFAF: |?| 0xC70F                   # 2X GRAPHIC @@@@......@@@@@@
+0xFB0: | | 0x0F                     # 2X GRAPHIC ........@@@@@@@@
+0xFB1: |?| 0x1F9F                   # 2X GRAPHIC ......@@@@@@@@@@
+0xFB2: | | 0x9F                     # 2X GRAPHIC @@....@@@@@@@@@@
+0xFB3: | | 0x9F                     # 2X GRAPHIC @@....@@@@@@@@@@
+0xFB4: | | 0x9F                     # 2X GRAPHIC @@....@@@@@@@@@@
+0xFB5: | | 0x9F                     # 2X GRAPHIC @@....@@@@@@@@@@
+0xFB6: | | 0x9F                     # 2X GRAPHIC @@....@@@@@@@@@@
+0xFB7: | | 0x8F                     # 2X GRAPHIC @@......@@@@@@@@
+0xFB8: | | 0x8F                     # 2X GRAPHIC @@......@@@@@@@@
+0xFB9: | | 0x8F                     # 2X GRAPHIC @@......@@@@@@@@
+0xFBA: |?| 0x8F87                   # 2X GRAPHIC @@......@@@@@@@@
+0xFBB: | | 0x87                     # 2X GRAPHIC @@........@@@@@@
+0xFBC: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xFBD: | | 0xFC                     # 2X GRAPHIC @@@@@@@@@@@@....
+0xFBE: |?| 0x3E3E                   # 2X GRAPHIC ....@@@@@@@@@@..
+0xFBF: |?| 0x3EFE                   # 2X GRAPHIC ....@@@@@@@@@@..
+0xFC0: | | 0xFE                     # 2X GRAPHIC @@@@@@@@@@@@@@..
+0xFC1: | | 0xFE                     # 2X GRAPHIC @@@@@@@@@@@@@@..
+0xFC2: |?| 0xBF1F                   # 2X GRAPHIC @@..@@@@@@@@@@@@
+0xFC3: |?| 0x1F9F                   # 2X GRAPHIC ......@@@@@@@@@@
+0xFC4: | | 0x9F                     # 2X GRAPHIC @@....@@@@@@@@@@
+0xFC5: | | 0x8F                     # 2X GRAPHIC @@......@@@@@@@@
+0xFC6: | | 0x8F                     # 2X GRAPHIC @@......@@@@@@@@
+0xFC7: | | 0x8F                     # 2X GRAPHIC @@......@@@@@@@@
+0xFC8: |?| 0x3F7F                   # 2X GRAPHIC ....@@@@@@@@@@@@
+0xFC9: |?| 0x7F7C                   # 2X GRAPHIC ..@@@@@@@@@@@@@@
+0xFCA: |?| 0x7C7C                   # 2X GRAPHIC ..@@@@@@@@@@....
+0xFCB: |?| 0x7C3C                   # 2X GRAPHIC ..@@@@@@@@@@....
+0xFCC: |?| 0x3C3E                   # 2X GRAPHIC ....@@@@@@@@....
+0xFCD: |?| 0x3E3E                   # 2X GRAPHIC ....@@@@@@@@@@..
+0xFCE: |?| 0x3E3E                   # 2X GRAPHIC ....@@@@@@@@@@..
+0xFCF: |?| 0x3E1F                   # 2X GRAPHIC ....@@@@@@@@@@..
+0xFD0: |?| 0x1F1F                   # 2X GRAPHIC ......@@@@@@@@@@
+0xFD1: |?| 0x1F0F                   # 2X GRAPHIC ......@@@@@@@@@@
+0xFD2: | | 0x0F                     # 2X GRAPHIC ........@@@@@@@@
+0xFD3: | | 0x07                     # 2X GRAPHIC ..........@@@@@@
+0xFD4: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xFD5: | | 0xF8                     # 2X GRAPHIC @@@@@@@@@@......
+0xFD6: | | 0x00                     # 2X GRAPHIC ................
+0xFD7: | | 0x00                     # 2X GRAPHIC ................
+0xFD8: | | 0x00                     # 2X GRAPHIC ................
+0xFD9: | | 0x00                     # 2X GRAPHIC ................
+0xFDA: | | 0x00                     # 2X GRAPHIC ................
+0xFDB: | | 0x00                     # 2X GRAPHIC ................
+0xFDC: | | 0x00                     # 2X GRAPHIC ................
+0xFDD: |?| 0x00FF                   # 2X GRAPHIC ................
+0xFDE: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@
+0xFDF: | | 0xFF                     # 2X GRAPHIC @@@@@@@@@@@@@@@@

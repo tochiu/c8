@@ -1,8 +1,10 @@
-use crate::config::DEFAULT_INSTRUCTION_FREQUENCY;
+use crate::run::rom::RomKind;
 
-use clap::{Parser, Subcommand};
-use log::LevelFilter;
+use clap::{Parser, Subcommand, ValueEnum};
+use log::{Level, LevelFilter};
 use std::path::PathBuf;
+
+const DEFAULT_INSTRUCTION_FREQUENCY: u16 = 2000;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -13,9 +15,23 @@ pub struct Cli {
     pub command: CliCommand,
 }
 
-#[derive(clap::ValueEnum, Clone, Copy)]
-pub enum LogLevel {
-    Off,
+#[derive(ValueEnum, Clone, Copy)]
+pub enum KindOption {
+    CHIP8,
+    SCHIP,
+}
+
+impl KindOption {
+    pub fn to_kind(self) -> RomKind {
+        match self {
+            KindOption::CHIP8 => RomKind::CHIP8,
+            KindOption::SCHIP => RomKind::SCHIP,
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Copy)]
+pub enum LogLevelOption {
     Trace,
     Debug,
     Info,
@@ -23,15 +39,24 @@ pub enum LogLevel {
     Error,
 }
 
-impl LogLevel {
+impl LogLevelOption {
+    pub fn to_level(self) -> Level {
+        match self {
+            LogLevelOption::Trace => Level::Trace,
+            LogLevelOption::Debug => Level::Debug,
+            LogLevelOption::Info => Level::Info,
+            LogLevelOption::Warn => Level::Warn,
+            LogLevelOption::Error => Level::Error,
+        }
+    }
+
     pub fn to_level_filter(self) -> LevelFilter {
         match self {
-            LogLevel::Trace => LevelFilter::Trace,
-            LogLevel::Debug => LevelFilter::Debug,
-            LogLevel::Info => LevelFilter::Info,
-            LogLevel::Warn => LevelFilter::Warn,
-            LogLevel::Error => LevelFilter::Error,
-            LogLevel::Off => LevelFilter::Off,
+            LogLevelOption::Trace => LevelFilter::Trace,
+            LogLevelOption::Debug => LevelFilter::Debug,
+            LogLevelOption::Info => LevelFilter::Info,
+            LogLevelOption::Warn => LevelFilter::Warn,
+            LogLevelOption::Error => LevelFilter::Error,
         }
     }
 }
@@ -45,8 +70,12 @@ pub enum CliCommand {
         path: PathBuf,
 
         /// Enable logging
-        #[arg(short, long, value_enum, value_name = "LEVEL", default_value_t=LogLevel::Off)]
-        log: LogLevel,
+        #[arg(short, long, value_enum, value_name = "LEVEL")]
+        log: Option<LogLevelOption>,
+
+        /// Sets the ROM kind
+        #[arg(long, value_enum, default_value_t = KindOption::CHIP8)]
+        kind: KindOption,
     },
 
     /// C8 DASM: Disassembles a CHIP-8 ROM
@@ -56,8 +85,12 @@ pub enum CliCommand {
         path: PathBuf,
 
         /// Enable logging
-        #[arg(short, long, value_enum, value_name = "LEVEL", default_value_t=LogLevel::Off)]
-        log: LogLevel,
+        #[arg(short, long, value_enum, value_name = "LEVEL")]
+        log: Option<LogLevelOption>,
+
+        /// Sets the ROM kind
+        #[arg(long, value_enum, default_value_t = KindOption::CHIP8)]
+        kind: KindOption,
     },
 
     /// C8 RUN: Loads a CHIP-8 ROM and runs it
@@ -75,7 +108,11 @@ pub enum CliCommand {
         hz: u16,
 
         /// Enable logging
-        #[arg(short, long, value_enum, value_name = "LEVEL", default_value_t=LogLevel::Off)]
-        log: LogLevel,
+        #[arg(short, long, value_enum, value_name = "LEVEL")]
+        log: Option<LogLevelOption>,
+
+        /// Sets the ROM kind
+        #[arg(long, value_enum, default_value_t = KindOption::CHIP8)]
+        kind: KindOption,
     },
 }

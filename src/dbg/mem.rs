@@ -4,10 +4,7 @@ use crate::{
     asm::{
         write_byte_str, Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS,
     },
-    run::{
-        interp::{Instruction, Interpreter},
-        prog::PROGRAM_MEMORY_SIZE,
-    },
+    run::interp::{Instruction, Interpreter, PROGRAM_MEMORY_SIZE},
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -323,7 +320,6 @@ impl<'a> MemoryWidget<'_> {
         let show_comments = show_addr_bin || show_addr_asm_desc;
 
         if show_addr_bin {
-            addr_bin.push(' ');
             write_byte_str(addr_bin, byte, 1).ok();
         }
 

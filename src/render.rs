@@ -1,10 +1,9 @@
 use crate::{
-    config::C8Config,
     dbg::core::{DebuggerWidget, DebuggerWidgetState, Debugger},
     run::{
         core::{C8Lock, Interval, IntervalAccuracy},
         disp::{Display, DisplayWidget},
-        vm::VM,
+        vm::VM, rom::RomConfig,
     },
 };
 
@@ -45,7 +44,7 @@ pub fn panic_cleanup_terminal() -> Result<()> {
     )
 }
 
-pub fn spawn_render_thread(c8: C8Lock, config: C8Config) -> (Sender<()>, JoinHandle<()>) {
+pub fn spawn_render_thread(c8: C8Lock, config: RomConfig) -> (Sender<()>, JoinHandle<()>) {
     let (render_sender, render_receiver) = channel::<()>();
     let render_thread_handle = thread::spawn(move || {
         // change terminal to an alternate screen so user doesnt lose terminal history on exit
@@ -63,7 +62,6 @@ pub fn spawn_render_thread(c8: C8Lock, config: C8Config) -> (Sender<()>, JoinHan
         let mut renderer = Renderer {
             dbg_widget_state: Default::default(),
             dbg_visible: false,
-            vm_disp: Display::new(config.title.clone(), config.instruction_frequency),
             config,
         };
 
@@ -100,8 +98,7 @@ pub fn spawn_render_thread(c8: C8Lock, config: C8Config) -> (Sender<()>, JoinHan
 }
 
 struct Renderer {
-    config: C8Config,
-    vm_disp: Display,
+    config: RomConfig,
     dbg_visible: bool,
     dbg_widget_state: DebuggerWidgetState
 }
@@ -113,16 +110,11 @@ impl Renderer {
 
         let (vm, maybe_dbg) = _guard.deref_mut();
 
-        let did_vm_disp_update = if let Some(buf) = vm.extract_new_frame() {
-            self.vm_disp.buffer = buf;
-            true
-        } else {
-            false
-        };
+        let maybe_display = vm.extract_new_display();
 
         let is_dbg_visible = maybe_dbg.as_ref().map_or(false, Debugger::is_active);
         let should_draw = should_redraw 
-            || did_vm_disp_update 
+            || maybe_display.is_some() 
             || is_dbg_visible != self.dbg_visible;
 
         if should_draw {
@@ -132,16 +124,16 @@ impl Renderer {
                     unreachable!("debugger must exist for debugger draw call to be made")
                 };
 
-                self.vm_disp.instruction_frequency = dbg.frequency();
-
                 terminal.draw(|f| {
                     self.render_debugger(f, dbg, vm);
                 })?;
             } else {
+                let display = maybe_display.unwrap_or_else(|| vm.interpreter().output.display.clone());
+                let time_step = vm.time_step;
                 drop(_guard);
                 
                 terminal.draw(|f| {
-                    self.render_virtual_machine(f);
+                    self.render_virtual_machine(f, &display, (1.0/time_step).round().clamp(0.0, u16::MAX as f32) as u16);
                 })?;
             }
         }
@@ -154,7 +146,6 @@ impl Renderer {
         let dbg_widget = DebuggerWidget {
             dbg,
             vm,
-            vm_disp: &self.vm_disp,
             logging: self.config.logging,
         };
 
@@ -169,11 +160,14 @@ impl Renderer {
         f.render_stateful_widget(dbg_widget, dbg_area, &mut self.dbg_widget_state);
     }
 
-    fn render_virtual_machine<B: Backend>(&self, f: &mut Frame<B>) {
+    fn render_virtual_machine<B: Backend>(&self, f: &mut Frame<B>, display: &Display, instruction_frequency: u16) {
         let display_area = f.size();
         let display_widget = DisplayWidget {
-            display: &self.vm_disp,
+            title: &self.config.name,
+            rom_kind: self.config.kind,
             logging: self.config.logging,
+            instruction_frequency: instruction_frequency, 
+            display,
         };
 
         if self.config.logging {

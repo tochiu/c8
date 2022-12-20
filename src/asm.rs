@@ -1,6 +1,6 @@
 use crate::run::{
-    interp::{Instruction, InstructionParameters, Interpreter, InterpreterMemory},
-    prog::{Program, PROGRAM_STARTING_ADDRESS},
+    interp::{Instruction, InstructionParameters, Interpreter, InterpreterMemory, PROGRAM_STARTING_ADDRESS},
+    rom::{Rom, RomKind},
 };
 
 use std::{
@@ -8,7 +8,7 @@ use std::{
     time::Instant,
 };
 
-pub const INSTRUCTION_COLUMNS: usize = 36;
+pub const INSTRUCTION_COLUMNS: usize = 30;
 pub const INSTRUCTION_MAX_LENGTH: usize = 13;
 pub const ADDRESS_COMMENT_TOKEN: &'static str = "#";
 
@@ -95,7 +95,7 @@ impl<'a> DisassemblyPath<'_> {
 pub struct Disassembler {
     pub instruction_params: Vec<InstructionParameters>,
     pub instructions: Vec<Option<Instruction>>,
-    pub program: Program,
+    pub rom: Rom,
     pub memory: InterpreterMemory,
     pub tags: Vec<InstructionTag>, 
     pub traces: Vec<Trace>,
@@ -114,17 +114,16 @@ struct TraceEntry {
     payload: Option<u8>,
 }
 
-impl From<Program> for Disassembler {
-    fn from(program: Program) -> Self {
-        let memory = Interpreter::alloc(&program);
+impl From<Rom> for Disassembler {
+    fn from(rom: Rom) -> Self {
+        let memory = Interpreter::alloc(&rom);
 
         let mut instruction_params =
             Interpreter::instruction_parameters(&memory).collect::<Vec<_>>();
         let mut instructions = instruction_params
             .iter()
             .cloned()
-            .map(Instruction::try_from)
-            .map(Result::ok)
+            .map(|params| params.try_decode(rom.config.kind).ok())
             .collect::<Vec<_>>();
         let mut tags = instructions
             .iter()
@@ -148,7 +147,7 @@ impl From<Program> for Disassembler {
         Disassembler {
             instruction_params,
             instructions,
-            program,
+            rom,
             memory,
             tags,
             traces: Vec::new(),
@@ -177,7 +176,7 @@ impl Disassembler {
         {
             *byte = new_param_bits[0];
             *params = InstructionParameters::from([new_param_bits[0], new_param_bits[1]]);
-            *inst = Instruction::try_from(*params).ok();
+            *inst = params.try_decode(interp.rom.config.kind).ok();
 
             disasm_required = disasm_required
                 || *tag > InstructionTag::Parsable
@@ -224,7 +223,7 @@ impl Disassembler {
     pub fn run_from(&mut self, addr: u16, tag: InstructionTag, depth: usize) {
         log::info!(
             "Disassembling \"{}\" starting at {:#05X}",
-            &self.program.name,
+            &self.rom.config.name,
             addr
         );
         let mut trace_buffer = Vec::new();
@@ -237,7 +236,7 @@ impl Disassembler {
             trace_pushed: false,
         });
         let elapsed = now.elapsed().as_micros();
-        log::info!("Disassembled \"{}\" in {} us", &self.program.name, elapsed);
+        log::info!("Disassembled \"{}\" in {} us", &self.rom.config.name, elapsed);
     }
 
     fn eval(&mut self, mut path: DisassemblyPath) -> bool {
@@ -260,6 +259,9 @@ impl Disassembler {
             // traverse
 
             let path_is_valid = match instruction {
+
+                Instruction::Exit => true,
+
                 Instruction::Jump(addr) => {
                     path.enter_trace(Some(instruction), None);
                     let path_is_valid = self.eval(path.fork(addr));
@@ -407,20 +409,20 @@ impl Disassembler {
         let tag = self.tags[index];
 
         // address
-        write!(addr_header, "{:#05X}:", addr)?;
+        write!(addr_header, "{:#05X}", addr)?;
 
         // instruction tag symbol
-        write!(addr_bin, " |{}|", tag.to_symbol())?;
+        write!(addr_bin, " {}", tag.to_symbol())?;
 
         // instruction if parsable
         if tag >= InstructionTag::Parsable {
-            write!(addr_bin, " {:#06X}", params.bits)?;
+            write!(addr_bin, " {:04X}", params.bits)?;
         } else {
-            write!(addr_bin, " {:#04X}", self.memory[index])?;
+            write!(addr_bin, " {:02X}", self.memory[index])?;
         }
 
         if let Some(instruction) = self.instructions[index].as_ref() {
-            write_inst_asm(instruction, addr_asm, addr_asm_desc)?;
+            write_inst_asm(instruction, self.rom.config.kind, addr_asm, addr_asm_desc)?;
         }
 
         Ok(())
@@ -466,7 +468,7 @@ impl Disassembler {
                         _ => {
                             asm.clear();
                             asm_desc.clear();
-                            write_inst_asm(inst, &mut asm, &mut asm_desc).expect("Writing instruction to string failed");
+                            write_inst_asm(inst, self.rom.config.kind, &mut asm, &mut asm_desc).expect("Writing instruction to string failed");
                             write!(f, " {}", &asm)?;
                             if asm_desc.len() > 0 {
                                 write!(f, " {} {}", ADDRESS_COMMENT_TOKEN, &asm_desc)?;
@@ -494,7 +496,7 @@ impl Display for Disassembler {
 
         for (addr, byte, tag) in self.tags[PROGRAM_STARTING_ADDRESS as usize..]
             .iter()
-            .take(self.program.data.len())
+            .take(self.rom.data.len())
             .enumerate()
             .map(|(i, tag)| {
                 (
@@ -579,16 +581,13 @@ pub fn write_byte_str(
 
 pub fn write_inst_asm(
     inst: &Instruction,
+    kind: RomKind,
     f: &mut impl std::fmt::Write,
     c: &mut impl std::fmt::Write,
 ) -> std::fmt::Result {
     match inst {
-        Instruction::ClearScreen => {
-            write!(f, "cls")?;
-            write!(c, "clear display")
-        }
-
         // side effect of discontinuity instructions having no comments is it highlights a clear break in execution
+        Instruction::Exit => write!(f, "exit"),
         Instruction::Jump(addr) => write!(f, "jp   {:#05X}", addr),
         Instruction::JumpWithOffset(addr, _) => write!(f, "jp   v0 {:#05X}", addr),
         Instruction::CallSubroutine(addr) => write!(f, "call {:#05X}", addr),
@@ -596,31 +595,31 @@ pub fn write_inst_asm(
 
         Instruction::SkipIfEqualsConstant(vx, value) => {
             write!(f, "se   v{:x} {}", vx, value)?;
-            write!(c, "skip next if v{:x} == {}", vx, value)
+            write!(c, "skip if v{:x} == {}", vx, value)
         }
         Instruction::SkipIfNotEqualsConstant(vx, value) => {
             write!(f, "sne  v{:x} {}", vx, value)?;
-            write!(c, "skip next if v{:x} != {}", vx, value)
+            write!(c, "skip if v{:x} != {}", vx, value)
         }
         Instruction::SkipIfEquals(vx, vy) => {
             write!(f, "se   v{:x} v{:x}", vx, vy)?;
-            write!(c, "skip next if v{:x} == v{:x}", vx, vy)
+            write!(c, "skip if v{:x} == v{:x}", vx, vy)
         }
         Instruction::SkipIfNotEquals(vx, vy) => {
             write!(f, "sne  v{:x} v{:x}", vx, vy)?;
-            write!(c, "skip next if v{:x} != v{:x}", vx, vy)
+            write!(c, "skip if v{:x} != v{:x}", vx, vy)
         }
         Instruction::SkipIfKeyDown(vx) => {
             write!(f, "skp  v{:x}", vx)?;
-            write!(c, "skip next if v{:x} key is down", vx)
+            write!(c, "skip if v{:x} keydown", vx)
         }
         Instruction::SkipIfKeyNotDown(vx) => {
             write!(f, "sknp v{:x}", vx)?;
-            write!(c, "skip next if v{:x} key is up", vx)
+            write!(c, "skip if v{:x} keyup", vx)
         }
         Instruction::GetKey(vx) => {
             write!(f, "ld   v{:x} k", vx)?;
-            write!(c, "v{:x} = next key press", vx)
+            write!(c, "v{:x} = next keypress", vx)
         }
         Instruction::SetConstant(vx, value) => {
             write!(f, "ld   v{:x} {}", vx, value)?;
@@ -682,54 +681,75 @@ pub fn write_inst_asm(
         }
         Instruction::SetIndex(value) => {
             write!(f, "ld   i {:#05X}", value)?;
-            write!(c, "index = {:#05X}", value)
+            write!(c, "i = {:#05X}", value)
         }
         Instruction::SetIndexToHexChar(vx) => {
             write!(f, "ld   f v{:x}", vx)?;
-            write!(c, "index = sprite of hex char v{:x}", vx)
+            write!(c, "i = hex v{:x}", vx)
+        }
+        Instruction::SetIndexToBigHexChar(vx) => {
+            write!(f, "ld   hf v{:x}", vx)?;
+            write!(c, "i = big hex v{:x}", vx)
         }
         Instruction::AddToIndex(value) => {
             write!(f, "add  i {}", value)?;
-            write!(c, "index += {} ({:#05X})", value, value)
+            write!(c, "i += {} ({:#05X})", value, value)
         }
         Instruction::Load(vx) => {
             write!(f, "ld   v{:x} i", vx)?;
-            write!(
-                c,
-                "load {} byte{} into v(0..={})",
-                vx + 1,
-                if *vx == 0 { "" } else { "s" },
-                vx
-            )
+            write!(c, "v0..=v{:x} = memory", vx)
         }
         Instruction::Store(vx) => {
             write!(f, "ld   i v{:x}", vx)?;
-            write!(
-                c,
-                "save {} byte{} from v(0..={})",
-                vx + 1,
-                if *vx == 0 { "" } else { "s" },
-                vx
-            )
+            write!(c, "memory = v0..=v{:x}", vx)
+        }
+        Instruction::LoadFlags(vx) => {
+            write!(f, "ld   v{:x} r", vx)?;
+            write!(c, "v0..=v{:x} = flags", vx)
+        }
+        Instruction::StoreFlags(vx) => {
+            write!(f, "ld   r v{:x}", vx)?;
+            write!(c, "flags = v0..=v{:x}", vx)
         }
         Instruction::StoreDecimal(vx) => {
             write!(f, "ld   b v{:x}", vx)?;
-            write!(c, "save binary-coded decimal v{:x}", vx)
+            write!(c, "save dec digits from v{:x}", vx)
         }
         Instruction::GenerateRandom(vx, bound) => {
             write!(f, "rnd  v{:x} {}", vx, bound)?;
-            write!(c, "v{:x} = rand in range [0, {}]", vx, bound)
+            write!(c, "v{:x} = rand 0..={}", vx, bound)
         }
         Instruction::Display(vx, vy, height) => {
             write!(f, "drw  v{:x} v{:x} {}", vx, vy, height)?;
-            write!(
-                c,
-                "draw {} byte{} at pos (v{:x}, v{:x})",
-                height,
-                if *height == 1 { "" } else { "s" },
-                vx,
-                vy
-            )
+            if *height == 0 && kind == RomKind::SCHIP {
+                write!(c, "draw 16x16 @ v{:x},v{:x}", vx, vy)
+            } else {
+                write!(c, "draw 8x{} @ v{:x},v{:x}", height, vx, vy)
+            }
+        }
+        Instruction::ScrollDown(n) => {
+            write!(f, "scd")?;
+            write!(c, "scroll display {} down", n)
+        }
+        Instruction::ScrollLeft => {
+            write!(f, "scl")?;
+            write!(c, "scroll display left")
+        }
+        Instruction::ScrollRight => {
+            write!(f, "scr")?;
+            write!(c, "scroll display right")
+        }
+        Instruction::LowResolution => {
+            write!(f, "low")?;
+            write!(c, "use lo-res display")
+        }
+        Instruction::HighResolution => {
+            write!(f, "high")?;
+            write!(c, "use hi-res display")
+        }
+        Instruction::ClearScreen => {
+            write!(f, "cls")?;
+            write!(c, "clear display")
         }
     }
 }

@@ -1,7 +1,8 @@
 use crate::{
     asm::{write_inst_asm, ADDRESS_COMMENT_TOKEN, INSTRUCTION_MAX_LENGTH},
     run::{
-        vm::{VMHistoryFragment, VM}
+        rom::RomKind,
+        vm::{VMHistoryFragment, VM},
     },
 };
 
@@ -18,14 +19,23 @@ use std::{collections::VecDeque, fmt::Write};
 
 const HISTORY_CAPACITY: usize = 250_000;
 
-#[derive(Default)]
 pub(super) struct History {
+    rom_kind: RomKind,
     recording: bool,
     pub fragments: VecDeque<VMHistoryFragment>,
     cursor: usize,
 }
 
 impl History {
+    pub(super) fn new(rom_kind: RomKind) -> Self {
+        Self {
+            rom_kind,
+            recording: false,
+            fragments: VecDeque::new(),
+            cursor: 0,
+        }
+    }
+
     pub(super) fn is_recording(&self) -> bool {
         self.recording
     }
@@ -77,7 +87,7 @@ impl History {
         amt_rewinded
     }
 
-    pub(super) fn step(&mut self, vm: &mut VM) -> Result<(), String> {
+    pub(super) fn step(&mut self, vm: &mut VM) -> Result<bool, String> {
         // time step is not state that is completely deterministic so must set it if possible
         if self.cursor < self.fragments.len() {
             vm.time_step = self.fragments[self.cursor].time_step;
@@ -113,7 +123,6 @@ impl History {
             self.cursor = (self.cursor + 1).min(self.fragments.len());
         }
 
-        vm.handle_inputs();
         let vm_result = vm.step();
 
         // edge case: keyboard contains ephemeral state so we must manually restore it
@@ -201,7 +210,7 @@ impl<'a> Widget for HistoryWidget<'_> {
                 asm_desc.push_str(ADDRESS_COMMENT_TOKEN);
                 asm_desc.push(' ');
                 if let Some(inst) = interp_state.instruction.as_ref() {
-                    write_inst_asm(inst, &mut asm, &mut asm_desc).ok();
+                    write_inst_asm(inst, self.history.rom_kind, &mut asm, &mut asm_desc).ok();
                 } else {
                     asm.push_str("BAD INSTRUCTION");
                 }
