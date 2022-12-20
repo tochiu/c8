@@ -1,15 +1,15 @@
 use super::{
     cli::*,
+    hist::{History, HistoryWidget},
     mem::*,
     shell::*,
-    hist::{History, HistoryWidget},
 };
 
 use crate::{
     asm::Disassembler,
     run::{
         core::Runner,
-        disp::DisplayWidget,
+        disp::{DisplayMode, DisplayWidget},
         input::KEY_ORDERING,
         interp::{Instruction, Interpreter},
         vm::VM,
@@ -202,11 +202,10 @@ impl Debugger {
 
             vm_visible: true,
             vm_exception: None,
-            vm_executing: true
+            vm_executing: true,
         };
 
         dbg.disassembler.run();
-        dbg.history.start_recording();
         dbg.activate(vm);
         dbg
     }
@@ -259,6 +258,10 @@ impl Debugger {
                 break;
             }
             amt_stepped = step + 1;
+            if amt - amt_stepped > self.history.redo_amount() {
+                log::warn!("Redo history was cleared during operation because current state did not agree with redo history.");
+                break;
+            }
         }
 
         amt_stepped
@@ -277,13 +280,7 @@ impl Debugger {
             return false;
         }
 
-        let step_result = if self.history.is_recording() {
-            self.history.step(vm)
-        } else {
-            vm.step()
-        };
-
-        let mut should_continue = match step_result {
+        let mut should_continue = match self.history.step(vm) {
             Ok(should_continue) => {
                 if !should_continue {
                     self.shell.print("Program has finished executing.");
@@ -292,7 +289,7 @@ impl Debugger {
                 }
 
                 should_continue
-            },
+            }
             Err(e) => {
                 self.shell.error(&e);
                 self.vm_executing = false;
@@ -527,11 +524,7 @@ impl Debugger {
                 vm.keyboard_mut().clear();
             }
             DebugCliCommand::Step { amount } => {
-                let amt_stepped = self.stepn(
-                    vm,
-                    amount,
-                    1.0 / self.runner_frequency as f32,
-                );
+                let amt_stepped = self.stepn(vm, amount, 1.0 / self.runner_frequency as f32);
 
                 if amt_stepped > 1 {
                     self.shell.print(format!("Stepped {} times", amt_stepped));
@@ -547,22 +540,6 @@ impl Debugger {
 
                 self.runner_frequency = hertz;
                 self.shell.print(format!("Set frequency to {}Hz", hertz));
-            }
-            DebugCliCommand::Record => {
-                if self.history.is_recording() {
-                    self.shell.print("Already recording VM state");
-                    return;
-                }
-                self.history.start_recording();
-                self.shell.print("Recording VM state");
-            }
-            DebugCliCommand::Stop => {
-                if self.history.is_recording() {
-                    self.history.stop_recording();
-                    self.shell.print("Stopped recording VM state");
-                } else {
-                    self.shell.print("Already not recording VM state");
-                }
             }
             DebugCliCommand::Redo { amount } => {
                 let amt_stepped = self.redon(vm, amount);
@@ -588,10 +565,6 @@ impl Debugger {
                 }
             }
             DebugCliCommand::History => {
-                if !self.history.is_recording() {
-                    self.shell.print("Not recording VM state");
-                    return;
-                }
                 self.history_active = true;
                 self.shell_input_active = false;
             }
@@ -856,9 +829,20 @@ impl Debugger {
     }
 }
 
-#[derive(Default)]
 pub struct DebuggerWidgetState {
     input: InputWidgetState,
+    pub logger_area: Rect,
+    pub logger_border: Borders,
+}
+
+impl Default for DebuggerWidgetState {
+    fn default() -> Self {
+        Self {
+            input: InputWidgetState::default(),
+            logger_area: Rect::default(),
+            logger_border: Borders::ALL,
+        }
+    }
 }
 
 pub struct DebuggerWidget<'a> {
@@ -867,7 +851,60 @@ pub struct DebuggerWidget<'a> {
     pub vm: &'a VM,
 }
 
+#[derive(Default)]
+pub struct DebuggerWidgetAreas {
+    pub history: Rect,
+    pub output: Rect,
+    pub keyboard: Rect,
+    pub pointers: Rect,
+    pub registers: Rect,
+    pub timers: Rect,
+    pub stack: Rect,
+    pub memory: Rect,
+    pub display: Rect,
+    pub logger: Rect,
+    pub command_line: Rect,
+}
+
+pub struct DebuggerWidgetBorders {
+    pub history: Borders,
+    pub output: Borders,
+    pub keyboard: Borders,
+    pub pointers: Borders,
+    pub registers: Borders,
+    pub timers: Borders,
+    pub stack: Borders,
+    pub memory: Borders,
+    pub display: Borders,
+    pub logger: Borders,
+    pub command_line: Borders,
+}
+
+impl Default for DebuggerWidgetBorders {
+    fn default() -> Self {
+        Self {
+            history: Borders::NONE,
+            output: Borders::NONE,
+            keyboard: Borders::NONE,
+            pointers: Borders::NONE,
+            registers: Borders::NONE,
+            timers: Borders::NONE,
+            stack: Borders::NONE,
+            memory: Borders::NONE,
+            display: Borders::NONE,
+            logger: Borders::NONE,
+            command_line: Borders::NONE,
+        }
+    }
+}
+
 impl<'a> DebuggerWidget<'a> {
+    const GENERAL_STATE_COLUMN_WIDTH: u16 = 15;
+    const KEYBOARD_STATE_HEIGHT: u16 = 10;
+    const POINTERS_STATE_HEIGHT: u16 = 3;
+    const REGISTERS_STATE_HEIGHT: u16 = 17;
+    const TIMERS_STATE_HEIGHT: u16 = 4;
+
     pub fn cursor_position(
         &self,
         area: Rect,
@@ -880,143 +917,216 @@ impl<'a> DebuggerWidget<'a> {
         }
     }
 
-    pub fn logger_area(&self, area: Rect) -> Rect {
-        self.areas(area).3
-    }
+    fn build_layout(&self, terminal_area: Rect) -> (DebuggerWidgetAreas, DebuggerWidgetBorders) {
+        let [above_command_line_area, command_line_area] = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(terminal_area.height.saturating_sub(1)),
+                Constraint::Length(1),
+            ])
+            .split(terminal_area)[..] else { unreachable!() };
+        let command_line_borders = Borders::NONE;
 
-    fn areas(&self, area: Rect) -> (Rect, Rect, Rect, Rect) {
-        let (display_width, display_height) = self.vm.interpreter().output.display.mode.dimensions();
-        let (region, bottom) = {
-            let rects = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(area.height.saturating_sub(1)),
-                    Constraint::Length(1),
-                ])
-                .split(area);
-            (rects[0], rects[1])
-        };
-
-        let (main, region) = {
-            let rects = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints(if self.dbg.vm_visible && !self.dbg.shell_output_active {
-                    [
-                        Constraint::Length(region.width.saturating_sub(display_width as u16 + 2)),
-                        Constraint::Length(display_width as u16 + 2),
-                    ]
-                } else if self.logging {
-                    [Constraint::Percentage(80), Constraint::Percentage(20)]
-                } else {
-                    [Constraint::Percentage(100), Constraint::Percentage(0)]
-                })
-                .split(region);
-            (rects[0], rects[1])
-        };
-
-        let (vm, logger) = {
-            let rects = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints(
-                    if self.dbg.vm_visible && !self.dbg.shell_output_active && self.logging {
-                        [
-                            Constraint::Length(display_height as u16/2 + 2),
-                            Constraint::Length(region.height.saturating_sub(display_height as u16/2 + 2)),
-                        ]
-                    } else if self.logging {
-                        [Constraint::Percentage(0), Constraint::Percentage(100)]
-                    } else {
-                        [Constraint::Percentage(100), Constraint::Percentage(0)]
-                    },
-                )
-                .split(region);
-            (rects[0], rects[1])
-        };
-
-        (main, bottom, vm, logger)
-    }
-
-    fn dbg_areas(&self, mut area: Rect) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
         if self.dbg.shell_output_active {
             return (
-                Rect::default(),
-                Rect::default(),
-                Rect::default(),
-                Rect::default(),
-                Rect::default(),
-                Rect::default(),
-                area,
-                Rect::default(),
+                DebuggerWidgetAreas {
+                    output: above_command_line_area,
+                    command_line: command_line_area,
+                    ..Default::default()
+                },
+                DebuggerWidgetBorders {
+                    output: Borders::TOP,
+                    command_line: command_line_borders,
+                    ..Default::default()
+                },
             );
         }
 
-        let mut rects = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(if self.dbg.memory_active {
-                [
-                    Constraint::Length(0),
-                    Constraint::Length(15),
-                    Constraint::Length(area.width.saturating_sub(area.width.saturating_sub(15))),
-                ]
-            } else if self.dbg.memory_visible {
-                [
-                    Constraint::Length(area.width.saturating_sub(15) / 3),
-                    Constraint::Length(15),
-                    Constraint::Length(
-                        area.width.saturating_sub(area.width.saturating_sub(15) / 3),
-                    ),
-                ]
-            } else {
-                [
-                    Constraint::Length(area.width.saturating_sub(15)),
-                    Constraint::Length(15),
-                    Constraint::Length(0),
-                ]
-            })
-            .split(area);
+        if self.dbg.memory_active {
+            return (
+                DebuggerWidgetAreas {
+                    memory: above_command_line_area,
+                    command_line: command_line_area,
+                    ..Default::default()
+                },
+                DebuggerWidgetBorders {
+                    memory: Borders::TOP,
+                    command_line: command_line_borders,
+                    ..Default::default()
+                },
+            );
+        }
 
-        let (left_area, memory_area) = (rects[0], rects[2]);
-
-        let (history_area, output_area) = {
-            if self.dbg.history_active {
-                (left_area, Rect::default())
-            } else if self.dbg.history.is_recording() && self.dbg.shell_input_active {
-                let rects = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .split(left_area);
-                (rects[0], rects[1])
-            } else if self.dbg.shell_input_active {
-                (Rect::default(), left_area)
-            } else {
-                (Rect::default(), Rect::default())
-            }
+        let display_mode = self.vm.interpreter().output.display.mode;
+        let (mut display_window_width, mut display_window_height) =
+            display_mode.window_dimensions();
+        display_window_height = if self.dbg.vm_visible {
+            display_window_height.saturating_sub(1)
+        } else {
+            0
+        };
+        display_window_width = if display_mode == DisplayMode::HighResolution && !self.logging {
+            display_window_width
+        } else {
+            display_window_width.saturating_sub(1)
         };
 
-        area = rects[1];
-        rects = Layout::default()
+        let non_column_with_display_width =
+            terminal_area.width.saturating_sub(display_window_width);
+        let left_of_column_with_display_width =
+            if display_mode == DisplayMode::HighResolution && !self.logging {
+                non_column_with_display_width
+            } else {
+                (non_column_with_display_width / 2)
+                    .max(Self::GENERAL_STATE_COLUMN_WIDTH)
+                    .min(non_column_with_display_width)
+            };
+
+        let [left_of_column_with_display, column_with_display, right_of_column_with_display] =
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Length(left_of_column_with_display_width),
+                    Constraint::Length(display_window_width),
+                    Constraint::Length(
+                        non_column_with_display_width - left_of_column_with_display_width,
+                    ),
+                ])
+                .split(above_command_line_area)[..] else { unreachable!() };
+
+        let [display_area, below_display_area] =
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(display_window_height),
+                    Constraint::Length(
+                        column_with_display
+                            .height
+                            .saturating_sub(display_window_height),
+                    ),
+                ])
+                .split(column_with_display)[..] else { unreachable!() };
+        let display_area_borders = if self.dbg.vm_visible {
+            if display_mode == DisplayMode::HighResolution && !self.logging {
+                Borders::ALL.difference(Borders::BOTTOM)
+            } else {
+                Borders::ALL
+                    .difference(Borders::BOTTOM)
+                    .difference(Borders::RIGHT)
+            }
+        } else {
+            Borders::NONE
+        };
+
+        let [right_of_display, bottom_right_of_display] = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(10),
-                Constraint::Length(3),
-                Constraint::Length(17),
-                Constraint::Length(4),
-                Constraint::Length(1 + self.vm.interpreter().stack.len().max(1) as u16),
+                Constraint::Length(display_window_height),
+                Constraint::Length(
+                    right_of_column_with_display
+                        .height
+                        .saturating_sub(display_window_height),
+                ),
             ])
-            .split(area);
+            .split(right_of_column_with_display)[..] else { unreachable!() };
 
-        let (keyboard_area, pointer_area, register_area, timer_area, stack_area) =
-            (rects[0], rects[1], rects[2], rects[3], rects[4]);
+        let memory_window_width = DisplayMode::LowResolution.window_dimensions().0;
+        let [memory_area, right_of_memory_area_in_display_column] =
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Length(memory_window_width),
+                    Constraint::Length(
+                        below_display_area.width.saturating_sub(memory_window_width),
+                    ),
+                ])
+                .split(below_display_area)[..] else { unreachable!() };
+        let memory_area_borders = Borders::ALL.difference(Borders::RIGHT);
+
+        let [output_area, between_output_column_and_display_column] = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(
+                    left_of_column_with_display
+                        .width
+                        .saturating_sub(Self::GENERAL_STATE_COLUMN_WIDTH),
+                ),
+                Constraint::Length(Self::GENERAL_STATE_COLUMN_WIDTH),
+            ])
+            .split(left_of_column_with_display)[..] else { unreachable!() };
+        let output_area_borders = Borders::TOP;
+
+        let [keyboard_area, pointers_area, registers_area, timers_area, stack_area] =
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(Self::KEYBOARD_STATE_HEIGHT),
+                    Constraint::Length(Self::POINTERS_STATE_HEIGHT),
+                    Constraint::Length(Self::REGISTERS_STATE_HEIGHT),
+                    Constraint::Length(Self::TIMERS_STATE_HEIGHT),
+                    Constraint::Length(1 + self.vm.interpreter().stack.len().max(1) as u16),
+                ])
+                .split(between_output_column_and_display_column)[..] else { unreachable!() };
+        let keyboard_area_borders = Borders::TOP.union(Borders::LEFT);
+        let pointers_area_borders = Borders::TOP.union(Borders::LEFT);
+        let registers_area_borders = Borders::TOP.union(Borders::LEFT);
+        let timers_area_borders = Borders::TOP.union(Borders::LEFT);
+        let stack_area_borders = Borders::ALL.difference(Borders::RIGHT);
+
+        let history_area = match display_mode {
+            DisplayMode::LowResolution => {
+                if self.logging {
+                    bottom_right_of_display
+                } else {
+                    right_of_column_with_display
+                }
+            }
+            DisplayMode::HighResolution => right_of_memory_area_in_display_column,
+        };
+        let history_area_borders = if display_mode == DisplayMode::HighResolution && self.logging {
+            Borders::ALL.difference(Borders::RIGHT)
+        } else {
+            Borders::ALL
+        };
+
+        let (logger_area, logger_area_borders) = if self.logging {
+            match display_mode {
+                DisplayMode::LowResolution => {
+                    (right_of_display, Borders::ALL.difference(Borders::BOTTOM))
+                }
+                DisplayMode::HighResolution => (right_of_column_with_display, Borders::ALL),
+            }
+        } else {
+            (Rect::default(), Borders::NONE)
+        };
 
         (
-            memory_area,
-            keyboard_area,
-            pointer_area,
-            register_area,
-            timer_area,
-            stack_area,
-            output_area,
-            history_area,
+            DebuggerWidgetAreas {
+                history: history_area,
+                output: output_area,
+                keyboard: keyboard_area,
+                pointers: pointers_area,
+                registers: registers_area,
+                timers: timers_area,
+                stack: stack_area,
+                memory: memory_area,
+                display: display_area,
+                logger: logger_area,
+                command_line: command_line_area,
+            },
+            DebuggerWidgetBorders {
+                history: history_area_borders,
+                output: output_area_borders,
+                keyboard: keyboard_area_borders,
+                pointers: pointers_area_borders,
+                registers: registers_area_borders,
+                timers: timers_area_borders,
+                stack: stack_area_borders,
+                memory: memory_area_borders,
+                display: display_area_borders,
+                logger: logger_area_borders,
+                command_line: command_line_borders,
+            },
         )
     }
 
@@ -1032,63 +1142,48 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             return;
         }
 
-        let (main_area, bottom_area, vm_area, _) = self.areas(area);
-        let (
-            memory_area,
-            keyboard_area,
-            pointer_area,
-            register_area,
-            timer_area,
-            stack_area,
-            output_area,
-            history_area,
-        ) = self.dbg_areas(main_area);
+        let (layout_areas, layout_borders) = self.build_layout(area);
 
-        let base_border = Borders::TOP.union(Borders::LEFT);
+        state.logger_area = layout_areas.logger;
+        state.logger_border = layout_borders.logger;
 
-        // VM
-        if self.dbg.vm_visible {
-            DisplayWidget {
-                title: &self.vm.interpreter().rom.config.name,
-                display: &self.vm.interpreter().output.display,
-                rom_kind: self.vm.interpreter().rom.config.kind,
-                instruction_frequency: self.dbg.runner_frequency,
-                logging: false,
-            }
-            .render(vm_area, buf);
-        }
+        let display_widget = DisplayWidget {
+            display: &self.vm.interpreter().output.display,
+            rom_name: &self.vm.interpreter().rom.config.name,
+            rom_kind: self.vm.interpreter().rom.config.kind,
+            instruction_frequency: self.dbg.runner_frequency,
+            logging: self.logging,
+        };
+
+        // Display
+        let display_block = Block::default()
+            .title(display_widget.title())
+            .borders(layout_borders.display);
+        display_widget.render(display_block.inner(layout_areas.display), buf);
+        display_block.render(layout_areas.display, buf);
 
         // Output
-        let output_block = Block::default().title(" Output ").borders(Borders::TOP);
+        let output_block = Block::default()
+            .title(" Output ")
+            .borders(layout_borders.output);
         self.dbg
             .shell
             .as_output_widget()
-            .render(output_block.inner(output_area), buf);
-        output_block.render(output_area, buf);
+            .render(output_block.inner(layout_areas.output), buf);
+        output_block.render(layout_areas.output, buf);
 
         // History
         HistoryWidget {
             history: &self.dbg.history,
             active: self.dbg.history_active,
-            border: if self.dbg.shell_input_active {
-                Borders::TOP
-            } else {
-                Borders::TOP.union(Borders::BOTTOM)
-            },
+            border: layout_borders.history,
         }
-        .render(history_area, buf);
+        .render(layout_areas.history, buf);
 
         // Memory
-        let memory_block =
-            Block::default()
-                .title(" Memory ")
-                .borders(base_border.union(Borders::BOTTOM).union(
-                    if self.logging || self.dbg.vm_visible {
-                        Borders::NONE
-                    } else {
-                        Borders::RIGHT
-                    },
-                ));
+        let memory_block = Block::default()
+            .title(" Memory ")
+            .borders(layout_borders.memory);
         let mut memory_state = self.dbg.memory_widget_state.take();
         MemoryWidget {
             active: self.dbg.memory_active,
@@ -1098,8 +1193,12 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             interpreter: self.vm.interpreter(),
             disassembler: &self.dbg.disassembler,
         }
-        .render(memory_block.inner(memory_area), buf, &mut memory_state);
-        memory_block.render(memory_area, buf);
+        .render(
+            memory_block.inner(layout_areas.memory),
+            buf,
+            &mut memory_state,
+        );
+        memory_block.render(layout_areas.memory, buf);
         self.dbg.memory_widget_state.set(memory_state);
 
         let interp = self.vm.interpreter();
@@ -1147,8 +1246,12 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         }
 
         Paragraph::new(keyboard_row_spans)
-            .block(Block::default().title(" Keyboard ").borders(base_border))
-            .render(keyboard_area, buf);
+            .block(
+                Block::default()
+                    .title(" Keyboard ")
+                    .borders(layout_borders.keyboard),
+            )
+            .render(layout_areas.keyboard, buf);
 
         // Pointers
         Paragraph::new(vec![
@@ -1179,8 +1282,12 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
                 interp.index
             )),
         ])
-        .block(Block::default().title(" Pointers ").borders(base_border))
-        .render(pointer_area, buf);
+        .block(
+            Block::default()
+                .title(" Pointers ")
+                .borders(layout_borders.pointers),
+        )
+        .render(layout_areas.pointers, buf);
 
         // Registers
         Paragraph::new(
@@ -1207,8 +1314,12 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
                 })
                 .collect::<Vec<_>>(),
         )
-        .block(Block::default().title(" Registers ").borders(base_border))
-        .render(register_area, buf);
+        .block(
+            Block::default()
+                .title(" Registers ")
+                .borders(layout_borders.registers),
+        )
+        .render(layout_areas.registers, buf);
 
         // Timers
         Paragraph::new(vec![
@@ -1216,8 +1327,12 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             Spans::from(format!("-delay {:0>7.3}", self.vm.delay_timer())),
             Spans::from(format!("   |-> {:0>3}", interp.input.delay_timer)),
         ])
-        .block(Block::default().title(" Timers ").borders(base_border))
-        .render(timer_area, buf);
+        .block(
+            Block::default()
+                .title(" Timers ")
+                .borders(layout_borders.timers),
+        )
+        .render(layout_areas.timers, buf);
 
         // Stack
         Paragraph::new(
@@ -1231,31 +1346,35 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         .block(
             Block::default()
                 .title(" Stack ")
-                .borders(base_border.union(Borders::BOTTOM)),
+                .borders(layout_borders.stack),
         )
-        .render(stack_area, buf);
+        .render(layout_areas.stack, buf);
 
         // Bottom (Command line or messages)
         if self.can_draw_shell(area) {
-            InputWidget::from(&self.dbg.shell).render(bottom_area, buf, &mut state.input)
+            InputWidget::from(&self.dbg.shell).render(
+                layout_areas.command_line,
+                buf,
+                &mut state.input,
+            )
         } else if self.dbg.shell_output_active {
             let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
-            buf.set_style(bottom_area, bottom_area_style);
+            buf.set_style(layout_areas.command_line, bottom_area_style);
             Paragraph::new("Esc to exit output navigation")
                 .style(bottom_area_style)
-                .render(bottom_area, buf);
+                .render(layout_areas.command_line, buf);
         } else if self.dbg.memory_active {
             let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
-            buf.set_style(bottom_area, bottom_area_style);
+            buf.set_style(layout_areas.command_line, bottom_area_style);
             Paragraph::new("Esc to exit memory navigation")
                 .style(bottom_area_style)
-                .render(bottom_area, buf);
+                .render(layout_areas.command_line, buf);
         } else if self.dbg.history_active {
             let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
-            buf.set_style(bottom_area, bottom_area_style);
+            buf.set_style(layout_areas.command_line, bottom_area_style);
             Paragraph::new("Esc to exit history navigation")
                 .style(bottom_area_style)
-                .render(bottom_area, buf);
+                .render(layout_areas.command_line, buf);
         }
     }
 }

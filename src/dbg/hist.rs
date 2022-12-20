@@ -20,9 +20,9 @@ use std::{collections::VecDeque, fmt::Write};
 const HISTORY_CAPACITY: usize = 250_000;
 
 pub(super) struct History {
-    rom_kind: RomKind,
-    recording: bool,
     pub fragments: VecDeque<VMHistoryFragment>,
+
+    rom_kind: RomKind,
     cursor: usize,
 }
 
@@ -30,32 +30,13 @@ impl History {
     pub(super) fn new(rom_kind: RomKind) -> Self {
         Self {
             rom_kind,
-            recording: false,
-            fragments: VecDeque::new(),
+            fragments: VecDeque::with_capacity(HISTORY_CAPACITY),
             cursor: 0,
         }
     }
 
-    pub(super) fn is_recording(&self) -> bool {
-        self.recording
-    }
-
     pub(super) fn redo_amount(&self) -> usize {
         self.fragments.len().abs_diff(self.cursor)
-    }
-
-    pub(super) fn start_recording(&mut self) {
-        if self.fragments.capacity() < HISTORY_CAPACITY {
-            self.fragments
-                .reserve_exact(HISTORY_CAPACITY - self.fragments.capacity());
-        }
-        self.recording = true;
-    }
-
-    pub(super) fn stop_recording(&mut self) {
-        self.recording = false;
-        self.fragments = VecDeque::new();
-        self.cursor = 0;
     }
 
     pub(super) fn clear_redo_history(&mut self) {
@@ -93,35 +74,34 @@ impl History {
             vm.time_step = self.fragments[self.cursor].time_step;
         }
 
-        if self.recording {
-            
-            let state = VMHistoryFragment::from(&*vm); // get state of vm
+        vm.drain_event_queue();
 
-            // if cursor is at the start or the new state is different from the previous one
-            // we know we might advance the history cursor
-            let amt_clearing = self.fragments.len() - self.cursor;
-            if amt_clearing == 0 || &self.fragments[self.cursor] != &state {
-                if amt_clearing > 0 {
-                    log::info!(
-                        "Clearing {} history checkpoints equal or ahead of cursor",
-                        amt_clearing
-                    );
-                    self.fragments.truncate(self.cursor);
-                } else if self.cursor > 0
-                    && state.can_replace(&self.fragments[self.cursor - 1], vm.interpreter())
-                {
-                    log::debug!("Replacing history checkpoint at cursor");
-                    self.cursor -= 1;
-                    self.fragments.pop_back();
-                }
+        let state = VMHistoryFragment::from(&*vm); // get state of vm
 
-                if self.fragments.len() == HISTORY_CAPACITY {
-                    self.fragments.pop_front();
-                }
-                self.fragments.push_back(state);
+        // if cursor is at the start or the new state is different from the previous one
+        // we know we might advance the history cursor
+        let amt_clearing = self.fragments.len() - self.cursor;
+        if amt_clearing == 0 || &self.fragments[self.cursor] != &state {
+            if amt_clearing > 0 {
+                log::info!(
+                    "Clearing {} history checkpoints equal or ahead of cursor",
+                    amt_clearing
+                );
+                self.fragments.truncate(self.cursor);
+            } else if self.cursor > 0
+                && state.can_replace(&self.fragments[self.cursor - 1], vm.interpreter())
+            {
+                log::debug!("Replacing history checkpoint at cursor");
+                self.cursor -= 1;
+                self.fragments.pop_back();
             }
-            self.cursor = (self.cursor + 1).min(self.fragments.len());
+
+            if self.fragments.len() == HISTORY_CAPACITY {
+                self.fragments.pop_front();
+            }
+            self.fragments.push_back(state);
         }
+        self.cursor = (self.cursor + 1).min(self.fragments.len());
 
         let vm_result = vm.step();
 
@@ -134,7 +114,12 @@ impl History {
         vm_result
     }
 
-    pub(super) fn handle_key_event(&self, event: KeyEvent, active: &mut bool, cursor_change: &mut (usize, bool)) -> bool {
+    pub(super) fn handle_key_event(
+        &self,
+        event: KeyEvent,
+        active: &mut bool,
+        cursor_change: &mut (usize, bool),
+    ) -> bool {
         let cursor = self.cursor;
         let mut new_cursor = self.cursor;
         match event.code {
@@ -164,7 +149,7 @@ impl History {
 pub(super) struct HistoryWidget<'a> {
     pub(super) history: &'a History,
     pub(super) active: bool,
-    pub(super) border: Borders
+    pub(super) border: Borders,
 }
 
 impl<'a> Widget for HistoryWidget<'_> {

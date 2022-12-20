@@ -1,7 +1,4 @@
-use crate::{
-    asm::write_inst_asm,
-    run::interp::Interpreter,
-};
+use crate::{asm::write_inst_asm, run::interp::Interpreter};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use tui::{
@@ -148,7 +145,13 @@ impl Shell {
         let mut inst_asm = String::new();
         let mut inst_comment = String::new();
         if let Ok(inst) = interp.try_fetch_decode() {
-            write_inst_asm(&inst, interp.rom.config.kind, &mut inst_asm, &mut inst_comment).ok();
+            write_inst_asm(
+                &inst,
+                interp.rom.config.kind,
+                &mut inst_asm,
+                &mut inst_comment,
+            )
+            .ok();
             write!(buf, "{}", inst_asm).ok();
             self.print(buf);
             if inst_comment.is_empty() {
@@ -196,7 +199,9 @@ impl Shell {
 
     pub(super) fn as_output_widget(&self) -> OutputWidget {
         OutputWidget {
-            output: self.output.range(..self.output.len().saturating_sub(self.output_offset)),
+            output: self
+                .output
+                .range(..self.output.len().saturating_sub(self.output_offset)),
             output_draw_buffer: &self.output_line_buffer,
         }
     }
@@ -229,7 +234,6 @@ impl<'a> Widget for OutputWidget<'_> {
         let max_line_width = area.width as usize;
 
         for line in self.output.rev() {
-
             let start = lines.len();
 
             for span in line.0.iter() {

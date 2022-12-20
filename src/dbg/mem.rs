@@ -305,10 +305,10 @@ impl<'a> MemoryWidget<'_> {
 
         let (draw, read, write, exec) = AddressFlags::extract(flags);
         addr_header.push(' ');
-        addr_header.push(if draw  { 'd' } else { '-' });
-        addr_header.push(if read  { 'r' } else { '-' });
+        addr_header.push(if draw { 'd' } else { '-' });
+        addr_header.push(if read { 'r' } else { '-' });
         addr_header.push(if write { 'w' } else { '-' });
-        addr_header.push(if exec  { 'x' } else { '-' });
+        addr_header.push(if exec { 'x' } else { '-' });
 
         let force_asm = addr == self.interpreter.pc;
 
@@ -346,7 +346,8 @@ impl<'a> MemoryWidget<'_> {
             Color::Red
         } else if self.watchpoints.contains(&Watchpoint::Address(addr)) {
             Color::Blue
-        } else if addr_is_selected || addr == self.interpreter.pc || addr == self.interpreter.index {
+        } else if addr_is_selected || addr == self.interpreter.pc || addr == self.interpreter.index
+        {
             Color::Black
         } else {
             Color::Reset

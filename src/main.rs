@@ -9,8 +9,8 @@ mod run;
 use {
     asm::Disassembler,
     cli::{Cli, CliCommand},
+    render::panic_cleanup_terminal,
     run::{core::spawn_run_threads, rom::Rom},
-    render::panic_cleanup_terminal
 };
 
 use anyhow::Result;
@@ -26,7 +26,8 @@ fn main() -> Result<()> {
                 simple_logger::init_with_level(level.to_level())?;
             }
 
-            let mut disasm = Disassembler::from(Rom::read(path, kind.to_kind(), log.is_some(), false)?);
+            let mut disasm =
+                Disassembler::from(Rom::read(path, kind.to_kind(), log.is_some(), false)?);
             disasm.run();
             disasm.write_issue_traces(&mut stdout())?;
         }
@@ -35,11 +36,18 @@ fn main() -> Result<()> {
                 simple_logger::init_with_level(level.to_level())?;
             }
 
-            let mut disasm = Disassembler::from(Rom::read(path, kind.to_kind(), log.is_some(), false)?);
+            let mut disasm =
+                Disassembler::from(Rom::read(path, kind.to_kind(), log.is_some(), false)?);
             disasm.run();
             print!("{}", disasm);
         }
-        CliCommand::Run { path, debug, hz, log, kind } => {
+        CliCommand::Run {
+            path,
+            debug,
+            hz,
+            log,
+            kind,
+        } => {
             let kind = kind.to_kind();
             let rom = Rom::read(path, kind, log.is_some(), debug)?;
 
@@ -67,11 +75,10 @@ fn main() -> Result<()> {
             let (run_render_thread, run_main_thread) = spawn_run_threads(rom, hz);
 
             // wait for threads
-            run_render_thread.join()
+            run_render_thread
+                .join()
                 .expect("Failed to join render thread");
-            match run_main_thread.join()
-                .expect("Failed to join run thread") 
-            {
+            match run_main_thread.join().expect("Failed to join run thread") {
                 Ok(analytics) => println!("{}", analytics),
                 Err(err) => println!("\n    {} {}", format!("Error").red().bold(), err),
             }

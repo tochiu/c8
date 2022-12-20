@@ -20,50 +20,6 @@ pub enum VMEvent {
     FocusingKeyDown(Key),
 }
 
-pub struct VMHistoryFragment {
-    pub time_step: f32,
-    pub keyboard: Keyboard,
-    pub sound_timer: f32,
-    pub delay_timer: f32,
-    pub interp_state: InterpreterHistoryFragment,
-}
-
-impl PartialEq for VMHistoryFragment {
-    fn eq(&self, other: &Self) -> bool {
-        self.keyboard == other.keyboard
-            && self.sound_timer == other.sound_timer
-            && self.delay_timer == other.delay_timer
-            && self.interp_state == other.interp_state
-    }
-}
-
-impl From<&VM> for VMHistoryFragment {
-    fn from(vm: &VM) -> Self {
-        VMHistoryFragment {
-            time_step: vm.time_step,
-            keyboard: vm.keyboard,
-            sound_timer: vm.sound_timer,
-            delay_timer: vm.delay_timer,
-            interp_state: (&vm.interp).into(),
-        }
-    }
-}
-
-impl VMHistoryFragment {
-    pub fn can_replace(&self, other: &Self, interp: &Interpreter) -> bool {
-        if self.interp_state.are_get_key_forms(&other.interp_state) {
-            let (_, kd2, ku2) = other.keyboard.state();
-            interp.pick_key(kd2, ku2).is_none()
-        } else {
-            false
-        }
-    }
-
-    pub fn restore_keyboard(&self, vm: &mut VM) {
-        *vm.keyboard_mut() = self.keyboard;
-    }
-}
-
 pub struct VM {
     pub time_step: f32,
 
@@ -207,5 +163,49 @@ impl VM {
         }
 
         Ok(should_continue)
+    }
+}
+
+pub struct VMHistoryFragment {
+    pub time_step: f32,
+    pub keyboard: Keyboard,
+    pub sound_timer: f32,
+    pub delay_timer: f32,
+    pub interp_state: InterpreterHistoryFragment,
+}
+
+impl PartialEq for VMHistoryFragment {
+    fn eq(&self, other: &Self) -> bool {
+        self.keyboard == other.keyboard
+            && self.sound_timer == other.sound_timer
+            && self.delay_timer == other.delay_timer
+            && self.interp_state == other.interp_state
+    }
+}
+
+impl From<&VM> for VMHistoryFragment {
+    fn from(vm: &VM) -> Self {
+        VMHistoryFragment {
+            time_step: vm.time_step,
+            keyboard: vm.keyboard,
+            sound_timer: vm.sound_timer,
+            delay_timer: vm.delay_timer,
+            interp_state: (&vm.interp).into(),
+        }
+    }
+}
+
+impl VMHistoryFragment {
+    pub fn can_replace(&self, other: &Self, interp: &Interpreter) -> bool {
+        if self.interp_state.are_get_key_forms(&other.interp_state) {
+            let (_, kd2, ku2) = other.keyboard.state();
+            interp.pick_key(kd2, ku2).is_none()
+        } else {
+            false
+        }
+    }
+
+    pub fn restore_keyboard(&self, vm: &mut VM) {
+        *vm.keyboard_mut() = self.keyboard;
     }
 }

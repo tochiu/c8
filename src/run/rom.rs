@@ -1,6 +1,6 @@
 use std::{ffi::OsStr, fmt::Display, fs::read, io, path::Path};
 
-use super::interp::{PROGRAM_STARTING_ADDRESS, PROGRAM_MEMORY_SIZE};
+use super::interp::{PROGRAM_MEMORY_SIZE, PROGRAM_STARTING_ADDRESS};
 
 pub const MAX_ROM_SIZE: u16 = PROGRAM_MEMORY_SIZE - PROGRAM_STARTING_ADDRESS;
 
@@ -38,18 +38,23 @@ pub struct Rom {
 }
 
 impl Rom {
-    pub fn read<P: AsRef<Path>>(path: P, kind: RomKind, logging: bool, debugging: bool) -> io::Result<Rom> {
+    pub fn read<P: AsRef<Path>>(
+        path: P,
+        kind: RomKind,
+        logging: bool,
+        debugging: bool,
+    ) -> io::Result<Rom> {
         let rom = Rom {
-            config: RomConfig { 
+            config: RomConfig {
                 name: path
                     .as_ref()
                     .file_stem()
                     .and_then(OsStr::to_str)
                     .unwrap_or("Untitled")
-                    .into(), 
-                kind, 
-                logging, 
-                debugging 
+                    .into(),
+                kind,
+                logging,
+                debugging,
             },
             data: read(path)?,
         };
@@ -57,10 +62,7 @@ impl Rom {
         if rom.data.len() < 2 {
             Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!(
-                    "ROM size ({}B) is below minimum size (2B)",
-                    rom.data.len()
-                ),
+                format!("ROM size ({}B) is below minimum size (2B)", rom.data.len()),
             ))
         } else if rom.data.len() > MAX_ROM_SIZE as usize {
             Err(io::Error::new(

@@ -4,10 +4,7 @@ use super::{
     vm::{VMEvent, VM},
 };
 
-use crate::{
-    dbg::core::Debugger,
-    render::spawn_render_thread,
-};
+use crate::{dbg::core::Debugger, render::spawn_render_thread};
 
 use anyhow::Result;
 use crossterm::{
@@ -180,7 +177,6 @@ fn update_frequency_stats(
 }
 
 pub struct Runner {
-
     c8: Arc<Mutex<C8>>,
 
     thread_handle: JoinHandle<RunResult>,

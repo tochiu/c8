@@ -253,14 +253,14 @@ pub enum InterpreterRequest {
 
 pub type InterpreterMemory = [u8; PROGRAM_MEMORY_SIZE as usize];
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Debug)]
 pub enum PartialInterpreterStatePayload {
     Rng(StdRng),
     Display(Display),
     Flags([u8; 8]),
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct InterpreterHistoryFragment {
     pub instruction: Option<Instruction>,
     pub pc: u16,
@@ -285,9 +285,14 @@ impl From<&Interpreter> for InterpreterHistoryFragment {
         InterpreterHistoryFragment {
             payload: instruction.and_then(|instruction| match instruction {
                 Instruction::GenerateRandom(_, _) => Some(Box::new(PartialInterpreterStatePayload::Rng(interp.rng.clone()))),
-                Instruction::ClearScreen | Instruction::ScrollDown(_) | Instruction::ScrollLeft | Instruction::ScrollRight | Instruction::LowResolution | Instruction::HighResolution => Some(Box::new(PartialInterpreterStatePayload::Display(interp.output.display.clone()))),
                 Instruction::StoreFlags(_) => Some(Box::new(PartialInterpreterStatePayload::Flags(interp.flags))),
-                _ => Some(Box::new(PartialInterpreterStatePayload::Display(interp.output.display.clone()))),
+                Instruction::ClearScreen 
+                | Instruction::ScrollDown(_) 
+                | Instruction::ScrollLeft 
+                | Instruction::ScrollRight 
+                | Instruction::LowResolution 
+                | Instruction::HighResolution => Some(Box::new(PartialInterpreterStatePayload::Display(interp.output.display.clone()))),
+                _ => None,
             }),
 
             pc: interp.pc,
@@ -311,7 +316,13 @@ impl InterpreterHistoryFragment {
 
     pub(super) fn does_modify_display(&self) -> bool {
         match self.instruction {
-            Some(Instruction::ClearScreen | Instruction::ScrollDown(_) | Instruction::ScrollLeft | Instruction::ScrollRight | Instruction::LowResolution | Instruction::HighResolution | Instruction::Display(_, _, _)) => true,
+            Some(Instruction::ClearScreen 
+                | Instruction::ScrollDown(_) 
+                | Instruction::ScrollLeft 
+                | Instruction::ScrollRight 
+                | Instruction::LowResolution 
+                | Instruction::HighResolution 
+                | Instruction::Display(_, _, _)) => true,
             _ => false,
         }
     }
@@ -755,9 +766,9 @@ impl Interpreter {
 
         self.registers[VFLAG] = self.output.display.draw(
             &self.memory[self.index as usize..],
-            self.registers[vx as usize],
-            self.registers[vy as usize],
-            height,
+            self.registers[vx as usize] as u16,
+            self.registers[vy as usize] as u16,
+            height as u16,
             bytes_per_row == 2,
         ) as u8;
 

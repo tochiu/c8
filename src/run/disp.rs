@@ -1,41 +1,41 @@
 use super::rom::RomKind;
 
-use tui::{
-    buffer::Buffer,
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
-    widgets::{Block, Borders, Widget},
-};
+use tui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DisplayMode {
     LowResolution,
     HighResolution,
 }
 
 impl DisplayMode {
-    pub fn dimensions(&self) -> (u8, u8) {
+    pub fn dimensions(&self) -> (u16, u16) {
         match self {
             Self::LowResolution => (LORES_DISPLAY_WIDTH, LORES_DISPLAY_HEIGHT),
             Self::HighResolution => (HIRES_DISPLAY_WIDTH, HIRES_DISPLAY_HEIGHT),
         }
     }
+
+    pub fn window_dimensions(&self) -> (u16, u16) {
+        let (width, height) = self.dimensions();
+        (width as u16 + 2, height as u16 / 2 + 2)
+    }
 }
 
-const LORES_DISPLAY_WIDTH: u8 = 64;
-const LORES_DISPLAY_HEIGHT: u8 = 32;
+const LORES_DISPLAY_WIDTH: u16 = 64;
+const LORES_DISPLAY_HEIGHT: u16 = 32;
 
-const HIRES_DISPLAY_WIDTH: u8 = 128;
-const HIRES_DISPLAY_HEIGHT: u8 = 64;
+const HIRES_DISPLAY_WIDTH: u16 = 128;
+const HIRES_DISPLAY_HEIGHT: u16 = 64;
 
 const CLEAR_DISPLAY: DisplayBuffer = [0; HIRES_DISPLAY_HEIGHT as usize];
 
 // Each u128 represents a row of the display with each bit representing whether that pixel should be on or not
 // The number of u128 represents the display height
-// NOTE: The most signficant bit corresponds to the left-most pixel on the row
+// NOTE: The left-most pixel on the row corresponds to the most significant bit
 pub type DisplayBuffer = [u128; HIRES_DISPLAY_HEIGHT as usize];
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Display {
     pub mode: DisplayMode,
     pub buffer: DisplayBuffer,
@@ -59,7 +59,7 @@ impl Display {
     pub fn clear(&mut self) {
         self.buffer.fill(0);
     }
-    
+
     pub fn scroll_down(&mut self, amt: usize) {
         let range_end = self.buffer.len() - amt;
         self.buffer.copy_within(..range_end, amt);
@@ -77,14 +77,14 @@ impl Display {
     pub fn draw(
         &mut self,
         sprite: &[u8],
-        mut pos_x: u8,
-        mut pos_y: u8,
-        height: u8,
+        mut pos_x: u16,
+        mut pos_y: u16,
+        height: u16,
         is_16bit_sprite: bool,
     ) -> bool {
         let (display_width, display_height) = self.mode.dimensions();
         let buf = &mut self.buffer;
-        let bytes_per_chunk = if is_16bit_sprite { 2 } else { 1 };
+        let bytes_per_row = if is_16bit_sprite { 2 } else { 1 };
         let mask = if self.mode == DisplayMode::HighResolution {
             u128::MAX
         } else {
@@ -96,18 +96,17 @@ impl Display {
 
         let mut flag = false;
 
-        // iterate over rows that aren't clipped by the display height
-        //     and map row index to mutable ref of row in display buffer
-        //     and expanding 8-bit row data to 64 bits by padding (64 - 8) zeros to the right and then shifting everything to the right by pos_x amount
-        //     now we have built a dst &mut u128 (display_row) and src u128 (sprite_row) that we can xor
+        // iterate over bytes_per_row chunks and combine them into a u128
+        // then shift the row all the way to the left and shift it back to the right by pos_x
+        // then AND it with the mask to make sure we don't draw outside the display
         for (display_row, sprite_row) in buf[pos_y as usize..].iter_mut().zip(
-            sprite[..(height.min(display_height - pos_y) as usize) * bytes_per_chunk]
-                .chunks_exact(bytes_per_chunk)
+            sprite[..(height.min(display_height - pos_y) as usize) * bytes_per_row]
+                .chunks_exact(bytes_per_row)
                 .map(|chunk| {
                     chunk
                         .iter()
                         .fold(0u128, |row, byte| (row << 8) | *byte as u128)
-                        << (128 - 8 * bytes_per_chunk)
+                        << (128 - 8 * bytes_per_row)
                         >> pos_x
                         & mask
                 }),
@@ -124,86 +123,50 @@ impl Display {
 pub struct DisplayWidget<'a, 'b> {
     pub display: &'a Display,
     pub logging: bool,
-    pub title: &'b str,
+    pub rom_name: &'b str,
     pub rom_kind: RomKind,
     pub instruction_frequency: u16,
 }
 
 impl<'a, 'b> DisplayWidget<'_, '_> {
-    pub fn logger_area(&self, area: Rect) -> Rect {
-        self.areas(area).1
-    }
-
-    fn areas(&self, area: Rect) -> (Rect, Rect) {
-        let (display_width, _) = self.display.mode.dimensions();
-        if self.logging {
-            let rects = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Length(display_width as u16 + 2),
-                    Constraint::Length(area.width.saturating_sub(display_width as u16 + 2)),
-                ])
-                .split(area);
-            (rects[0], rects[1])
-        } else {
-            (area, Rect::default())
-        }
+    pub fn title(&self) -> String {
+        format!(
+            " {} Virtual Machine ({}) {}Hz ",
+            self.rom_kind, self.rom_name, self.instruction_frequency
+        )
     }
 }
 
-// TODO: when wake up figure out blank screen bug
-
 impl<'a, 'b> Widget for DisplayWidget<'_, '_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // prepare display window
-        let window = Block::default()
-            .title(format!(" {} Virtual Machine ({}) {}Hz ", self.rom_kind, self.title, self.instruction_frequency))
-            .border_style(Style::default().fg(Color::White))
-            .borders(Borders::ALL);
-        let window_area = self.areas(area).0;
-        let window_inner_area = window.inner(window_area);
-
-        window.render(window_area, buf);
-
         let (display_width, display_height) = self.display.mode.dimensions();
 
-        let display_area = Rect::new(
-            window_inner_area.x,
-            window_inner_area.y,
-            display_width as u16,
-            display_height as u16/2,
-        );
+        // terminal pixel height is twice the width but there is a unicode top-half block (▀) and bottom-half block (▄)
+        // so for each pixel in the row of the terminal we can use half-block color and the background color to represent 2 pixels in the display
+        // so for each row of the terminal we can fit 2 rows of the display
+        for area_row_index in 0..area.height.min(display_height as u16 / 2) {
+            // NOTE: we reverse the bits so the left most pixel is the least significant bit (this makes writing the bitwise ops simpler)
+            let row_top_bits = self.display.buffer[2 * area_row_index as usize + 0].reverse_bits();
+            let row_bot_bits = self.display.buffer[2 * area_row_index as usize + 1].reverse_bits();
 
-        // if there is no common area between where the display must be drawn (display_area) and our allowed render area then we return
-        if !window_inner_area.intersects(display_area) {
-            return;
-        }
+            for area_column_index in 0..area.width.min(display_width as u16) {
+                let top_is_on = row_top_bits >> area_column_index & 1 == 1;
+                let bot_is_on = row_bot_bits >> area_column_index & 1 == 1;
 
-        // otherwise we draw the part of the display buffer that intersects the allowed render area
-        let intersect_area = window_inner_area.intersection(display_area);
+                let cell =
+                    buf.get_mut(area.left() + area_column_index, area.top() + area_row_index);
 
-        // now get the bit for each position (x, y) in the intersection area
-        // and change the color of the terminal background at that position accordingly
-
-        for y in intersect_area.top()..intersect_area.bottom() {
-            // reverse the bits of the row so now the least significant bit is our left most pixel (this just makes writing the bitwise ops simpler)
-            let up_bits = self.display.buffer[2*(y as usize - display_area.top() as usize)].reverse_bits();
-            let down_bits = self.display.buffer[2*(y as usize - display_area.top() as usize) + 1].reverse_bits();
-
-            for x in intersect_area.left()..intersect_area.right() {
-                // x - left side of the display area gives us our right shift offset so now just do an AND mask with 1 to get bit at that position
-                // set color according to value
-                let color_top = up_bits >> (x - display_area.left()) & 1 == 1;
-                let color_bottom = down_bits >> (x - display_area.left()) & 1 == 1;
-
-                let cell = buf.get_mut(x, y);
-
-                match (color_top, color_bottom) {
-                    (true, true) => cell.set_bg(Color::Green),
-                    (true, false) => cell.set_bg(Color::Gray).set_fg(Color::Green).set_symbol("▀"),
-                    (false, true) => cell.set_bg(Color::Gray).set_fg(Color::Green).set_symbol("▄"),
-                    (false, false) => cell.set_bg(Color::Gray),
-                };
+                if top_is_on && bot_is_on {
+                    cell.set_bg(Color::Green);
+                } else {
+                    cell.set_bg(Color::Gray);
+                    cell.set_fg(Color::Green);
+                    if top_is_on {
+                        cell.set_symbol("▀");
+                    } else if bot_is_on {
+                        cell.set_symbol("▄");
+                    }
+                }
             }
         }
     }

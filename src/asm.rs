@@ -1,5 +1,8 @@
 use crate::run::{
-    interp::{Instruction, InstructionParameters, Interpreter, InterpreterMemory, PROGRAM_STARTING_ADDRESS},
+    interp::{
+        Instruction, InstructionParameters, Interpreter, InterpreterMemory,
+        PROGRAM_STARTING_ADDRESS,
+    },
     rom::{Rom, RomKind},
 };
 
@@ -17,8 +20,8 @@ pub enum InstructionTag {
     Not,       // Instruction that cannot be parsed
     Parsable,  // Instruction that can be parsed
     Reachable, // Parsable instruction that is reachable by at least one execution path
-    Valid,     // Reachable instruction whose subsequent execution contains at least one path that leads to a valid or better instruction
-    Proven,    // Valid instruction that can be reached by at least one static execution path (path w/o jump with offset)
+    Valid, // Reachable instruction whose subsequent execution contains at least one path that leads to a valid or better instruction
+    Proven, // Valid instruction that can be reached by at least one static execution path (path w/o jump with offset)
 }
 
 impl InstructionTag {
@@ -37,7 +40,7 @@ pub struct DisassemblyPath<'a> {
     addr: u16,
     tag: InstructionTag,
     depth: usize,
-    
+
     trace: &'a mut Vec<TraceEntry>,
     trace_pushed: bool,
 }
@@ -80,7 +83,7 @@ impl<'a> DisassemblyPath<'_> {
         self.trace.push(TraceEntry {
             addr: self.addr,
             instruction,
-            payload
+            payload,
         });
     }
 
@@ -97,7 +100,7 @@ pub struct Disassembler {
     pub instructions: Vec<Option<Instruction>>,
     pub rom: Rom,
     pub memory: InterpreterMemory,
-    pub tags: Vec<InstructionTag>, 
+    pub tags: Vec<InstructionTag>,
     pub traces: Vec<Trace>,
 }
 
@@ -164,7 +167,11 @@ impl Disassembler {
         let lbound = addr as usize;
         let rbound = addr.saturating_add(bytes + 1).min(memory.len() as u16) as usize;
 
-        log::trace!("Prelim disassembly of address range [{:#05X}, {:#05X})", lbound, rbound);
+        log::trace!(
+            "Prelim disassembly of address range [{:#05X}, {:#05X})",
+            lbound,
+            rbound
+        );
 
         for ((((new_param_bits, byte), params), inst), tag) in memory[lbound..rbound]
             .windows(2)
@@ -213,11 +220,7 @@ impl Disassembler {
     }
 
     pub fn run(&mut self) {
-        self.run_from(
-            PROGRAM_STARTING_ADDRESS,
-            InstructionTag::Proven,
-            0,
-        );
+        self.run_from(PROGRAM_STARTING_ADDRESS, InstructionTag::Proven, 0);
     }
 
     pub fn run_from(&mut self, addr: u16, tag: InstructionTag, depth: usize) {
@@ -236,7 +239,11 @@ impl Disassembler {
             trace_pushed: false,
         });
         let elapsed = now.elapsed().as_micros();
-        log::info!("Disassembled \"{}\" in {} us", &self.rom.config.name, elapsed);
+        log::info!(
+            "Disassembled \"{}\" in {} us",
+            &self.rom.config.name,
+            elapsed
+        );
     }
 
     fn eval(&mut self, mut path: DisassemblyPath) -> bool {
@@ -259,7 +266,6 @@ impl Disassembler {
             // traverse
 
             let path_is_valid = match instruction {
-
                 Instruction::Exit => true,
 
                 Instruction::Jump(addr) => {
@@ -284,7 +290,8 @@ impl Disassembler {
                     for i in 0..=255 {
                         path.enter_trace(Some(instruction), Some(i));
                         if (i as usize) < self.memory.len() - addr as usize {
-                            let is_valid_jump = self.eval(path.fork(addr + i as u16).tag(InstructionTag::Valid));
+                            let is_valid_jump =
+                                self.eval(path.fork(addr + i as u16).tag(InstructionTag::Valid));
                             valid_jump_exists = valid_jump_exists || is_valid_jump;
                         }
                         path.leave_trace();
@@ -305,7 +312,7 @@ impl Disassembler {
 
                     valid_jump_exists
                 }
-                
+
                 Instruction::CallSubroutine(addr) => {
                     // i would check that path.addr + 2 is a valid address but technically the subroutine could never return
                     // so it isn't certain that we traverse the next instruction, valid or not
@@ -317,7 +324,6 @@ impl Disassembler {
                         // if the call path is valid, then the next instruction can be evaluated
                         self.eval(path.fork(path.addr + 2));
                     }
-                    
 
                     is_call_path_valid
                 }
@@ -429,14 +435,24 @@ impl Disassembler {
     }
 
     pub fn write_issue_traces(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
-        writeln!(f, "FOUND {} ISSUE{}\n", self.traces.len(), if self.traces.len() == 1 { "" } else { "S" })?;
+        writeln!(
+            f,
+            "FOUND {} ISSUE{}\n",
+            self.traces.len(),
+            if self.traces.len() == 1 { "" } else { "S" }
+        )?;
         for trace in self.traces.iter() {
             let is_error = trace.tag == InstructionTag::Proven;
 
             let mut asm = String::new();
             let mut asm_desc = String::new();
             // TODO: fix this
-            writeln!(f, "{} {}", if is_error { "ERROR:" } else { "WARNING:" }, &trace.message)?;
+            writeln!(
+                f,
+                "{} {}",
+                if is_error { "ERROR:" } else { "WARNING:" },
+                &trace.message
+            )?;
             for entry in trace.entries.iter().rev() {
                 write!(f, "  at {:#05X}", entry.addr)?;
                 if let Some(inst) = entry.instruction.as_ref() {
@@ -452,7 +468,7 @@ impl Disassembler {
                                 write!(f, " (offset = all)")?;
                             }
                         }
-                        
+
                         Instruction::CallSubroutine(addr) => {
                             write!(f, " CALL {:#05X}", addr)?;
                         }
@@ -468,12 +484,12 @@ impl Disassembler {
                         _ => {
                             asm.clear();
                             asm_desc.clear();
-                            write_inst_asm(inst, self.rom.config.kind, &mut asm, &mut asm_desc).expect("Writing instruction to string failed");
+                            write_inst_asm(inst, self.rom.config.kind, &mut asm, &mut asm_desc)
+                                .expect("Writing instruction to string failed");
                             write!(f, " {}", &asm)?;
                             if asm_desc.len() > 0 {
                                 write!(f, " {} {}", ADDRESS_COMMENT_TOKEN, &asm_desc)?;
                             } else {
-                                
                             }
                         }
                     }
@@ -518,7 +534,13 @@ impl Display for Disassembler {
             asm_content.clear();
             asm_comment.clear();
 
-            self.write_addr_disasm(addr, &mut bin_header, &mut bin_opcode, &mut asm_content, &mut asm_comment)?;
+            self.write_addr_disasm(
+                addr,
+                &mut bin_header,
+                &mut bin_opcode,
+                &mut asm_content,
+                &mut asm_comment,
+            )?;
 
             let show_bin_comment = tag <= InstructionTag::Valid;
             let show_asm_content = tag >= InstructionTag::Valid;
@@ -729,27 +751,27 @@ pub fn write_inst_asm(
         }
         Instruction::ScrollDown(n) => {
             write!(f, "scd")?;
-            write!(c, "scroll display {} down", n)
+            write!(c, "scroll {} down", n)
         }
         Instruction::ScrollLeft => {
             write!(f, "scl")?;
-            write!(c, "scroll display left")
+            write!(c, "scroll left")
         }
         Instruction::ScrollRight => {
             write!(f, "scr")?;
-            write!(c, "scroll display right")
+            write!(c, "scroll right")
         }
         Instruction::LowResolution => {
             write!(f, "low")?;
-            write!(c, "use lo-res display")
+            write!(c, "use lo-res")
         }
         Instruction::HighResolution => {
             write!(f, "high")?;
-            write!(c, "use hi-res display")
+            write!(c, "use hi-res")
         }
         Instruction::ClearScreen => {
             write!(f, "cls")?;
-            write!(c, "clear display")
+            write!(c, "clear")
         }
     }
 }

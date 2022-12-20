@@ -106,7 +106,7 @@ pub enum ShowHideOption {
     Memory {
         /// Memory but without address collapsing around instructions and both graphics and instruction descriptions visible
         #[clap(long, short)]
-        verbose: bool
+        verbose: bool,
     },
 }
 
@@ -256,13 +256,6 @@ pub enum DebugCliCommand {
         #[arg(value_name = "FREQUENCY")]
         hertz: u16,
     },
-
-    /// Record the program history as it executes
-    #[clap(visible_aliases = &["r", "rec"])]
-    Record,
-
-    /// Stop recording and clear program history
-    Stop,
 
     /// Redo the next N (default = 1) instructions within the program history
     #[clap(visible_aliases = &["ff", "fast-forward", ">>"])]
