@@ -125,14 +125,14 @@ pub struct DisplayWidget<'a, 'b> {
     pub logging: bool,
     pub rom_name: &'b str,
     pub rom_kind: RomKind,
-    pub instruction_frequency: u16,
+    pub execution_frequency: u16,
 }
 
 impl<'a, 'b> DisplayWidget<'_, '_> {
     pub fn title(&self) -> String {
         format!(
             " {} Virtual Machine ({}) {}Hz ",
-            self.rom_kind, self.rom_name, self.instruction_frequency
+            self.rom_kind, self.rom_name, self.execution_frequency
         )
     }
 }

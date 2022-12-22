@@ -34,13 +34,13 @@ pub type C8Lock = Arc<Mutex<C8>>;
 pub type RunResult = Result<RunAnalytics, String>;
 pub type RunControlResult = Result<(), &'static str>;
 
-pub const GOOD_INSTRUCTION_FREQUENCY_DIFF: f64 = 1.0;
-pub const OKAY_INSTRUCTION_FREQUENCY_DIFF: f64 = 10.0;
+pub const GOOD_EXECUTION_FREQUENCY_PERCENT_DIFF: f64 = 1.0;
+pub const OKAY_EXECUTION_FREQUENCY_PERCENT_DIFF: f64 = 10.0;
 
-pub fn spawn_run_threads(rom: Rom, init_hz: u16) -> (JoinHandle<()>, JoinHandle<RunResult>) {
+pub fn spawn_run_threads(rom: Rom, initial_target_execution_frequency: u16) -> (JoinHandle<()>, JoinHandle<RunResult>) {
     // runner
     let rom_config = rom.config.clone();
-    let mut runner = Runner::spawn(rom, init_hz);
+    let mut runner = Runner::spawn(rom, initial_target_execution_frequency);
 
     // render
     let (render_sender, render_thread) = spawn_render_thread(runner.c8(), rom_config.clone());
@@ -207,13 +207,13 @@ impl Runner {
         self.thread_handle.is_finished()
     }
 
-    pub fn set_instruction_frequency(&mut self, frequency: u16) -> Result<(), &'static str> {
+    pub fn set_execution_frequency(&mut self, frequency: u16) -> Result<(), &'static str> {
         self.thread_frequency_sender
             .send(frequency)
             .map_err(|_| "Failed to send instruction frequency to vm thread")
     }
 
-    pub fn spawn(rom: Rom, init_hz: u16) -> Self {
+    pub fn spawn(rom: Rom, initial_target_execution_frequency: u16) -> Self {
         let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
         let (thread_continue_sender, thread_continue_receiver) = channel::<bool>();
         let (thread_frequency_sender, thread_frequency_receiver) = channel::<u16>();
@@ -223,7 +223,7 @@ impl Runner {
         let c8 = Arc::new(Mutex::new({
             let vm = VM::new(rom, vm_event_receiver);
             let dbg = if rom_config.debugging {
-                Some(Debugger::new(&vm, init_hz))
+                Some(Debugger::new(&vm, initial_target_execution_frequency))
             } else {
                 None
             };
@@ -231,7 +231,7 @@ impl Runner {
             (vm, dbg)
         }));
 
-        let mut frequency = init_hz;
+        let mut frequency = initial_target_execution_frequency;
         let mut frequency_stats: BTreeMap<u16, (Duration, u64)> = BTreeMap::new();
 
         let thread_handle = {
@@ -440,9 +440,9 @@ impl Display for RunAnalytics {
         {
             let ips = instructions_executed as f64 / runtime_duration.as_secs_f64();
             let ips_diff = (ips - target_ips as f64) / target_ips as f64 * 100.0;
-            let color_ips_diff = if ips_diff.abs() > OKAY_INSTRUCTION_FREQUENCY_DIFF {
+            let color_ips_diff = if ips_diff.abs() > OKAY_EXECUTION_FREQUENCY_PERCENT_DIFF {
                 Stylize::red
-            } else if ips_diff.abs() > GOOD_INSTRUCTION_FREQUENCY_DIFF {
+            } else if ips_diff.abs() > GOOD_EXECUTION_FREQUENCY_PERCENT_DIFF {
                 Stylize::yellow
             } else {
                 Stylize::green

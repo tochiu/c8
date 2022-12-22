@@ -21,7 +21,7 @@ const HISTORY_CAPACITY: usize = 250_000;
 
 pub(super) struct History {
     pub fragments: VecDeque<VMHistoryFragment>,
-
+    pub present_fragment: Option<VMHistoryFragment>,
     rom_kind: RomKind,
     cursor: usize,
 }
@@ -31,6 +31,7 @@ impl History {
         Self {
             rom_kind,
             fragments: VecDeque::with_capacity(HISTORY_CAPACITY),
+            present_fragment: None,
             cursor: 0,
         }
     }
@@ -44,27 +45,19 @@ impl History {
     }
 
     pub(super) fn undo(&mut self, vm: &mut VM, amt: usize) -> usize {
-        let mut amt_rewinded = 0;
+        if self.redo_amount() == 0 {
+            self.present_fragment = Some(vm.to_history_fragment());
+        }
 
+        let mut amt_rewinded = 0;
         for _ in 0..amt {
             if self.cursor == 0 {
                 break;
-            }
-            if &VMHistoryFragment::from(&*vm) == &self.fragments[self.cursor - 1] {
-                log::trace!(
-                    "Skipping identical VM state at history index {}",
-                    self.cursor - 1
-                );
-                self.cursor -= 1;
-                if self.cursor == 0 {
-                    break;
-                }
             }
             self.cursor -= 1;
             vm.undo(&self.fragments[self.cursor]);
             amt_rewinded += 1;
         }
-
         amt_rewinded
     }
 
@@ -76,39 +69,47 @@ impl History {
 
         vm.drain_event_queue();
 
-        let state = VMHistoryFragment::from(&*vm); // get state of vm
+        let state = vm.to_history_fragment(); // get state of vm
 
-        // if cursor is at the start or the new state is different from the previous one
-        // we know we might advance the history cursor
-        let amt_clearing = self.fragments.len() - self.cursor;
-        if amt_clearing == 0 || &self.fragments[self.cursor] != &state {
-            if amt_clearing > 0 {
-                log::info!(
-                    "Clearing {} history checkpoints equal or ahead of cursor",
-                    amt_clearing
-                );
-                self.fragments.truncate(self.cursor);
-            } else if self.cursor > 0
-                && state.can_replace(&self.fragments[self.cursor - 1], vm.interpreter())
-            {
-                log::debug!("Replacing history checkpoint at cursor");
-                self.cursor -= 1;
-                self.fragments.pop_back();
+        // if we have redo ahead of us but the cursor isnt consistent with our current state then we need to clear it
+        let mut redo_amount = self.redo_amount();
+        if redo_amount > 0 && state != self.fragments[self.cursor] {
+            log::info!(
+                "Clearing {} history checkpoints at or ahead of cursor",
+                redo_amount
+            );
+            state.log_diff(&self.fragments[self.cursor]); // DEBUG
+            self.fragments.truncate(self.cursor);
+            redo_amount = 0;
+        }
+
+        let vm_result = vm.step();
+
+        // if vm is continuing then update memory access flags too
+        if let Ok(true) = vm_result {
+            if !vm.interpreter().output.waiting {
+                vm.update_memory_access_flags(&state.interpreter);
             }
+        }
 
+        if redo_amount == 0 && !vm.interpreter().output.waiting && vm_result.is_ok() {
             if self.fragments.len() == HISTORY_CAPACITY {
                 self.fragments.pop_front();
             }
             self.fragments.push_back(state);
         }
+
         self.cursor = (self.cursor + 1).min(self.fragments.len());
 
-        let vm_result = vm.step();
-
-        // edge case: keyboard contains ephemeral state so we must manually restore it
-        // before each step if we are seeking through recorded history
-        if self.cursor < self.fragments.len() {
-            self.fragments[self.cursor].restore_keyboard(&mut *vm);
+        // restore state of vm that is independent of the vm step (input state)
+        if self.redo_amount() > 0 { // in past
+            self.fragments[self.cursor].restore(&mut *vm);
+        } else { // in present
+            if let Some(present_fragment) = self.present_fragment.take() {
+                if redo_amount > 0 { // made it to present instead of losing redo history
+                    present_fragment.restore(&mut *vm);
+                }
+            }
         }
 
         vm_result
@@ -187,11 +188,11 @@ impl<'a> Widget for HistoryWidget<'_> {
 
             for interp_state in history
                 .range(lbound..rbound.min(history.len()))
-                .map(|fragment| &fragment.interp_state)
+                .map(|fragment| &fragment.interpreter)
             {
                 asm.clear();
                 asm_desc.clear();
-                write!(&mut asm, "{:#05X}: ", interp_state.pc).ok();
+                write!(&mut asm, "  {:#05X}: ", interp_state.pc).ok();
                 asm_desc.push_str(ADDRESS_COMMENT_TOKEN);
                 asm_desc.push(' ');
                 if let Some(inst) = interp_state.instruction.as_ref() {
@@ -201,7 +202,7 @@ impl<'a> Widget for HistoryWidget<'_> {
                 }
 
                 if asm_desc.len() > ADDRESS_COMMENT_TOKEN.len() + 1 {
-                    for _ in 0..(8 + INSTRUCTION_MAX_LENGTH).saturating_sub(asm.len()) {
+                    for _ in 0..(10 + INSTRUCTION_MAX_LENGTH).saturating_sub(asm.len()) {
                         asm.push(' ');
                     }
 
@@ -215,7 +216,7 @@ impl<'a> Widget for HistoryWidget<'_> {
             }
 
             if rbound == history.len() + 1 {
-                lines.push(Spans::from("PRESENT"));
+                lines.push(Spans::from("  PRESENT"));
             }
 
             if let Some(line) = lines.get_mut(cursor - lbound) {

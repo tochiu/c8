@@ -1,7 +1,8 @@
 use super::{
     disp::{DisplayMode, Display},
     input::Key,
-    rom::{Rom, RomKind}
+    rom::{Rom, RomKind}, 
+    mem::{MEM_ACCESS_EXEC_FLAG, MEM_ACCESS_READ_FLAG, MEM_ACCESS_WRITE_FLAG, MEM_ACCESS_DRAW_FLAG}
 };
 
 use rand::rngs::StdRng;
@@ -48,6 +49,48 @@ const BIG_FONT: [u8; 100] = [
     0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F, 0x03, 0x03, 0x3E, 0x7C, // 9
 ];
 
+pub trait MemoryRef {
+    fn add_addresses(&self, lhs: u16, rhs: u16) -> u16;
+    fn export(&self, address: u16, dst: &mut [u8]);
+}
+
+pub trait MemoryMut {
+    fn import(&mut self, src: &[u8], address: u16);
+}
+
+impl<T> MemoryRef for T where T: AsRef<[u8]> + ?Sized {
+    fn add_addresses(&self, lhs: u16, rhs: u16) -> u16 {
+        lhs.overflowing_add(rhs).0 % self.as_ref().len() as u16
+    }
+
+    fn export(&self, address: u16, dst: &mut [u8]) {
+        let memory = self.as_ref();
+        let address = address as usize % memory.len();
+
+        let pivot = dst.len().min(address.abs_diff(memory.len()));
+        let (dst0, dst1) = dst.split_at_mut(pivot);
+
+        let src0 = &memory[address..address + dst0.len()];
+        let src1 = &memory[..dst1.len()];
+
+        dst0.copy_from_slice(src0);
+        dst1.copy_from_slice(src1);
+    }
+}
+
+impl<T> MemoryMut for T where T: AsMut<[u8]> + ?Sized {
+    fn import(&mut self, src: &[u8], address: u16) {
+        let memory = self.as_mut();
+        let address = address as usize % memory.len();
+
+        let pivot = src.len().min(address.abs_diff(memory.len()));
+        let (src0, src1) = src.split_at(pivot);
+
+        memory[address..address + src0.len()].copy_from_slice(src0);
+        memory[..src1.len()].copy_from_slice(src1);
+    }
+}
+
 // Takes 16 bits (instruction size) and decomposes it into its parts
 #[derive(Clone, Copy, Debug)]
 pub struct InstructionParameters {
@@ -74,18 +117,15 @@ impl From<u16> for InstructionParameters {
     }
 }
 
-impl From<[u8; 2]> for InstructionParameters {
-    fn from(bytes: [u8; 2]) -> Self {
-        InstructionParameters::from((bytes[0] as u16) << 8 | bytes[1] as u16)
-    }
-}
-
 impl InstructionParameters {
+    pub fn from_bytes(byte0: u8, byte1: u8) -> Self {
+        InstructionParameters::from((byte0 as u16) << 8 | byte1 as u16)
+    }
     pub fn try_decode(&self, kind: RomKind) -> Result<Instruction, String> {
         let (op, x, y, n, nn, nnn) = (
             self.op, self.x, self.y, self.n, self.nn, self.nnn,
         );
-
+        
         match op {
             0x0 => match nnn {
                 0x0E0 => Ok(Instruction::ClearScreen),
@@ -230,6 +270,8 @@ pub enum Instruction {
 pub struct InterpreterInput {
     pub delay_timer: u8,
 
+    pub vertical_blank: bool,
+
     pub down_keys: u16,
     pub just_pressed_key: Option<u8>,
     pub just_released_key: Option<u8>,
@@ -238,7 +280,7 @@ pub struct InterpreterInput {
 // Response body so IO know how to proceed
 pub struct InterpreterOutput {
     pub display: Display,
-    pub awaiting_input: bool,
+    pub waiting: bool,
 
     pub request: Option<InterpreterRequest>,
 }
@@ -251,85 +293,66 @@ pub enum InterpreterRequest {
     SetSoundTimer(u8),
 }
 
-pub type InterpreterMemory = [u8; PROGRAM_MEMORY_SIZE as usize];
-
 #[derive(Eq, PartialEq, Debug)]
-pub enum PartialInterpreterStatePayload {
-    Rng(StdRng),
-    Display(Display),
-    Flags([u8; 8]),
+pub enum InterpreterHistoryFragmentExtra {
+    WillGenerateRandom {
+        rng: Box<StdRng>,
+    },
+    WillDrawEntireDisplay {
+        display: Box<Display>,
+    },
+    WillLoadFromMemory {
+        index_access_flag_slice: [u8; 32]
+    },
+    WillStoreInMemory {
+        index_memory: [u8; 16],
+        index_access_flag_slice: [u8; 16]
+    },
+    WillStoreInFlags {
+        flags: [u8; 8],
+    },
+    WillReturnFromSubroutine {
+        return_address: u16,
+    },
 }
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct InterpreterHistoryFragment {
     pub instruction: Option<Instruction>,
     pub pc: u16,
-    pub return_address: u16,
+    pub pc_access_flags: u8,
     pub index: u16,
-    pub index_memory: [u8; 32],
     pub registers: [u8; 16],
-    pub payload: Option<Box<PartialInterpreterStatePayload>>,
-}
-
-impl From<&Interpreter> for InterpreterHistoryFragment {
-    fn from(interp: &Interpreter) -> Self {
-        let mut index_memory = [0; 32];
-        let index = interp.index as usize;
-        if index < interp.memory.len() {
-            let n = (index + 32).min(interp.memory.len()) - index;
-            index_memory[..n].copy_from_slice(&interp.memory[index..index + n]);
-        }
-
-        let instruction = interp.try_fetch_decode().ok();
-
-        InterpreterHistoryFragment {
-            payload: instruction.and_then(|instruction| match instruction {
-                Instruction::GenerateRandom(_, _) => Some(Box::new(PartialInterpreterStatePayload::Rng(interp.rng.clone()))),
-                Instruction::StoreFlags(_) => Some(Box::new(PartialInterpreterStatePayload::Flags(interp.flags))),
-                Instruction::ClearScreen 
-                | Instruction::ScrollDown(_) 
-                | Instruction::ScrollLeft 
-                | Instruction::ScrollRight 
-                | Instruction::LowResolution 
-                | Instruction::HighResolution => Some(Box::new(PartialInterpreterStatePayload::Display(interp.output.display.clone()))),
-                _ => None,
-            }),
-
-            pc: interp.pc,
-            instruction,
-            return_address: interp.stack.last().cloned().unwrap_or_default(),
-            index: interp.index,
-            index_memory,
-            registers: interp.registers,
-        }
-    }
+    pub extra: Option<Box<InterpreterHistoryFragmentExtra>>,
 }
 
 impl InterpreterHistoryFragment {
-    pub(super) fn are_get_key_forms(&self, rhs: &Self) -> bool {
-        if let Some(&Instruction::GetKey(_)) = self.instruction.as_ref() {
-            self == rhs
-        } else {
-            false
+    // TODO RESTORE MEMORY ACCESS FLAGS
+    pub fn log_diff(&self, other: &Self) {
+        if self.instruction != other.instruction {
+            log::debug!("Instruction difference: {:?} -> {:?}", self.instruction, other.instruction);
         }
-    }
-
-    pub(super) fn does_modify_display(&self) -> bool {
-        match self.instruction {
-            Some(Instruction::ClearScreen 
-                | Instruction::ScrollDown(_) 
-                | Instruction::ScrollLeft 
-                | Instruction::ScrollRight 
-                | Instruction::LowResolution 
-                | Instruction::HighResolution 
-                | Instruction::Display(_, _, _)) => true,
-            _ => false,
+        if self.pc != other.pc {
+            log::debug!("PC difference: {:?} -> {:?}", self.pc, other.pc);
+        }
+        if self.pc_access_flags != other.pc_access_flags {
+            log::debug!("PC access flags difference: {:?} -> {:?}", self.pc_access_flags, other.pc_access_flags);
+        }
+        if self.index != other.index {
+            log::debug!("Index difference: {:?} -> {:?}", self.index, other.index);
+        }
+        if self.registers != other.registers {
+            log::debug!("Registers difference: {:?} -> {:?}", self.registers, other.registers);
+        }
+        if self.extra != other.extra {
+            log::debug!("Payload difference: {:?} -> {:?}", self.extra, other.extra);
         }
     }
 }
 
 pub struct Interpreter {
-    pub memory: InterpreterMemory,
+    pub memory: [u8; PROGRAM_MEMORY_SIZE as usize],
+    pub memory_access_flags: Vec<u8>,
     pub pc: u16,
     pub index: u16,
     pub stack: Vec<u16>,
@@ -341,21 +364,27 @@ pub struct Interpreter {
     pub rng: StdRng,
 }
 
-impl<'a> From<Rom> for Interpreter {
+impl From<Rom> for Interpreter {
     fn from(rom: Rom) -> Self {
         Interpreter {
             memory: Self::alloc(&rom),
-            rom,
+            memory_access_flags: if rom.config.debugging {
+                vec![0; PROGRAM_MEMORY_SIZE as usize]
+            } else {
+                vec![]
+            },
+            
             pc: PROGRAM_STARTING_ADDRESS,
             index: 0,
             stack: Vec::with_capacity(16),
             flags: [0; 8],
             registers: [0; 16],
+            rom,
             rng: StdRng::from_entropy(),
             input: Default::default(),
             output: InterpreterOutput {
                 display: Default::default(),
-                awaiting_input: false,
+                waiting: false,
                 request: None,
             },
         }
@@ -368,35 +397,33 @@ impl Interpreter {
     ) -> impl Iterator<Item = InstructionParameters> + '_ {
         binary
             .windows(2)
-            .map(|slice| InstructionParameters::from([slice[0], slice[1]]))
+            .map(|slice| InstructionParameters::from_bytes(slice[0], slice[1]))
+            .chain(
+                std::iter::once(InstructionParameters::from_bytes(
+                    *binary.last().expect("Binary shouldn't be empty!"), 
+                    *binary.first().expect("Binary shouldn't be empty!")
+                ))
+            )
     }
 
-    pub fn alloc(rom: &Rom) -> InterpreterMemory {
+    pub fn alloc(rom: &Rom) -> [u8; PROGRAM_MEMORY_SIZE as usize] {
         let mut memory = [0; PROGRAM_MEMORY_SIZE as usize];
-
-        memory[FONT_STARTING_ADDRESS as usize..FONT_STARTING_ADDRESS as usize + FONT.len()]
-            .copy_from_slice(&FONT);
-
-        memory[BIG_FONT_STARTING_ADDRESS as usize..BIG_FONT_STARTING_ADDRESS as usize + BIG_FONT.len()]
-            .copy_from_slice(&BIG_FONT);
-
-        memory[PROGRAM_STARTING_ADDRESS as usize
-            ..PROGRAM_STARTING_ADDRESS as usize + rom.data.len()]
-            .copy_from_slice(&rom.data);
-
+        memory.import(&rom.data, PROGRAM_STARTING_ADDRESS);
+        memory.import(&FONT, FONT_STARTING_ADDRESS);
+        if rom.config.kind == RomKind::SCHIP {
+            memory.import(&BIG_FONT, BIG_FONT_STARTING_ADDRESS);
+        }
+        
         memory
     }
 
-    pub fn checked_addr_add(&self, addr: u16, amt: u16) -> Option<u16> {
-        let (result_addr, result_overflow) = addr.overflowing_add(amt);
-        if (addr as usize) < self.memory.len()
-            && (result_addr as usize) < self.memory.len()
-            && !result_overflow
-        {
-            Some(result_addr)
-        } else {
-            None
-        }
+    // TODO: this needs to be removed since all chip8 specifications wait for the key up in the Get Key (FX0A) instruction
+    pub fn pick_key<'a, 'b, T: TryInto<Key>>(
+        &'a self,
+        _: &'b Option<T>,
+        key_up: &'b Option<T>,
+    ) -> &'b Option<T> {
+        key_up
     }
 
     pub fn undo(&mut self, prior_state: &InterpreterHistoryFragment) {
@@ -404,186 +431,334 @@ impl Interpreter {
         self.index = prior_state.index;
         self.registers = prior_state.registers;
 
-        let index = self.index as usize;
-        let n = (index + 32).min(self.memory.len()) - index;
+        log::debug!("Restoring memory access flags: {:?} -> {:?}", self.memory_access_flags[self.pc as usize], prior_state.pc_access_flags);
+        self.memory_access_flags[self.pc as usize] = prior_state.pc_access_flags;
 
-        self.memory[index..index + n].copy_from_slice(&prior_state.index_memory);
-        let Some(inst) = prior_state.instruction.as_ref() else {
+        let Some(instruction) = prior_state.instruction.as_ref() else {
             unreachable!("Cannot undo to a state without an instruction")
         };
-        log::trace!("Undoing instruction: {:?}", inst);
 
-        match inst {
+        log::trace!("Undoing instruction: {:?}", instruction);
+
+        match instruction {
             Instruction::CallSubroutine(_) => {
                 self.stack.pop();
             }
-            Instruction::SubroutineReturn => {
-                self.stack.push(prior_state.return_address);
-            }
             Instruction::Display(vx, vy, height) => {
-                if self.exec_display_instruction(*vx, *vy, *height).is_err() {
-                    unreachable!("Cannot undo to a state with an invalid display instruction");
-                }
+                self.exec_display_instruction(*vx, *vy, *height);
                 self.registers[VFLAG] = prior_state.registers[VFLAG];
             }
             _ => (),
         }
 
-        if let Some(payload) = prior_state.payload.as_deref() {
-            match payload {
-                PartialInterpreterStatePayload::Display(display) => {
-                    self.output.display = display.clone();
+        let Some(extra) = prior_state.extra.as_deref() else {
+            return
+        };
+
+        match extra {
+            InterpreterHistoryFragmentExtra::WillGenerateRandom { 
+                rng 
+            } => {
+                self.rng = rng.as_ref().clone();
+            },
+            InterpreterHistoryFragmentExtra::WillDrawEntireDisplay { 
+                display 
+            } => {
+                self.output.display = display.as_ref().clone();
+            },
+            InterpreterHistoryFragmentExtra::WillLoadFromMemory {
+                index_access_flag_slice
+            } => {
+                self.memory_access_flags.import(index_access_flag_slice, self.index);
+            },
+            InterpreterHistoryFragmentExtra::WillStoreInMemory {
+                index_memory,
+                index_access_flag_slice
+            } => {
+                self.memory.import(index_memory, self.index);
+                self.memory_access_flags.import(index_access_flag_slice, self.index);
+            },
+            InterpreterHistoryFragmentExtra::WillStoreInFlags {
+                flags
+            } => {
+                self.flags = *flags;
+            },
+            InterpreterHistoryFragmentExtra::WillReturnFromSubroutine {
+                return_address
+            } => {
+                self.stack.push(*return_address);
+            },
+        }
+    }
+
+    pub fn to_history_fragment(&self) -> InterpreterHistoryFragment {
+        let mut index_memory = [0; 32];
+        self.memory.export(self.index, &mut index_memory);
+
+        let instruction = self.try_fetch_decode().ok();
+        let extra = instruction.and_then(|instruction| match instruction {
+            Instruction::GenerateRandom(_, _) => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillGenerateRandom {
+                    rng: Box::new(self.rng.clone()),
                 }
-                PartialInterpreterStatePayload::Rng(rng) => {
-                    self.rng = rng.clone();
+            )),
+
+            Instruction::ClearScreen 
+            | Instruction::ScrollDown(_) 
+            | Instruction::ScrollLeft 
+            | Instruction::ScrollRight 
+            | Instruction::LowResolution 
+            | Instruction::HighResolution => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillDrawEntireDisplay { 
+                    display: Box::new(self.output.display.clone()) 
                 }
-                PartialInterpreterStatePayload::Flags(flags) => {
-                    self.flags = *flags;
+            )),
+
+            Instruction::Load(_) | Instruction::Display(_, _, _) => Some(Box::new({
+                let mut index_access_flag_slice = [0; 32];
+                self.memory_access_flags.export(self.index, &mut index_access_flag_slice);
+                InterpreterHistoryFragmentExtra::WillLoadFromMemory { 
+                    index_access_flag_slice
                 }
+            })),
+
+            Instruction::Store(_) | Instruction::StoreDecimal(_) => Some(Box::new({
+                let mut index_memory = [0; 16];
+                let mut index_access_flag_slice = [0; 16];
+                self.memory.export(self.index, &mut index_memory);
+                self.memory_access_flags.export(self.index, &mut index_access_flag_slice);
+                InterpreterHistoryFragmentExtra::WillStoreInMemory { 
+                    index_memory,
+                    index_access_flag_slice
+                }
+            })),
+
+            Instruction::StoreFlags(_) => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillStoreInFlags { 
+                    flags: self.flags,
+                }
+            )),
+
+            Instruction::SubroutineReturn => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillReturnFromSubroutine { 
+                    return_address: self.stack.last().cloned().unwrap_or_default(),
+                }
+            )),
+            
+            _ => None,
+        });
+
+        InterpreterHistoryFragment {
+            pc: self.pc,
+            pc_access_flags: self.memory_access_flags[self.pc as usize],
+            instruction,
+            index: self.index,
+            registers: self.registers,
+            extra,
+        }
+    }
+
+    pub fn update_memory_access_flags(&mut self, executed_fragment: &InterpreterHistoryFragment) {
+        self.memory_access_flags[executed_fragment.pc as usize] |= MEM_ACCESS_EXEC_FLAG;
+
+        let Some(instruction) = executed_fragment.instruction else {
+            return
+        };
+
+        match instruction {
+
+            Instruction::Load(vx) => {
+                let mut workspace = [0; 16];
+                let buf = &mut workspace[0..=vx as usize];
+                self.memory_access_flags.export(executed_fragment.index, buf);
+                buf.iter_mut().for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
+                self.memory_access_flags.import(buf, executed_fragment.index);
+            },
+
+            Instruction::Display(_, _, height) => {
+                let sprite_bytes = if self.rom.config.kind == RomKind::SCHIP && height == 0 {
+                    32
+                } else {
+                    height as usize
+                };
+
+                let mut workspace = [0; 32];
+                let buf = &mut workspace[0..sprite_bytes];
+                self.memory_access_flags.export(executed_fragment.index, buf);
+                buf.iter_mut().for_each(|flags| *flags |= MEM_ACCESS_DRAW_FLAG);
+                self.memory_access_flags.import(buf, executed_fragment.index);
+            },
+
+            Instruction::Store(vx) => {
+                let mut workspace = [0; 16];
+                let buf = &mut workspace[0..=vx as usize];
+                self.memory_access_flags.export(executed_fragment.index, buf);
+                buf.iter_mut().for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
+                self.memory_access_flags.import(buf, executed_fragment.index);
+            },
+
+            Instruction::StoreDecimal(_) => {
+                let mut buf = [0; 3];
+                self.memory_access_flags.export(executed_fragment.index, &mut buf);
+                buf.iter_mut().for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
+                self.memory_access_flags.import(&buf, executed_fragment.index);
             }
+            
+            _ => (),
         }
     }
 
     // interpret the next instruction
     pub fn step(&mut self) -> Result<bool, String> {
-        // clear output request
+        // clear ephemeral output
         self.output.request = None;
+        self.output.waiting = false;
 
         // fetch + decode
         match self.try_fetch_decode() {
-            Ok(inst) => {
-                log::trace!("Instruction {:#05X?} {:?} ", self.pc, inst);
-                self.pc += 2;
+            Ok(instruction) => {
+                log::trace!("Instruction {:#05X?} {:?} ", self.pc, instruction);
+                let prior_pc = self.pc;
+
+                self.pc = self.memory.add_addresses(self.pc, 2);
 
                 // execute instruction
-                match self.exec(inst) {
-                    Ok(should_continue) => {
-                        if !should_continue {
-                            self.pc -= 2; // revert program counter
-                        }
+                let result = self.exec(instruction);
 
-                        Ok(should_continue)
-                    }
-                    Err(e) => {
-                        self.pc -= 2; // revert program counter
-                        Err(e)
-                    }
+                // revert if execution failed or if execution shouldnt continue or if the interpreter is waiting
+                if !result.as_ref().unwrap_or(&false) || self.output.waiting {
+                    self.pc = prior_pc;
                 }
+
+                result
             }
             Err(e) => Err(format!("Decode at {:#05X?} failed: {}", self.pc, e)),
         }
     }
 
-    pub fn pick_key<'a, 'b, T: TryInto<Key>>(
-        &'a self,
-        key_down: &'b Option<T>,
-        key_up: &'b Option<T>,
-    ) -> &'b Option<T> {
-        match self.rom.config.kind {
-            RomKind::COSMACVIP => key_up,
-            _ => key_down,
-        }
+    pub fn fetch(&self) -> InstructionParameters {
+        let mut bytes = [0; 2];
+        self.memory.export(self.pc, &mut bytes);
+        InstructionParameters::from_bytes(bytes[0], bytes[1])
     }
-
+    
     pub fn try_fetch_decode(&self) -> Result<Instruction, String> {
-        if (self.pc as usize) < self.memory.len() - 1 {
-            InstructionParameters::from([
-                self.memory[self.pc as usize],
-                self.memory[self.pc as usize + 1],
-            ]).try_decode(self.rom.config.kind)
-        } else {
-            Err(format!(
-                "Fetch failed: Program counter address is out of bounds ({:#05X?})",
-                self.pc
-            ))
-        }
+        self.fetch().try_decode(self.rom.config.kind)
     }
 
     fn exec(&mut self, inst: Instruction) -> Result<bool, String> {
         match inst {
+
             Instruction::Exit => {
                 return Ok(false)
             }
-            Instruction::Jump(pc) => self.pc = pc,
+
+            Instruction::Jump(address) => self.pc = self.memory.add_addresses(address, 0),
+
             Instruction::JumpWithOffset(address, vx) => {
-                let offset = if self.rom.config.kind == RomKind::CHIP48 {
+                let offset = if self.rom.config.kind == RomKind::SCHIP {
                     self.registers[vx as usize] as u16
                 } else {
                     self.registers[0] as u16
                 };
 
-                if (offset as usize) < self.memory.len().saturating_sub(address as usize) {
-                    self.pc = address + offset;
-                } else {
-                    return Err(format!(
-                        "Jump with offset failed: adresss {:#05X?} with offset {:#04X?} ({}) is out of bounds",
-                        address, offset, offset
-                    ));
-                }
+                self.pc = self.memory.add_addresses(address, offset);
             }
-            Instruction::CallSubroutine(pc) => {
+
+            Instruction::CallSubroutine(address) => {
                 self.stack.push(self.pc);
-                self.pc = pc;
+                self.pc = self.memory.add_addresses(address, 0);
             }
+
             Instruction::SubroutineReturn => {
                 self.pc = self
                     .stack
                     .pop()
                     .expect("Could not return from subroutine because stack is empty")
             }
+
             Instruction::SkipIfEqualsConstant(vx, value) => {
                 if self.registers[vx as usize] == value {
-                    self.pc += 2
+                    self.pc = self.memory.add_addresses(self.pc, 2);
                 }
             }
+
             Instruction::SkipIfNotEqualsConstant(vx, value) => {
                 if self.registers[vx as usize] != value {
-                    self.pc += 2
+                    self.pc = self.memory.add_addresses(self.pc, 2);
                 }
             }
+
             Instruction::SkipIfEquals(vx, vy) => {
                 if self.registers[vx as usize] == self.registers[vy as usize] {
-                    self.pc += 2
+                    self.pc = self.memory.add_addresses(self.pc, 2);
                 }
             }
+
             Instruction::SkipIfNotEquals(vx, vy) => {
                 if self.registers[vx as usize] != self.registers[vy as usize] {
-                    self.pc += 2
+                    self.pc = self.memory.add_addresses(self.pc, 2);
                 }
             }
+
             Instruction::SkipIfKeyDown(vx) => {
                 if self.input.down_keys >> self.registers[vx as usize] & 1 == 1 {
-                    self.pc += 2
+                    self.pc = self.memory.add_addresses(self.pc, 2);
                 }
             }
+
             Instruction::SkipIfKeyNotDown(vx) => {
                 if self.input.down_keys >> self.registers[vx as usize] & 1 == 0 {
-                    self.pc += 2
+                    self.pc = self.memory.add_addresses(self.pc, 2);
                 }
             }
+
             Instruction::GetKey(vx) => {
                 if let Some(key_code) =
                     self.pick_key(&self.input.just_pressed_key, &self.input.just_released_key)
                 {
                     self.registers[vx as usize] = *key_code;
                 } else {
-                    self.pc -= 2;
+                    self.output.waiting = true;
                 }
             }
+
             Instruction::SetConstant(vx, value) => self.registers[vx as usize] = value,
+
             Instruction::AddConstant(vx, change) => {
                 self.registers[vx as usize] = self.registers[vx as usize].overflowing_add(change).0
             }
+
             Instruction::Set(vx, vy) => self.registers[vx as usize] = self.registers[vy as usize],
-            Instruction::Or(vx, vy) => self.registers[vx as usize] |= self.registers[vy as usize],
-            Instruction::And(vx, vy) => self.registers[vx as usize] &= self.registers[vy as usize],
-            Instruction::Xor(vx, vy) => self.registers[vx as usize] ^= self.registers[vy as usize],
+
+            Instruction::Or(vx, vy) => {
+                self.registers[vx as usize] |= self.registers[vy as usize];
+                if self.rom.config.kind == RomKind::COSMACVIP {
+                    self.registers[VFLAG] = 0;
+                }
+            },
+
+            Instruction::And(vx, vy) => {
+                self.registers[vx as usize] &= self.registers[vy as usize];
+                if self.rom.config.kind == RomKind::COSMACVIP {
+                    self.registers[VFLAG] = 0;
+                }
+            },
+
+            Instruction::Xor(vx, vy) => {
+                self.registers[vx as usize] ^= self.registers[vy as usize];
+                if self.rom.config.kind == RomKind::COSMACVIP {
+                    self.registers[VFLAG] = 0;
+                }
+            },
+
             Instruction::Add(vx, vy) => {
                 let (value, overflowed) =
                     self.registers[vx as usize].overflowing_add(self.registers[vy as usize]);
                 self.registers[vx as usize] = value;
                 self.registers[VFLAG] = overflowed as u8;
             }
+
             Instruction::Sub(vx, vy, vx_minus_vy) => {
                 let (value, overflowed) = if vx_minus_vy {
                     self.registers[vx as usize].overflowing_sub(self.registers[vy as usize])
@@ -594,6 +769,7 @@ impl Interpreter {
                 self.registers[vx as usize] = value;
                 self.registers[VFLAG] = !overflowed as u8; // vf is 0 on overflow instead of 1 like add
             }
+
             Instruction::Shift(vx, vy, right) => {
                 let bits = match self.rom.config.kind {
                     RomKind::COSMACVIP => self.registers[vy as usize],
@@ -601,144 +777,129 @@ impl Interpreter {
                 };
 
                 if right {
-                    self.registers[VFLAG] = bits & 1;
                     self.registers[vx as usize] = bits >> 1;
+                    self.registers[VFLAG] = bits & 1;
                 } else {
-                    self.registers[VFLAG] = bits.reverse_bits() & 1;
                     self.registers[vx as usize] = bits << 1;
+                    self.registers[VFLAG] = bits.reverse_bits() & 1;
                 }
             }
+
             Instruction::GetDelayTimer(vx) => self.registers[vx as usize] = self.input.delay_timer,
+
             Instruction::SetDelayTimer(vx) => {
                 self.output.request = Some(InterpreterRequest::SetDelayTimer(
                     self.registers[vx as usize],
                 ))
             }
+
             Instruction::SetSoundTimer(vx) => {
                 self.output.request = Some(InterpreterRequest::SetSoundTimer(
                     self.registers[vx as usize],
                 ))
             }
+
             Instruction::SetIndex(index) => self.index = index,
+
             Instruction::SetIndexToHexChar(vx) => {
                 let c = self.registers[vx as usize];
                 if c > 0xF {
                     return Err(format!("Failed to set index: hex char \"{:X}\" does not exist", c));
                 }
 
-                self.index = FONT_STARTING_ADDRESS
-                    + (FONT_CHAR_DATA_SIZE as u16 * c as u16)
+                self.index = self.memory.add_addresses(FONT_STARTING_ADDRESS, FONT_CHAR_DATA_SIZE as u16 * c as u16);
             }
+
             Instruction::SetIndexToBigHexChar(vx) => {
                 let c = self.registers[vx as usize];
                 if c > 0x9 {
                     return Err(format!("Failed to set index: big hex char \"{:X}\" does not exist", c));
                 }
 
-                self.index = BIG_FONT_STARTING_ADDRESS
-                    + (BIG_FONT_CHAR_DATA_SIZE as u16 * c as u16)
+                self.index = self.memory.add_addresses(BIG_FONT_STARTING_ADDRESS, BIG_FONT_CHAR_DATA_SIZE as u16 * c as u16);
             }
+
             Instruction::AddToIndex(vx) => {
-                self.index = self
-                    .index
-                    .overflowing_add(self.registers[vx as usize] as u16)
-                    .0;
+                self.index = self.memory.add_addresses(self.index, self.registers[vx as usize] as u16);
             }
+
             Instruction::Load(vx) => {
-                if let Some(addr) = self.checked_addr_add(self.index, vx as u16) {
-                    self.registers[..=vx as usize]
-                        .copy_from_slice(&self.memory[self.index as usize..=addr as usize]);
-                    if self.rom.config.kind == RomKind::COSMACVIP {
-                        self.index = addr.overflowing_add(1).0;
-                    }
-                } else {
-                    return Err(format!(
-                        "Failed to load bytes from memory: out of bounds read ({} byte{} from i = {:#05X?})", 
-                        vx + 1, 
-                        if vx > 0 { "s" } else { "" }, 
-                        self.index
-                    ));
+                self.memory.export(self.index, &mut self.registers[..=vx as usize]);
+                if self.rom.config.kind == RomKind::COSMACVIP {
+                    self.index = self.memory.add_addresses(self.index, vx as u16 + 1);
                 }
             }
+
             Instruction::Store(vx) => {
-                if let Some(addr) = self.checked_addr_add(self.index, vx as u16) {
-                    self.memory[self.index as usize..=addr as usize]
-                        .copy_from_slice(&self.registers[..=vx as usize]);
-                    if self.rom.config.kind == RomKind::COSMACVIP {
-                        self.index = addr.overflowing_add(1).0;
-                    }
-                } else {
-                    return Err(format!(
-                        "Failed to write bytes to memory: out of bounds write ({} byte{} from i = {:#05X?})", 
-                        vx + 1, 
-                        if vx > 0 { "s" } else { "" }, 
-                        self.index
-                    ));
+                self.memory.import(&self.registers[..=vx as usize], self.index);
+                if self.rom.config.kind == RomKind::COSMACVIP {
+                    self.index = self.memory.add_addresses(self.index, vx as u16 + 1);
                 }
             }
+
             Instruction::LoadFlags(vx) => {
-                if (vx as usize) < self.flags.len() {
-                    self.registers[..=vx as usize].copy_from_slice(&self.flags[..=vx as usize]);
-                } else {
-                    return Err(format!(
-                        "Failed to load bytes from flags: out of bounds read ({} byte{} from flags)", 
-                        vx + 1, 
-                        if vx > 0 { "s" } else { "" }
-                    ));
+                if (vx as usize) >= self.flags.len() {
+                    return Err(format!("Failed to read from flags: flags {}..={} does not exist", self.flags.len(), vx));
                 }
+                self.flags.export(0, &mut self.registers[..=vx as usize]);
             }
+
             Instruction::StoreFlags(vx) => {
-                if (vx as usize) < self.flags.len() {
-                    self.flags[..=vx as usize].copy_from_slice(&self.registers[..=vx as usize]);
-                } else {
-                    return Err(format!(
-                        "Failed to write bytes to flags: out of bounds write ({} byte{} from flags)", 
-                        vx + 1, 
-                        if vx > 0 { "s" } else { "" }
-                    ));
+                if (vx as usize) >= self.flags.len() {
+                    return Err(format!("Failed to write to flags: flags {}..={} does not exist", self.flags.len(), vx));
                 }
+                self.flags.import(&self.registers[..=vx as usize], 0);
             }
+
             Instruction::StoreDecimal(vx) => {
-                if let Some(addr) = self.checked_addr_add(self.index, 2) {
-                    let number = self.registers[vx as usize];
-                    for (i, val) in self.memory[self.index as usize..=addr as usize]
-                        .iter_mut()
-                        .rev()
-                        .enumerate()
-                    {
-                        *val = number / 10u8.pow(i as u32) % 10;
-                    }
-                } else {
-                    return Err(format!("Failed to write decimal to memory: out of bounds write (3 bytes from i = {:#05X?})", self.index));
-                }
+                let mut bcd = [0, 0, 0];
+                let decimal = self.registers[vx as usize];
+                bcd
+                    .iter_mut()
+                    .rev()
+                    .enumerate()
+                    .for_each(|(i, val)| *val = decimal / 10u8.pow(i as u32) % 10);
+                self.memory.import(&bcd, self.index);
             }
+
             Instruction::GenerateRandom(vx, bound) => {
                 self.registers[vx as usize] = (self.rng.next_u32() & bound as u32) as u8;
             }
+
             Instruction::Display(vx, vy, height) => {
-                self.exec_display_instruction(vx, vy, height)?;
-                self.output.request = Some(InterpreterRequest::Display);
+                if self.rom.config.kind == RomKind::COSMACVIP && !self.input.vertical_blank {
+                    self.output.waiting = true;
+                } else {
+                    self.exec_display_instruction(vx, vy, height);
+                    self.output.request = Some(InterpreterRequest::Display);
+                }
             }
+
             Instruction::ScrollDown(n) => {
                 self.output.display.scroll_down(n as usize);
                 self.output.request = Some(InterpreterRequest::Display);
             }
+
             Instruction::ScrollLeft => {
                 self.output.display.scroll_left();
                 self.output.request = Some(InterpreterRequest::Display);
             }
+
             Instruction::ScrollRight => {
                 self.output.display.scroll_right();
                 self.output.request = Some(InterpreterRequest::Display);
             }
+
             Instruction::LowResolution => {
                 self.output.display.set_mode(DisplayMode::LowResolution);
                 self.output.request = Some(InterpreterRequest::Display);
             }
+
             Instruction::HighResolution => {
                 self.output.display.set_mode(DisplayMode::HighResolution);
                 self.output.request = Some(InterpreterRequest::Display);
             }
+
             Instruction::ClearScreen => {
                 self.output.display.clear();
                 self.output.request = Some(InterpreterRequest::Display);
@@ -748,30 +909,22 @@ impl Interpreter {
         Ok(true)
     }
 
-    fn exec_display_instruction(&mut self, vx: u8, vy: u8, height: u8) -> Result<(), String> {
-        let (bytes_per_row, height) = if self.rom.config.kind == RomKind::SCHIP && height == 0 { (2, 16) } else { (1, height) };
-        let required_bytes = height * bytes_per_row;
+    fn exec_display_instruction(&mut self, vx: u8, vy: u8, height: u8) {
+        let (bytes_per_row, height) = if self.rom.config.kind == RomKind::SCHIP && height == 0 { 
+            (2, 16) 
+        } else {
+            (1, height)
+        };
 
-        if self
-            .checked_addr_add(self.index, required_bytes.saturating_sub(1) as u16)
-            .is_none()
-        {
-            return Err(format!(
-                "Failed to display: sprite out of bounds read ({} byte{} from i = {:#05X?})", 
-                required_bytes, 
-                if required_bytes == 1 { "" } else { "s" }, 
-                self.index
-            ));
-        }
+        let mut sprite = [0; 32];
+        self.memory.export(self.index, &mut sprite[..(height * bytes_per_row) as usize]);
 
         self.registers[VFLAG] = self.output.display.draw(
-            &self.memory[self.index as usize..],
+            &sprite,
             self.registers[vx as usize] as u16,
             self.registers[vy as usize] as u16,
             height as u16,
             bytes_per_row == 2,
         ) as u8;
-
-        Ok(())
     }
 }

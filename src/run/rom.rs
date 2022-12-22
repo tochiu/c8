@@ -15,7 +15,6 @@ pub struct RomConfig {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RomKind {
     CHIP8,
-    CHIP48,
     COSMACVIP,
     SCHIP,
 }
@@ -24,7 +23,6 @@ impl Display for RomKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CHIP8 => write!(f, "CHIP8"),
-            Self::CHIP48 => write!(f, "CHIP48"),
             Self::COSMACVIP => write!(f, "CHIP8 (COSMAC VIP)"),
             Self::SCHIP => write!(f, "SCHIP"),
         }

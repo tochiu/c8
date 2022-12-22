@@ -4,7 +4,7 @@ use crate::{
     asm::{
         write_byte_str, Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS,
     },
-    run::interp::{Instruction, Interpreter, PROGRAM_MEMORY_SIZE},
+    run::{interp::Interpreter, mem::extract_access_flags},
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -33,28 +33,9 @@ impl MemoryPointer {
     }
 }
 
-struct AddressFlags;
-
-impl AddressFlags {
-    const DRAW: u8 = 0b1;
-    const READ: u8 = 0b10;
-    const WRITE: u8 = 0b100;
-    const EXECUTE: u8 = 0b1000;
-
-    fn extract(flags: u8) -> (bool, bool, bool, bool) {
-        (
-            flags & Self::DRAW == Self::DRAW,
-            flags & Self::READ == Self::READ,
-            flags & Self::WRITE == Self::WRITE,
-            flags & Self::EXECUTE == Self::EXECUTE,
-        )
-    }
-}
-
 pub(super) struct Memory {
     pub verbose: bool,
     pub follow: Option<MemoryPointer>,
-    flags: [u8; PROGRAM_MEMORY_SIZE as usize],
 }
 
 impl Default for Memory {
@@ -62,62 +43,11 @@ impl Default for Memory {
         Memory {
             verbose: false,
             follow: Some(MemoryPointer::ProgramCounter),
-            flags: [0; PROGRAM_MEMORY_SIZE as usize],
         }
     }
 }
 
 impl Memory {
-    pub(super) fn step(
-        &mut self,
-        widget_state: &mut MemoryWidgetState,
-        interp: &Interpreter,
-        pc: u16,
-        index: u16,
-        inst: Option<Instruction>,
-    ) {
-        widget_state.follow = true;
-        if let Some(inst) = inst {
-            if let Some(flags) = self.flags.get_mut(pc as usize) {
-                *flags |= AddressFlags::EXECUTE;
-            }
-
-            match inst {
-                Instruction::Display(_, _, height) => {
-                    if let Some(addr) =
-                        interp.checked_addr_add(index, height.saturating_sub(1) as u16)
-                    {
-                        for flags in self.flags[index as usize..=addr as usize].iter_mut() {
-                            *flags |= AddressFlags::DRAW;
-                        }
-                    }
-                }
-                Instruction::Load(vx) => {
-                    if let Some(addr) = interp.checked_addr_add(index, vx as u16) {
-                        for flags in self.flags[index as usize..=addr as usize].iter_mut() {
-                            *flags |= AddressFlags::READ;
-                        }
-                    }
-                }
-                Instruction::Store(vx) => {
-                    if let Some(addr) = interp.checked_addr_add(index, vx as u16) {
-                        for flags in self.flags[index as usize..=addr as usize].iter_mut() {
-                            *flags |= AddressFlags::WRITE;
-                        }
-                    }
-                }
-                Instruction::StoreDecimal(_) => {
-                    if let Some(addr) = interp.checked_addr_add(index, 2) {
-                        for flags in self.flags[index as usize..=addr as usize].iter_mut() {
-                            *flags |= AddressFlags::WRITE;
-                        }
-                    }
-                }
-                _ => (),
-            }
-        }
-    }
-
     pub(super) fn handle_key_event(
         &mut self,
         event: KeyEvent,
@@ -284,7 +214,7 @@ impl<'a> MemoryWidget<'_> {
     ) -> Spans {
         let byte = self.disassembler.memory[addr as usize];
         let tag = self.disassembler.tags[addr as usize];
-        let flags = self.memory.flags[addr as usize];
+        let flags = self.interpreter.memory_access_flags[addr as usize];
 
         addr_header.clear();
         addr_opcode.clear();
@@ -303,7 +233,7 @@ impl<'a> MemoryWidget<'_> {
             .write_addr_disasm(addr, addr_header, addr_opcode, addr_asm, addr_asm_desc)
             .ok();
 
-        let (draw, read, write, exec) = AddressFlags::extract(flags);
+        let (draw, read, write, exec) = extract_access_flags(flags);
         addr_header.push(' ');
         addr_header.push(if draw { 'd' } else { '-' });
         addr_header.push(if read { 'r' } else { '-' });

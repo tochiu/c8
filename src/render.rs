@@ -135,15 +135,11 @@ impl Renderer {
             } else {
                 let display =
                     maybe_display.unwrap_or_else(|| vm.interpreter().output.display.clone());
-                let time_step = vm.time_step;
+                let hz = vm.extract_execution_frequency().clamp(0.0, u16::MAX as f32).round() as u16;
                 drop(_guard);
 
                 terminal.draw(|f| {
-                    self.render_virtual_machine(
-                        f,
-                        &display,
-                        (1.0 / time_step).round().clamp(0.0, u16::MAX as f32) as u16,
-                    );
+                    self.render_virtual_machine(f, &display, hz);
                 })?;
             }
         }
@@ -174,14 +170,14 @@ impl Renderer {
         &self,
         f: &mut Frame<B>,
         display: &Display,
-        instruction_frequency: u16,
+        execution_frequency: u16,
     ) {
         let area = f.size();
         let display_widget = DisplayWidget {
             rom_name: &self.config.name,
             rom_kind: self.config.kind,
             logging: self.config.logging,
-            instruction_frequency: instruction_frequency,
+            execution_frequency,
             display,
         };
 

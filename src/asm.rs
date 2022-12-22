@@ -1,7 +1,7 @@
 use crate::run::{
     interp::{
-        Instruction, InstructionParameters, Interpreter, InterpreterMemory,
-        PROGRAM_STARTING_ADDRESS,
+        Instruction, InstructionParameters, Interpreter,
+        PROGRAM_STARTING_ADDRESS, PROGRAM_MEMORY_SIZE, MemoryRef,
     },
     rom::{Rom, RomKind},
 };
@@ -38,22 +38,27 @@ impl InstructionTag {
 
 pub struct DisassemblyPath<'a> {
     addr: u16,
+    addr_max: u16,
     tag: InstructionTag,
-    depth: usize,
-
+    depth: u8,
     trace: &'a mut Vec<TraceEntry>,
     trace_pushed: bool,
 }
 
 impl<'a> DisassemblyPath<'_> {
-    fn fork(&'a mut self, addr: u16) -> DisassemblyPath<'a> {
+    fn fork(&'a mut self, addr: u16, offset: u16) -> DisassemblyPath<'a> {
         DisassemblyPath {
-            addr,
+            addr: addr.overflowing_add(offset).0 & self.addr_max,
+            addr_max: self.addr_max,
             tag: self.tag,
             depth: self.depth,
             trace: self.trace,
             trace_pushed: false,
         }
+    }
+
+    fn fork_offset(&'a mut self, offset: u16) -> DisassemblyPath<'a> {
+        self.fork(self.addr, offset)
     }
 
     fn tag(mut self, tag: InstructionTag) -> Self {
@@ -99,7 +104,7 @@ pub struct Disassembler {
     pub instruction_params: Vec<InstructionParameters>,
     pub instructions: Vec<Option<Instruction>>,
     pub rom: Rom,
-    pub memory: InterpreterMemory,
+    pub memory: [u8; PROGRAM_MEMORY_SIZE as usize],
     pub tags: Vec<InstructionTag>,
     pub traces: Vec<Trace>,
 }
@@ -121,14 +126,13 @@ impl From<Rom> for Disassembler {
     fn from(rom: Rom) -> Self {
         let memory = Interpreter::alloc(&rom);
 
-        let mut instruction_params =
+        let instruction_params =
             Interpreter::instruction_parameters(&memory).collect::<Vec<_>>();
-        let mut instructions = instruction_params
+        let instructions = instruction_params
             .iter()
-            .cloned()
             .map(|params| params.try_decode(rom.config.kind).ok())
             .collect::<Vec<_>>();
-        let mut tags = instructions
+        let tags = instructions
             .iter()
             .map(|maybe_inst| {
                 if maybe_inst.is_some() {
@@ -138,14 +142,6 @@ impl From<Rom> for Disassembler {
                 }
             })
             .collect::<Vec<_>>();
-
-        // the last byte isn't processed (since instructions are 16 bits) so we must insert it manually
-        instruction_params.push(InstructionParameters::from([
-            memory.last().cloned().unwrap_or_default(),
-            0,
-        ]));
-        instructions.push(None);
-        tags.push(InstructionTag::Not);
 
         Disassembler {
             instruction_params,
@@ -159,61 +155,46 @@ impl From<Rom> for Disassembler {
 }
 
 impl Disassembler {
-    pub fn update(&mut self, interp: &Interpreter, addr: u16, bytes: u16) {
+    // it is assumed that bytes > 0 and bytes <= 16 
+    pub fn update(&mut self, interp: &Interpreter, index: u16, bytes: u16) {
         let memory = interp.memory;
         let mut disasm_required = false;
 
-        // add 1 to byte becaus we have a window iterator and want to handle the instruction formed by the last byte in range and next byte
-        let lbound = addr as usize;
-        let rbound = addr.saturating_add(bytes + 1).min(memory.len() as u16) as usize;
+        let mut instruction_bytes = [0; 2];
 
-        log::trace!(
-            "Prelim disassembly of address range [{:#05X}, {:#05X})",
-            lbound,
-            rbound
-        );
+        for i in 0..bytes {
+            let addr = memory.add_addresses(index, i);
+            memory.export(addr, &mut instruction_bytes);
 
-        for ((((new_param_bits, byte), params), inst), tag) in memory[lbound..rbound]
-            .windows(2)
-            .zip(self.memory[lbound..rbound].iter_mut())
-            .zip(self.instruction_params[lbound..rbound].iter_mut())
-            .zip(self.instructions[lbound..rbound].iter_mut())
-            .zip(self.tags[lbound..rbound].iter_mut())
-            .filter(|((((new_param_bits, byte), _), _), _)| new_param_bits[0] != **byte)
-        {
-            *byte = new_param_bits[0];
-            *params = InstructionParameters::from([new_param_bits[0], new_param_bits[1]]);
-            *inst = params.try_decode(interp.rom.config.kind).ok();
+            let instruction_param_bits = ((instruction_bytes[0] as u16) << 8) | instruction_bytes[1] as u16;
+            if instruction_param_bits == self.instruction_params[addr as usize].bits {
+                continue;
+            }
 
+            log::debug!("Updating instruction at {:#05X} ({:04X})", addr, instruction_param_bits);
+
+            let instruction_params = InstructionParameters::from(instruction_param_bits);
+            let instruction = instruction_params.try_decode(interp.rom.config.kind).ok();
+            
+            let old_tag = self.tags[addr as usize];
+            
             disasm_required = disasm_required
-                || *tag > InstructionTag::Parsable
-                || *tag < InstructionTag::Parsable && inst.is_some();
-
-            *tag = if inst.is_some() {
+                || old_tag > InstructionTag::Parsable
+                || old_tag < InstructionTag::Parsable && instruction.is_some();
+            
+            self.memory[addr as usize] = instruction_bytes[0];
+            self.instruction_params[addr as usize] = instruction_params;
+            self.instructions[addr as usize] = instruction;
+            self.tags[addr as usize] = if instruction.is_some() {
                 InstructionTag::Parsable
             } else {
                 InstructionTag::Not
             };
         }
 
-        // handle edge-case of last byte because it doesn't fit into the size of an instruction
-
-        let Some(last_byte) = self.memory[lbound..rbound].last_mut() else {
-            unreachable!("disasm memory size must be nonzero");
-        };
-
-        let Some(new_last_byte) = memory[lbound..rbound].last() else {
-            unreachable!("interp memory size must be nonzero");
-        };
-
-        *last_byte = *new_last_byte;
-
         if disasm_required {
             // reset tags that are >=parsable back to parsable before rerunning disassembler
-            for tag in self.tags.iter_mut() {
-                *tag = (*tag).min(InstructionTag::Parsable);
-            }
-
+            self.tags.iter_mut().for_each(|tag| *tag = (*tag).min(InstructionTag::Parsable));
             self.traces.clear();
             self.run();
         }
@@ -223,7 +204,7 @@ impl Disassembler {
         self.run_from(PROGRAM_STARTING_ADDRESS, InstructionTag::Proven, 0);
     }
 
-    pub fn run_from(&mut self, addr: u16, tag: InstructionTag, depth: usize) {
+    pub fn run_from(&mut self, addr: u16, tag: InstructionTag, depth: u8) {
         log::info!(
             "Disassembling \"{}\" starting at {:#05X}",
             &self.rom.config.name,
@@ -233,6 +214,7 @@ impl Disassembler {
         let now = Instant::now();
         self.eval(DisassemblyPath {
             addr,
+            addr_max: (self.memory.len() - 1) as u16,
             tag,
             depth,
             trace: &mut trace_buffer,
@@ -247,7 +229,7 @@ impl Disassembler {
     }
 
     fn eval(&mut self, mut path: DisassemblyPath) -> bool {
-        if let Some(Some(instruction)) = self.instructions.get(path.addr as usize).cloned() {
+        if let Some(instruction) = self.instructions[path.addr as usize] {
             let tag_old = self.tags[path.addr as usize];
             if tag_old >= path.tag {
                 log::trace!("path {:#05X?} is already good, backtracking!", path.addr);
@@ -270,7 +252,7 @@ impl Disassembler {
 
                 Instruction::Jump(addr) => {
                     path.enter_trace(Some(instruction), None);
-                    let path_is_valid = self.eval(path.fork(addr));
+                    let path_is_valid = self.eval(path.fork(addr, 0));
                     path.leave_trace();
                     path_is_valid
                 }
@@ -289,11 +271,8 @@ impl Disassembler {
 
                     for i in 0..=255 {
                         path.enter_trace(Some(instruction), Some(i));
-                        if (i as usize) < self.memory.len() - addr as usize {
-                            let is_valid_jump =
-                                self.eval(path.fork(addr + i as u16).tag(InstructionTag::Valid));
-                            valid_jump_exists = valid_jump_exists || is_valid_jump;
-                        }
+                        let is_valid_jump = self.eval(path.fork(addr, i as u16).tag(InstructionTag::Valid));
+                        valid_jump_exists = valid_jump_exists || is_valid_jump;
                         path.leave_trace();
                     }
 
@@ -317,12 +296,12 @@ impl Disassembler {
                     // i would check that path.addr + 2 is a valid address but technically the subroutine could never return
                     // so it isn't certain that we traverse the next instruction, valid or not
                     path.enter_trace(Some(instruction), None);
-                    let is_call_path_valid = self.eval(path.fork(addr).subroutine());
+                    let is_call_path_valid = self.eval(path.fork(addr, 0).subroutine());
                     path.leave_trace();
 
                     if is_call_path_valid {
                         // if the call path is valid, then the next instruction can be evaluated
-                        self.eval(path.fork(path.addr + 2));
+                        self.eval(path.fork_offset(2));
                     }
 
                     is_call_path_valid
@@ -356,18 +335,18 @@ impl Disassembler {
                     // one quirk i notice is that only 1 of the skip branches must be valid for the branch to be valid
                     // this seems sensible to me for disassembly but i could be wrong (im probably wrong)
                     //path.enter_trace(Some(instruction), Some(0));
-                    let false_path_is_valid = self.eval(path.fork(path.addr + 2));
+                    let false_path_is_valid = self.eval(path.fork_offset(2));
                     //path.leave_trace();
 
                     path.enter_trace(Some(instruction), None);
-                    let true_path_is_valid = self.eval(path.fork(path.addr + 4));
+                    let true_path_is_valid = self.eval(path.fork_offset(4));
                     path.leave_trace();
 
                     false_path_is_valid || true_path_is_valid
                 }
 
                 // if we made it this far then the instruction doesn't introduce a discontinuity so evaluate the next
-                _ => self.eval(path.fork(path.addr + 2)),
+                _ => self.eval(path.fork_offset(2)),
             };
 
             log::trace!(
@@ -611,7 +590,16 @@ pub fn write_inst_asm(
         // side effect of discontinuity instructions having no comments is it highlights a clear break in execution
         Instruction::Exit => write!(f, "exit"),
         Instruction::Jump(addr) => write!(f, "jp   {:#05X}", addr),
-        Instruction::JumpWithOffset(addr, _) => write!(f, "jp   v0 {:#05X}", addr),
+        Instruction::JumpWithOffset(addr, x) => write!(
+            f, 
+            "jp   v{:x} {:#05X}", 
+            if kind == RomKind::SCHIP { 
+                *x 
+            } else { 
+                0 
+            }, 
+            addr
+        ),
         Instruction::CallSubroutine(addr) => write!(f, "call {:#05X}", addr),
         Instruction::SubroutineReturn => write!(f, "ret"),
 

@@ -197,7 +197,7 @@ impl TryFrom<CrosstermKey> for Key {
     }
 }
 // Keyboard holds state necessary for providing keyboard state to CHIP-8 interpeters
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Keyboard {
     focused: bool,
 
@@ -211,6 +211,14 @@ pub struct Keyboard {
     // These fields are ephemeral and are therefore supposed to be cleared on flush (which should be called each interpreter step)
     key_down_change: Option<u8>,
     key_up_change: Option<u8>,
+}
+
+impl PartialEq for Keyboard {
+    fn eq(&self, other: &Self) -> bool {
+        self.focused_down_keys == other.focused_down_keys
+            && self.key_down_change == other.key_down_change
+            && self.key_up_change == other.key_up_change
+    }
 }
 
 impl Keyboard {
@@ -264,7 +272,7 @@ impl Keyboard {
             self.key_down_change = Some(key.to_code());
             self.focused_down_keys |= 1 << key.to_code();
 
-            log::info!(
+            log::debug!(
                 "focused key change detected: bitmap {:#018b}",
                 self.focused_down_keys
             );
@@ -286,7 +294,7 @@ impl Keyboard {
             self.key_up_change = Some(key.to_code());
             self.focused_down_keys &= !(1 << key.to_code());
 
-            log::info!(
+            log::debug!(
                 "focused key change detected: bitmap {:#018b}",
                 self.focused_down_keys
             );
