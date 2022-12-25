@@ -229,141 +229,10 @@ impl Disassembler {
     }
 
     fn eval(&mut self, mut path: DisassemblyPath) -> bool {
-        if let Some(instruction) = self.instructions[path.addr as usize] {
-            let tag_old = self.tags[path.addr as usize];
-            if tag_old >= path.tag {
-                log::trace!("path {:#05X?} is already good, backtracking!", path.addr);
-                return true;
-            } else if tag_old == InstructionTag::Reachable {
-                // reachable tag => instruction is reachable but path is invalid
-                log::trace!("path {:#05X?} is already invalid, backtracking!", path.addr);
-                return false;
-            }
+        let Some(instruction) = self.instructions[path.addr as usize] else {
 
-            // update tag
-            self.tags[path.addr as usize] = path.tag;
+            // Early exit if we are not able to decode the instruction
 
-            log::trace!("traversing path {:#05X?}", path.addr);
-
-            // traverse
-
-            let path_is_valid = match instruction {
-                Instruction::Exit => true,
-
-                Instruction::Jump(addr) => {
-                    path.enter_trace(Some(instruction), None);
-                    let path_is_valid = self.eval(path.fork(addr, 0));
-                    path.leave_trace();
-                    path_is_valid
-                }
-
-                // mark reachable jumps & then traverse the path of each reachable jump with the likely tag
-                // should stick if the path intersects a similar or better path
-                // (this instruction is what is singe-handedly making this disassembler nontrivial)
-                Instruction::JumpWithOffset(addr, _) => {
-                    log::debug!(
-                        "Jumping from {:#05X} to {:#05X} + [0, 256)",
-                        path.addr,
-                        addr
-                    );
-
-                    let mut valid_jump_exists = false;
-
-                    for i in 0..=255 {
-                        path.enter_trace(Some(instruction), Some(i));
-                        let is_valid_jump = self.eval(path.fork(addr, i as u16).tag(InstructionTag::Valid));
-                        valid_jump_exists = valid_jump_exists || is_valid_jump;
-                        path.leave_trace();
-                    }
-
-                    if !valid_jump_exists {
-                        path.enter_trace(Some(instruction), None);
-                        path.save_trace(self, "Unable to evaluate at least one jump path as valid");
-                        path.leave_trace();
-
-                        if path.tag == InstructionTag::Proven {
-                            log::error!(
-                                "Unable to evaluate at least one jump path as valid from {:#05X}",
-                                path.addr
-                            );
-                        }
-                    }
-
-                    valid_jump_exists
-                }
-
-                Instruction::CallSubroutine(addr) => {
-                    // i would check that path.addr + 2 is a valid address but technically the subroutine could never return
-                    // so it isn't certain that we traverse the next instruction, valid or not
-                    path.enter_trace(Some(instruction), None);
-                    let is_call_path_valid = self.eval(path.fork(addr, 0).subroutine());
-                    path.leave_trace();
-
-                    if is_call_path_valid {
-                        // if the call path is valid, then the next instruction can be evaluated
-                        self.eval(path.fork_offset(2));
-                    }
-
-                    is_call_path_valid
-                }
-
-                // TODO: return needs to do an explicit jump
-                Instruction::SubroutineReturn => {
-                    if path.depth > 0 {
-                        true
-                    } else {
-                        path.enter_trace(Some(instruction), None);
-                        path.save_trace(self, "Cannot return with empty call stack");
-                        path.leave_trace();
-                        if path.tag == InstructionTag::Proven {
-                            log::error!(
-                                "Attempted return at {:#05X} when stack is empty",
-                                path.addr
-                            );
-                        }
-                        false
-                    }
-                }
-
-                Instruction::SkipIfEqualsConstant(_, _)
-                | Instruction::SkipIfNotEqualsConstant(_, _)
-                | Instruction::SkipIfEquals(_, _)
-                | Instruction::SkipIfNotEquals(_, _)
-                | Instruction::SkipIfKeyDown(_)
-                | Instruction::SkipIfKeyNotDown(_) => {
-                    // evaluate branches (after this match statement the normal branch is evaluated)
-                    // one quirk i notice is that only 1 of the skip branches must be valid for the branch to be valid
-                    // this seems sensible to me for disassembly but i could be wrong (im probably wrong)
-                    //path.enter_trace(Some(instruction), Some(0));
-                    let false_path_is_valid = self.eval(path.fork_offset(2));
-                    //path.leave_trace();
-
-                    path.enter_trace(Some(instruction), None);
-                    let true_path_is_valid = self.eval(path.fork_offset(4));
-                    path.leave_trace();
-
-                    false_path_is_valid || true_path_is_valid
-                }
-
-                // if we made it this far then the instruction doesn't introduce a discontinuity so evaluate the next
-                _ => self.eval(path.fork_offset(2)),
-            };
-
-            log::trace!(
-                "path {:#05X?} is being marked as {}, backtracking!",
-                path.addr,
-                if path_is_valid { "good" } else { "bad" }
-            );
-
-            if !path_is_valid {
-                if path.tag < InstructionTag::Proven {
-                    self.tags[path.addr as usize] = InstructionTag::Reachable;
-                }
-                false
-            } else {
-                true
-            }
-        } else {
             path.enter_trace(None, None);
             path.save_trace(self, "Unable to decode instruction");
             path.leave_trace();
@@ -377,7 +246,143 @@ impl Disassembler {
                 );
             }
 
+            return false
+        };
+
+        // check if path is already validated with a better tag or if it is already invalid
+        
+        let current_tag = self.tags[path.addr as usize];
+        if current_tag >= path.tag {
+            log::trace!("path {:#05X?} is already good, backtracking!", path.addr);
+            return true;
+        } else if current_tag == InstructionTag::Reachable {
+            // reachable tag => instruction is reachable but path is invalid
+            log::trace!("path {:#05X?} is already invalid, backtracking!", path.addr);
+            return false;
+        }
+
+        // update tag
+        self.tags[path.addr as usize] = path.tag;
+
+        log::trace!("traversing path {:#05X?}", path.addr);
+
+        // traverse
+
+        let path_is_valid = match instruction {
+            Instruction::Exit => true,
+
+            Instruction::Jump(addr) => {
+                path.enter_trace(Some(instruction), None);
+                let path_is_valid = self.eval(path.fork(addr, 0));
+                path.leave_trace();
+                path_is_valid
+            }
+
+            // mark reachable jumps & then traverse the path of each reachable jump with the likely tag
+            // should stick if the path intersects a similar or better path
+            // (this instruction is what is singe-handedly making this disassembler nontrivial)
+            Instruction::JumpWithOffset(addr, _) => {
+                log::debug!(
+                    "Jumping from {:#05X} to {:#05X} + [0, 256)",
+                    path.addr,
+                    addr
+                );
+
+                let mut valid_jump_exists = false;
+
+                for i in 0..=255 {
+                    path.enter_trace(Some(instruction), Some(i));
+                    let is_valid_jump = self.eval(path.fork(addr, i as u16).tag(InstructionTag::Valid));
+                    valid_jump_exists = valid_jump_exists || is_valid_jump;
+                    path.leave_trace();
+                }
+
+                if !valid_jump_exists {
+                    path.enter_trace(Some(instruction), None);
+                    path.save_trace(self, "Unable to evaluate at least one jump path as valid");
+                    path.leave_trace();
+
+                    if path.tag == InstructionTag::Proven {
+                        log::error!(
+                            "Unable to evaluate at least one jump path as valid from {:#05X}",
+                            path.addr
+                        );
+                    }
+                }
+
+                valid_jump_exists
+            }
+
+            Instruction::CallSubroutine(addr) => {
+                // i would check that path.addr + 2 is a valid address but technically the subroutine could never return
+                // so it isn't certain that we traverse the next instruction, valid or not
+                path.enter_trace(Some(instruction), None);
+                let is_call_path_valid = self.eval(path.fork(addr, 0).subroutine());
+                path.leave_trace();
+
+                if is_call_path_valid {
+                    // if the call path is valid, then the next instruction can be evaluated
+                    self.eval(path.fork_offset(2));
+                }
+
+                is_call_path_valid
+            }
+
+            // TODO: return needs to do an explicit jump
+            Instruction::SubroutineReturn => {
+                if path.depth > 0 {
+                    true
+                } else {
+                    path.enter_trace(Some(instruction), None);
+                    path.save_trace(self, "Cannot return with empty call stack");
+                    path.leave_trace();
+                    if path.tag == InstructionTag::Proven {
+                        log::error!(
+                            "Attempted return at {:#05X} when stack is empty",
+                            path.addr
+                        );
+                    }
+                    false
+                }
+            }
+
+            Instruction::SkipIfEqualsConstant(_, _)
+            | Instruction::SkipIfNotEqualsConstant(_, _)
+            | Instruction::SkipIfEquals(_, _)
+            | Instruction::SkipIfNotEquals(_, _)
+            | Instruction::SkipIfKeyDown(_)
+            | Instruction::SkipIfKeyNotDown(_) => {
+                // evaluate branches (after this match statement the normal branch is evaluated)
+                // one quirk i notice is that only 1 of the skip branches must be valid for the branch to be valid
+                // this seems sensible to me for disassembly but i could be wrong (im probably wrong)
+                //path.enter_trace(Some(instruction), Some(0));
+                let false_path_is_valid = self.eval(path.fork_offset(2));
+                //path.leave_trace();
+
+                path.enter_trace(Some(instruction), None);
+                let true_path_is_valid = self.eval(path.fork_offset(4));
+                path.leave_trace();
+
+                false_path_is_valid || true_path_is_valid
+            }
+
+            // if we made it this far then the instruction doesn't introduce a discontinuity so evaluate the next
+            _ => self.eval(path.fork_offset(2)),
+        };
+
+        log::trace!(
+            "path {:#05X?} is being marked as {}, backtracking!",
+            path.addr,
+            if path_is_valid { "good" } else { "bad" }
+        );
+
+        if !path_is_valid {
+            if path.tag < InstructionTag::Proven {
+                self.tags[path.addr as usize] = InstructionTag::Reachable;
+            }
             false
+        } else {
+            true
         }
     }
 

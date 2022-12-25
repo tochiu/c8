@@ -17,8 +17,13 @@ pub struct Cli {
 
 #[derive(ValueEnum, Clone, Copy)]
 pub enum KindOption {
+    #[clap(aliases = &["c8"])]
     CHIP8,
+
+    #[clap(aliases = &["sc"])]
     SCHIP,
+
+    #[clap(aliases = &["vip"])]
     COSMACVIP
 }
 
