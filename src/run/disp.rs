@@ -165,10 +165,10 @@ impl<'a, 'b> Widget for DisplayWidget<'_, '_> {
                     buf.get_mut(area.left() + area_column_index, area.top() + area_row_index);
 
                 if top_is_on && bot_is_on {
-                    cell.set_bg(Color::Green);
+                    cell.set_bg(Color::White);
                 } else {
-                    cell.set_bg(Color::Gray);
-                    cell.set_fg(Color::Green);
+                    cell.set_bg(Color::Black);
+                    cell.set_fg(Color::White);
                     if top_is_on {
                         cell.set_symbol("▀");
                     } else if bot_is_on {
