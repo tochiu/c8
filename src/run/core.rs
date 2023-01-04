@@ -35,8 +35,8 @@ pub type C8Lock = Arc<Mutex<C8>>;
 pub type RunResult = Result<RunAnalytics, String>;
 pub type RunControlResult = Result<(), &'static str>;
 
-pub const GOOD_EXECUTION_FREQUENCY_PERCENT_DIFF: f64 = 1.0;
-pub const OKAY_EXECUTION_FREQUENCY_PERCENT_DIFF: f64 = 10.0;
+pub const GOOD_EXECUTION_FREQUENCY_PERCENT_DIFF: f32 = 1.0;
+pub const OKAY_EXECUTION_FREQUENCY_PERCENT_DIFF: f32 = 10.0;
 
 pub fn spawn_run_threads(
     rom: Rom,
@@ -252,10 +252,10 @@ impl Runner {
                 // calls the next instruction with said state,
                 // and handles the output of said instruction
 
-                let mut timer_instant = Instant::now();
+                // let mut timer_instant = Instant::now();
                 let mut interval = Interval::new(
                     "interp",
-                    Duration::from_secs_f64(1.0 / frequency as f64),
+                    Duration::from_secs_f32(1.0 / frequency as f32),
                     Duration::from_millis(8),
                     IntervalAccuracy::High,
                 );
@@ -266,10 +266,14 @@ impl Runner {
                 };
 
                 let mut runtime_start = Instant::now();
+                let mut runtime_timestep = 0.0;
                 let mut runtime_burst_duration = Duration::ZERO;
                 let mut runtime_duration = Duration::ZERO;
                 let mut instructions_executed = 0;
                 let mut just_resumed = false;
+
+                let uptime_start = Instant::now();
+                let mut time_step_total = 0.0;
 
                 loop {
                     // vm runner step
@@ -286,9 +290,11 @@ impl Runner {
                             vm.clear_events();
                         }
 
-                        let time_elapsed = timer_instant.elapsed().as_secs_f32();
-                        timer_instant = Instant::now();
+                        let time_elapsed = runtime_start.elapsed().as_secs_f32() - runtime_timestep;
+                        //timer_instant = Instant::now();
                         vm.time_step = time_elapsed;
+                        runtime_timestep += time_elapsed;
+                        time_step_total += time_elapsed;
 
                         // dbg.step will never return an Err variant because if the vm steps into an invalid
                         // state then the debugger step will return false which will pause the thread
@@ -333,7 +339,8 @@ impl Runner {
                         just_resumed = true;
                         runtime_burst_duration = Duration::ZERO;
                         runtime_start = Instant::now();
-                        timer_instant = Instant::now();
+                        runtime_timestep = 0.0;
+                        //timer_instant = Instant::now();
                         if let Some(freq) = thread_frequency_receiver.try_iter().last() {
                             update_frequency_stats(
                                 &mut frequency_stats,
@@ -341,7 +348,7 @@ impl Runner {
                                 runtime_duration,
                                 instructions_executed,
                             );
-                            interval.interval = Duration::from_secs_f64(1.0 / freq as f64);
+                            interval.interval = Duration::from_secs_f32(1.0 / freq as f32);
                             frequency = freq;
                             runtime_duration = Duration::ZERO;
                             instructions_executed = 0;
@@ -356,6 +363,8 @@ impl Runner {
                         );
                         return Ok(RunAnalytics {
                             frequency_stats,
+                            uptime: uptime_start.elapsed(),
+                            program_time: time_step_total,
                             rom_name: rom_config.name,
                         });
                     }
@@ -438,6 +447,8 @@ impl RunContinuation {
 
 pub struct RunAnalytics {
     frequency_stats: BTreeMap<u32, (Duration, u64)>,
+    uptime: Duration,
+    program_time: f32,
     rom_name: String,
 }
 
@@ -452,8 +463,8 @@ impl Display for RunAnalytics {
 
         for (&target_ips, &(runtime_duration, instructions_executed)) in self.frequency_stats.iter()
         {
-            let ips = instructions_executed as f64 / runtime_duration.as_secs_f64();
-            let ips_diff = (ips - target_ips as f64) / target_ips as f64 * 100.0;
+            let ips = instructions_executed as f32 / runtime_duration.as_secs_f32();
+            let ips_diff = (ips - target_ips as f32) / target_ips as f32 * 100.0;
             let color_ips_diff = if ips_diff.abs() > OKAY_EXECUTION_FREQUENCY_PERCENT_DIFF {
                 Stylize::red
             } else if ips_diff.abs() > GOOD_EXECUTION_FREQUENCY_PERCENT_DIFF {
@@ -462,12 +473,18 @@ impl Display for RunAnalytics {
                 Stylize::green
             };
 
+            write!(
+                f,
+                "\n    {}",
+                format!("|").blue().bold()
+            )?;
+
             writeln!(
                 f,
                 "\n    {} Runner ({:#04}Hz): {:.3}s",
                 format!("|").blue().bold(),
                 target_ips,
-                runtime_duration.as_secs_f64()
+                runtime_duration.as_secs_f32()
             )?;
             write!(
                 f,
@@ -489,6 +506,28 @@ impl Display for RunAnalytics {
                     target_ips
                 )?;
             }
+
+            write!(
+                f,
+                "\n    {}",
+                format!("|").blue().bold()
+            )?;
+
+            write!(
+                f,
+                "\n    {} Program Uptime: {:.3}s",
+                format!("=").blue().bold(),
+                //target_ips,
+                self.program_time
+            )?;
+
+            write!(
+                f,
+                "\n    {}      C8 Uptime: {:.3}s",
+                format!("=").blue().bold(),
+                //target_ips,
+                self.uptime.as_secs_f32()
+            )?;
         }
 
         Ok(())
