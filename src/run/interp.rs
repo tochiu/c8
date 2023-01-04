@@ -1,8 +1,11 @@
+use crate::asm::write_inst_asm;
+
 use super::{
-    disp::{DisplayMode, Display},
+    audio::{Audio, AUDIO_BUFFER_SIZE_BYTES},
+    disp::{Display, DisplayMode},
     input::Key,
-    rom::{Rom, RomKind}, 
-    mem::{MEM_ACCESS_EXEC_FLAG, MEM_ACCESS_READ_FLAG, MEM_ACCESS_WRITE_FLAG, MEM_ACCESS_DRAW_FLAG}
+    mem::*,
+    rom::{Rom, RomKind},
 };
 
 use rand::rngs::StdRng;
@@ -11,202 +14,172 @@ use rand::{RngCore, SeedableRng};
 pub const VFLAG: usize = 15;
 
 pub const PROGRAM_STARTING_ADDRESS: u16 = 0x200;
-pub const PROGRAM_MEMORY_SIZE: u16 = 4096;
-
-const FONT_STARTING_ADDRESS: u16 = 0x50; // store font in memory from 0x50 to 0x9F inclusive
-const FONT_CHAR_DATA_SIZE: u8 = 5;
-const FONT: [u8; 80] = [
-    0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-    0x20, 0x60, 0x20, 0x20, 0x70, // 1
-    0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-    0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-    0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-    0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-    0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-    0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-    0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-    0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-    0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-    0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-    0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-    0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-    0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-    0xF0, 0x80, 0xF0, 0x80, 0x80, // F
-];
-
-const BIG_FONT_STARTING_ADDRESS: u16 = 0xA0; // store big font in memory from 0xA0 to 0xFF inclusive
-const BIG_FONT_CHAR_DATA_SIZE: u8 = 10;
-const BIG_FONT: [u8; 100] = [
-    0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C, // 0
-    0x18, 0x38, 0x58, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, // 1
-    0x3E, 0x7F, 0xC3, 0x06, 0x0C, 0x18, 0x30, 0x60, 0xFF, 0xFF, // 2
-    0x3C, 0x7E, 0xC3, 0x03, 0x0E, 0x0E, 0x03, 0xC3, 0x7E, 0x3C, // 3
-    0x06, 0x0E, 0x1E, 0x36, 0x66, 0xC6, 0xFF, 0xFF, 0x06, 0x06, // 4
-    0xFF, 0xFF, 0xC0, 0xC0, 0xFC, 0xFE, 0x03, 0xC3, 0x7E, 0x3C, // 5
-    0x3E, 0x7C, 0xE0, 0xC0, 0xFC, 0xFE, 0xC3, 0xC3, 0x7E, 0x3C, // 6
-    0xFF, 0xFF, 0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x60, 0x60, // 7
-    0x3C, 0x7E, 0xC3, 0xC3, 0x7E, 0x7E, 0xC3, 0xC3, 0x7E, 0x3C, // 8
-    0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F, 0x03, 0x03, 0x3E, 0x7C, // 9
-];
-
-pub trait MemoryRef {
-    fn add_addresses(&self, lhs: u16, rhs: u16) -> u16;
-    fn export(&self, address: u16, dst: &mut [u8]);
-}
-
-pub trait MemoryMut {
-    fn import(&mut self, src: &[u8], address: u16);
-}
-
-impl<T> MemoryRef for T where T: AsRef<[u8]> + ?Sized {
-    fn add_addresses(&self, lhs: u16, rhs: u16) -> u16 {
-        lhs.overflowing_add(rhs).0 % self.as_ref().len() as u16
-    }
-
-    fn export(&self, address: u16, dst: &mut [u8]) {
-        let memory = self.as_ref();
-        let address = address as usize % memory.len();
-
-        let pivot = dst.len().min(address.abs_diff(memory.len()));
-        let (dst0, dst1) = dst.split_at_mut(pivot);
-
-        let src0 = &memory[address..address + dst0.len()];
-        let src1 = &memory[..dst1.len()];
-
-        dst0.copy_from_slice(src0);
-        dst1.copy_from_slice(src1);
-    }
-}
-
-impl<T> MemoryMut for T where T: AsMut<[u8]> + ?Sized {
-    fn import(&mut self, src: &[u8], address: u16) {
-        let memory = self.as_mut();
-        let address = address as usize % memory.len();
-
-        let pivot = src.len().min(address.abs_diff(memory.len()));
-        let (src0, src1) = src.split_at(pivot);
-
-        memory[address..address + src0.len()].copy_from_slice(src0);
-        memory[..src1.len()].copy_from_slice(src1);
-    }
-}
 
 // Takes 16 bits (instruction size) and decomposes it into its parts
 #[derive(Clone, Copy, Debug)]
 pub struct InstructionParameters {
-    pub bits: u16,
+    pub bits: u32,
     pub op: u8,
     pub x: u8,
     pub y: u8,
     pub n: u8,
     pub nn: u8,
     pub nnn: u16,
+    pub nnnn: u16,
 }
 
-impl From<u16> for InstructionParameters {
-    fn from(bits: u16) -> Self {
-        InstructionParameters {
-            bits,
-            op: ((bits & 0xF000) >> 4 * 3) as u8,
-            x: ((bits & 0x0F00) >> 4 * 2) as u8,
-            y: ((bits & 0x00F0) >> 4 * 1) as u8,
-            n: ((bits & 0x000F) >> 4 * 0) as u8,
-            nn: ((bits & 0x00FF) >> 4 * 0) as u8,
-            nnn: ((bits & 0x0FFF) >> 4 * 0) as u16,
-        }
+impl From<&[u8]> for InstructionParameters {
+    fn from(bytes: &[u8]) -> Self {
+        InstructionParameters::new(
+            (bytes[0] as u32) << 8 * 3
+                | (bytes[1] as u32) << 8 * 2
+                | (bytes[2] as u32) << 8 * 1
+                | (bytes[3] as u32) << 8 * 0,
+        )
+    }
+}
+
+impl From<[u8; 4]> for InstructionParameters {
+    fn from(bytes: [u8; 4]) -> Self {
+        InstructionParameters::new(u32::from_be_bytes(bytes))
     }
 }
 
 impl InstructionParameters {
-    pub fn from_bytes(byte0: u8, byte1: u8) -> Self {
-        InstructionParameters::from((byte0 as u16) << 8 | byte1 as u16)
-    }
-    pub fn try_decode(&self, kind: RomKind) -> Result<Instruction, String> {
-        let (op, x, y, n, nn, nnn) = (
-            self.op, self.x, self.y, self.n, self.nn, self.nnn,
-        );
-        
-        match op {
-            0x0 => match nnn {
-                0x0E0 => Ok(Instruction::ClearScreen),
-                0x0EE => Ok(Instruction::SubroutineReturn),
-                _ => {
-                    match y {
-                        0x00C => Ok(Instruction::ScrollDown(n)),
-                        _ => match nnn {
-                            0x0FB => Ok(Instruction::ScrollRight),
-                            0x0FC => Ok(Instruction::ScrollLeft),
-                            0x0FD => Ok(Instruction::Exit),
-                            0x0FE => Ok(Instruction::LowResolution),
-                            0x0FF => Ok(Instruction::HighResolution),
-                            _ => Err(format!("unable to decode instruction {}", self))
-                        }
-                    }.and_then(|instruction| {
-                        if kind == RomKind::SCHIP {
-                            Ok(instruction)
-                        } else {
-                            Err(format!("{:?} is a {} instruction but program is {}", instruction, RomKind::SCHIP, kind))
-                        }
-                    })
-                },
-            },
-            0x1 => Ok(Instruction::Jump(nnn)),
-            0x2 => Ok(Instruction::CallSubroutine(nnn)),
-            0x3 => Ok(Instruction::SkipIfEqualsConstant(x, nn)),
-            0x4 => Ok(Instruction::SkipIfNotEqualsConstant(x, nn)),
-            0x5 => Ok(Instruction::SkipIfEquals(x, y)),
-            0x6 => Ok(Instruction::SetConstant(x, nn)),
-            0x7 => Ok(Instruction::AddConstant(x, nn)),
-            0x8 => match n {
-                0x0 => Ok(Instruction::Set(x, y)),
-                0x1 => Ok(Instruction::Or(x, y)),
-                0x2 => Ok(Instruction::And(x, y)),
-                0x3 => Ok(Instruction::Xor(x, y)),
-                0x4 => Ok(Instruction::Add(x, y)),
-                0x5 => Ok(Instruction::Sub(x, y, true)),
-                0x6 => Ok(Instruction::Shift(x, y, true)),
-                0x7 => Ok(Instruction::Sub(x, y, false)),
-                0xE => Ok(Instruction::Shift(x, y, false)),
-                _ => Err(format!("unable to decode instruction {}", self)),
-            },
-            0x9 => match n {
-                0x0 => Ok(Instruction::SkipIfNotEquals(x, y)),
-                _ => Err(format!("unable to decode instruction {}", self)),
-            },
-            0xA => Ok(Instruction::SetIndex(nnn)),
-            0xB => Ok(Instruction::JumpWithOffset(nnn, x)),
-            0xC => Ok(Instruction::GenerateRandom(x, nn)),
-            0xD => Ok(Instruction::Display(x, y, n)),
-            0xE => match nn {
-                0x9E => Ok(Instruction::SkipIfKeyDown(x)),
-                0xA1 => Ok(Instruction::SkipIfKeyNotDown(x)),
-                _ => Err(format!("unable to decode instruction {}", self)),
-            },
-            0xF => match nn {
-                0x07 => Ok(Instruction::GetDelayTimer(x)),
-                0x15 => Ok(Instruction::SetDelayTimer(x)),
-                0x18 => Ok(Instruction::SetSoundTimer(x)),
-                0x1E => Ok(Instruction::AddToIndex(x)),
-                0x0A => Ok(Instruction::GetKey(x)),
-                0x29 => Ok(Instruction::SetIndexToHexChar(x)),
-                0x33 => Ok(Instruction::StoreDecimal(x)),
-                0x55 => Ok(Instruction::Store(x)),
-                0x65 => Ok(Instruction::Load(x)),
-                _ => match nn {
-                    0x30 => Ok(Instruction::SetIndexToBigHexChar(x)),
-                    0x75 => Ok(Instruction::StoreFlags(x)),
-                    0x85 => Ok(Instruction::LoadFlags(x)),
-                    _ => Err(format!("unable to decode instruction {}", self)),
-                }.and_then(|instruction| {
-                    if kind == RomKind::SCHIP {
-                        Ok(instruction)
-                    } else {
-                        Err(format!("{:?} is a {} instruction but program is {}", instruction, RomKind::SCHIP, kind))
-                    }
-                }),
-            },
-            _ => Err(format!("unable to decode instruction {}", self)),
+    pub fn new(bits: u32) -> Self {
+        InstructionParameters {
+            bits,
+            op  : ((bits & 0xF0000000) >> 4 * 7) as u8,
+            x   : ((bits & 0x0F000000) >> 4 * 6) as u8,
+            y   : ((bits & 0x00F00000) >> 4 * 5) as u8,
+            n   : ((bits & 0x000F0000) >> 4 * 4) as u8,
+            nn  : ((bits & 0x00FF0000) >> 4 * 4) as u8,
+            nnn : ((bits & 0x0FFF0000) >> 4 * 4) as u16,
+            nnnn: ((bits & 0x0000FFFF) >> 4 * 0) as u16,
         }
+    }
+
+    pub fn significant_bytes(&self, bytes: u16) -> u32 {
+        self.bits >> (32 - 8*bytes)
+    }
+
+    pub fn default_significant_bytes(&self) -> u32 {
+        self.significant_bytes(2)
+    }
+
+    pub fn try_decode(&self, kind: RomKind) -> Result<Instruction, String> {
+        let InstructionParameters {
+            op,
+            x,
+            y,
+            n,
+            nn,
+            nnn,
+            nnnn,
+            ..
+        } = *self;
+
+        let instruction = match (op, x, y, n) {
+            (0x0, 0x0, 0xE, 0x0) => Instruction::ClearScreen,
+            (0x0, 0x0, 0xE, 0xE) => Instruction::SubroutineReturn,
+            (0x0, 0x0, 0xC, __n) => Instruction::ScrollDown(n),
+            (0x0, 0x0, 0xD, __n) => Instruction::ScrollUp(n),
+            (0x0, 0x0, 0xF, 0xB) => Instruction::ScrollRight,
+            (0x0, 0x0, 0xF, 0xC) => Instruction::ScrollLeft,
+            (0x0, 0x0, 0xF, 0xD) => Instruction::Exit,
+            (0x0, 0x0, 0xF, 0xE) => Instruction::LowResolution,
+            (0x0, 0x0, 0xF, 0xF) => Instruction::HighResolution,
+            (0x1, __x, __y, __n) => Instruction::Jump(nnn),
+            (0x2, __x, __y, __n) => Instruction::CallSubroutine(nnn),
+            (0x3, __x, __y, __n) => Instruction::SkipIfEqualsConstant(x, nn),
+            (0x4, __x, __y, __n) => Instruction::SkipIfNotEqualsConstant(x, nn),
+            (0x5, __x, __y, 0x0) => Instruction::SkipIfEquals(x, y),
+            (0x5, __x, __y, 0x2) => Instruction::StoreRange(x, y),
+            (0x5, __x, __y, 0x3) => Instruction::LoadRange(x, y),
+            (0x6, __x, __y, __n) => Instruction::SetConstant(x, nn),
+            (0x7, __x, __y, __n) => Instruction::AddConstant(x, nn),
+            (0x8, __x, __y, 0x0) => Instruction::Set(x, y),
+            (0x8, __x, __y, 0x1) => Instruction::Or(x, y),
+            (0x8, __x, __y, 0x2) => Instruction::And(x, y),
+            (0x8, __x, __y, 0x3) => Instruction::Xor(x, y),
+            (0x8, __x, __y, 0x4) => Instruction::Add(x, y),
+            (0x8, __x, __y, 0x5) => Instruction::Sub(x, y, true),
+            (0x8, __x, __y, 0x6) => Instruction::Shift(x, y, true),
+            (0x8, __x, __y, 0x7) => Instruction::Sub(x, y, false),
+            (0x8, __x, __y, 0xE) => Instruction::Shift(x, y, false),
+            (0x9, __x, __y, 0x0) => Instruction::SkipIfNotEquals(x, y),
+            (0xA, __x, __y, __n) => Instruction::SetIndex(nnn),
+            (0xB, __x, __y, __n) => Instruction::JumpWithOffset(nnn, x),
+            (0xC, __x, __y, __n) => Instruction::GenerateRandom(x, nn),
+            (0xD, __x, __y, __n) => Instruction::Draw(x, y, n),
+            (0xF, 0x0, 0x0, 0x0) => Instruction::SetIndexToLong(nnnn),
+            (0xE, __x, 0x9, 0xE) => Instruction::SkipIfKeyDown(x),
+            (0xE, __x, 0xA, 0x1) => Instruction::SkipIfKeyNotDown(x),
+            (0xF, 0x0, 0x0, 0x2) => Instruction::LoadAudio,
+            (0xF, __x, 0x0, 0x7) => Instruction::GetDelayTimer(x),
+            (0xF, __x, 0x0, 0xA) => Instruction::WaitForKey(x),
+            (0xF, __x, 0x1, 0x5) => Instruction::SetDelayTimer(x),
+            (0xF, __x, 0x1, 0x8) => Instruction::SetSoundTimer(x),
+            (0xF, __x, 0x1, 0xE) => Instruction::AddToIndex(x),
+            (0xF, __x, 0x2, 0x9) => Instruction::SetIndexToHexChar(x),
+            (0xF, __x, 0x3, 0x0) => Instruction::SetIndexToBigHexChar(x),
+            (0xF, __x, 0x3, 0x3) => Instruction::StoreBinaryCodedDecimal(x),
+            (0xF, __x, 0x3, 0xA) => Instruction::SetPitch(x),
+            (0xF, __x, 0x5, 0x5) => Instruction::Store(x),
+            (0xF, __x, 0x6, 0x5) => Instruction::Load(x),
+            (0xF, __x, 0x7, 0x5) => Instruction::StoreFlags(x),
+            (0xF, __x, 0x8, 0x5) => Instruction::LoadFlags(x),
+            _ => return Err(format!("Unable to decode instruction {}", self)),
+        };
+
+        match instruction {
+            Instruction::Exit
+            | Instruction::LowResolution
+            | Instruction::HighResolution
+            | Instruction::ScrollDown(_)
+            | Instruction::ScrollRight
+            | Instruction::ScrollLeft
+            | Instruction::SetIndexToBigHexChar(_) => {
+                if kind < RomKind::SCHIP {
+                    return Err(self.compatibility_issue_msg(instruction, RomKind::SCHIP, kind));
+                }
+            }
+            Instruction::ScrollUp(_) 
+            | Instruction::LoadAudio
+            | Instruction::SetPitch(_)
+            | Instruction::LoadRange(_, _)
+            | Instruction::StoreRange(_, _) 
+            | Instruction::SetIndexToLong(_) => {
+                if kind < RomKind::XOCHIP {
+                    return Err(self.compatibility_issue_msg(instruction, RomKind::XOCHIP, kind));
+                }
+            }
+            Instruction::LoadFlags(vx) | Instruction::StoreFlags(vx) => {
+                if kind < RomKind::SCHIP {
+                    return Err(self.compatibility_issue_msg(instruction, RomKind::SCHIP, kind));
+                } else if vx > 0x7 && kind < RomKind::XOCHIP {
+                    return Err(self.compatibility_issue_msg(instruction, RomKind::XOCHIP, kind));
+                }
+            }
+            _ => (),
+        };
+
+        Ok(instruction)
+    }
+
+    fn compatibility_issue_msg(
+        &self,
+        instruction: Instruction,
+        expected_kind: RomKind,
+        actual_kind: RomKind,
+    ) -> String {
+        let mut message = String::new();
+        let mut comment = String::new();
+        write_inst_asm(&instruction, expected_kind, &mut message, &mut comment).ok();
+        format!(
+            "{:04X} a.k.a. \"{}\" ({}) is at least a {} instruction but ROM is {}",
+            self.significant_bytes(instruction.size()), message, comment, expected_kind, actual_kind
+        )
     }
 }
 
@@ -214,8 +187,8 @@ impl std::fmt::Display for InstructionParameters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{:#06X} (op = {:#X?}, x = {:?}, y = {:?}, n = {:?}, nn = {:?}, nnn = {:?})",
-            self.bits, self.op, self.x, self.y, self.n, self.nn, self.nnn
+            "{:04X} (op = {:#X?}, x = {:?}, y = {:?}, n = {:?}, nn = {:?}, nnn = {:?}, nnnn = {:?})",
+            self.default_significant_bytes(), self.op, self.x, self.y, self.n, self.nn, self.nnn, self.nnnn
         )
     }
 }
@@ -233,7 +206,7 @@ pub enum Instruction {
     SkipIfNotEquals(u8, u8),
     SkipIfKeyDown(u8),
     SkipIfKeyNotDown(u8),
-    GetKey(u8),
+    WaitForKey(u8),
     SetConstant(u8, u8),
     AddConstant(u8, u8),
     Set(u8, u8),
@@ -247,22 +220,43 @@ pub enum Instruction {
     SetDelayTimer(u8),
     SetSoundTimer(u8),
     SetIndex(u16),
+    SetIndexToLong(u16),
     SetIndexToHexChar(u8),
     SetIndexToBigHexChar(u8),
     AddToIndex(u8),
     Load(u8),
     Store(u8),
+    LoadRange(u8, u8),
+    StoreRange(u8, u8),
     LoadFlags(u8),
     StoreFlags(u8),
-    StoreDecimal(u8),
+    StoreBinaryCodedDecimal(u8),
     GenerateRandom(u8, u8),
-    Display(u8, u8, u8),
+    Draw(u8, u8, u8),
+    ScrollUp(u8),
     ScrollDown(u8),
     ScrollLeft,
     ScrollRight,
     LowResolution,
     HighResolution,
     ClearScreen,
+    LoadAudio,
+    SetPitch(u8),
+}
+
+impl Instruction {
+    pub const MAX_INSTRUCTION_SIZE: u16 = 4;
+    pub fn size(&self) -> u16 {
+        if let &Instruction::SetIndexToLong(_) = self {
+            4
+        } else {
+            2
+        }
+    }
+
+    pub fn size_or_default(instruction: &Option<Instruction>) -> u16 {
+        instruction.as_ref().map_or(2, Instruction::size)
+    }
 }
 
 // State the interpreter pulls from IO is stored here
@@ -277,42 +271,43 @@ pub struct InterpreterInput {
     pub just_released_key: Option<u8>,
 }
 
-// Response body so IO know how to proceed
-pub struct InterpreterOutput {
-    pub display: Display,
-    pub waiting: bool,
-
-    pub request: Option<InterpreterRequest>,
-}
-
 // Interpreter IO Request
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum InterpreterRequest {
+pub enum InterpreterOutput {
     Display,
     SetDelayTimer(u8),
     SetSoundTimer(u8),
+    UpdateAudioPitch,
+    UpdateAudioBuffer,
 }
 
 #[derive(Eq, PartialEq, Debug)]
 pub enum InterpreterHistoryFragmentExtra {
     WillGenerateRandom {
-        rng: Box<StdRng>,
+        prior_rng: Box<StdRng>,
     },
     WillDrawEntireDisplay {
-        display: Box<Display>,
+        prior_display: Box<Display>,
     },
     WillLoadFromMemory {
-        index_access_flag_slice: [u8; 32]
+        prior_index_access_flag_slice: [u8; 32],
     },
     WillStoreInMemory {
-        index_memory: [u8; 16],
-        index_access_flag_slice: [u8; 16]
+        prior_index_memory: [u8; 16],
+        prior_index_access_flag_slice: [u8; 16],
     },
     WillStoreInFlags {
-        flags: [u8; 8],
+        prior_flags: [u8; 16],
     },
     WillReturnFromSubroutine {
-        return_address: u16,
+        prior_return_address: u16,
+    },
+    WillSetPitch {
+        prior_pitch: u8,
+    },
+    WillLoadAudio {
+        prior_buffer: [u8; AUDIO_BUFFER_SIZE_BYTES],
+        prior_index_access_flag_slice: [u8; 16],
     },
 }
 
@@ -327,22 +322,33 @@ pub struct InterpreterHistoryFragment {
 }
 
 impl InterpreterHistoryFragment {
-    // TODO RESTORE MEMORY ACCESS FLAGS
     pub fn log_diff(&self, other: &Self) {
         if self.instruction != other.instruction {
-            log::debug!("Instruction difference: {:?} -> {:?}", self.instruction, other.instruction);
+            log::debug!(
+                "Instruction difference: {:?} -> {:?}",
+                self.instruction,
+                other.instruction
+            );
         }
         if self.pc != other.pc {
             log::debug!("PC difference: {:?} -> {:?}", self.pc, other.pc);
         }
         if self.pc_access_flags != other.pc_access_flags {
-            log::debug!("PC access flags difference: {:?} -> {:?}", self.pc_access_flags, other.pc_access_flags);
+            log::debug!(
+                "PC access flags difference: {:?} -> {:?}",
+                self.pc_access_flags,
+                other.pc_access_flags
+            );
         }
         if self.index != other.index {
             log::debug!("Index difference: {:?} -> {:?}", self.index, other.index);
         }
         if self.registers != other.registers {
-            log::debug!("Registers difference: {:?} -> {:?}", self.registers, other.registers);
+            log::debug!(
+                "Registers difference: {:?} -> {:?}",
+                self.registers,
+                other.registers
+            );
         }
         if self.extra != other.extra {
             log::debug!("Payload difference: {:?} -> {:?}", self.extra, other.extra);
@@ -351,72 +357,49 @@ impl InterpreterHistoryFragment {
 }
 
 pub struct Interpreter {
-    pub memory: [u8; PROGRAM_MEMORY_SIZE as usize],
+    pub memory: Vec<u8>,
     pub memory_access_flags: Vec<u8>,
     pub pc: u16,
     pub index: u16,
     pub stack: Vec<u16>,
-    pub flags: [u8; 8],
+    pub flags: [u8; 16],
     pub registers: [u8; 16],
-    pub input: InterpreterInput,
-    pub output: InterpreterOutput,
     pub rom: Rom,
     pub rng: StdRng,
+    pub display: Display,
+    pub waiting: bool,
+    pub audio: Audio,
+    pub input: InterpreterInput,
+    pub output: Option<InterpreterOutput>,
 }
 
 impl From<Rom> for Interpreter {
     fn from(rom: Rom) -> Self {
+        let memory = allocate_memory(&rom);
         Interpreter {
-            memory: Self::alloc(&rom),
             memory_access_flags: if rom.config.debugging {
-                vec![0; PROGRAM_MEMORY_SIZE as usize]
+                vec![0; memory.len()]
             } else {
                 vec![]
             },
-            
+            memory,
             pc: PROGRAM_STARTING_ADDRESS,
             index: 0,
             stack: Vec::with_capacity(16),
-            flags: [0; 8],
+            flags: [0; 16],
             registers: [0; 16],
-            rom,
             rng: StdRng::from_entropy(),
+            display: Default::default(),
+            waiting: false,
+            audio: Audio::from(rom.config.kind),
             input: Default::default(),
-            output: InterpreterOutput {
-                display: Default::default(),
-                waiting: false,
-                request: None,
-            },
+            output: None,
+            rom,
         }
     }
 }
 
 impl Interpreter {
-    pub fn instruction_parameters(
-        binary: &[u8],
-    ) -> impl Iterator<Item = InstructionParameters> + '_ {
-        binary
-            .windows(2)
-            .map(|slice| InstructionParameters::from_bytes(slice[0], slice[1]))
-            .chain(
-                std::iter::once(InstructionParameters::from_bytes(
-                    *binary.last().expect("Binary shouldn't be empty!"), 
-                    *binary.first().expect("Binary shouldn't be empty!")
-                ))
-            )
-    }
-
-    pub fn alloc(rom: &Rom) -> [u8; PROGRAM_MEMORY_SIZE as usize] {
-        let mut memory = [0; PROGRAM_MEMORY_SIZE as usize];
-        memory.import(&rom.data, PROGRAM_STARTING_ADDRESS);
-        memory.import(&FONT, FONT_STARTING_ADDRESS);
-        if rom.config.kind == RomKind::SCHIP {
-            memory.import(&BIG_FONT, BIG_FONT_STARTING_ADDRESS);
-        }
-        
-        memory
-    }
-
     // TODO: this needs to be removed since all chip8 specifications wait for the key up in the Get Key (FX0A) instruction
     pub fn pick_key<'a, 'b, T: TryInto<Key>>(
         &'a self,
@@ -431,7 +414,11 @@ impl Interpreter {
         self.index = prior_state.index;
         self.registers = prior_state.registers;
 
-        log::debug!("Restoring memory access flags: {:?} -> {:?}", self.memory_access_flags[self.pc as usize], prior_state.pc_access_flags);
+        log::debug!(
+            "Restoring memory access flags: {:?} -> {:?}",
+            self.memory_access_flags[self.pc as usize],
+            prior_state.pc_access_flags
+        );
         self.memory_access_flags[self.pc as usize] = prior_state.pc_access_flags;
 
         let Some(instruction) = prior_state.instruction.as_ref() else {
@@ -444,7 +431,7 @@ impl Interpreter {
             Instruction::CallSubroutine(_) => {
                 self.stack.pop();
             }
-            Instruction::Display(vx, vy, height) => {
+            Instruction::Draw(vx, vy, height) => {
                 self.exec_display_instruction(*vx, *vy, *height);
                 self.registers[VFLAG] = prior_state.registers[VFLAG];
             }
@@ -456,38 +443,52 @@ impl Interpreter {
         };
 
         match extra {
-            InterpreterHistoryFragmentExtra::WillGenerateRandom { 
-                rng 
-            } => {
-                self.rng = rng.as_ref().clone();
-            },
-            InterpreterHistoryFragmentExtra::WillDrawEntireDisplay { 
-                display 
-            } => {
-                self.output.display = display.as_ref().clone();
-            },
+            InterpreterHistoryFragmentExtra::WillGenerateRandom { prior_rng } => {
+                self.rng = prior_rng.as_ref().clone();
+            }
+
+            InterpreterHistoryFragmentExtra::WillDrawEntireDisplay { prior_display } => {
+                self.display = prior_display.as_ref().clone();
+            }
+
             InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                index_access_flag_slice
+                prior_index_access_flag_slice,
             } => {
-                self.memory_access_flags.import(index_access_flag_slice, self.index);
-            },
+                self.memory_access_flags
+                    .import(prior_index_access_flag_slice, self.index);
+            }
+
             InterpreterHistoryFragmentExtra::WillStoreInMemory {
-                index_memory,
-                index_access_flag_slice
+                prior_index_memory,
+                prior_index_access_flag_slice: index_access_flag_slice,
             } => {
-                self.memory.import(index_memory, self.index);
-                self.memory_access_flags.import(index_access_flag_slice, self.index);
-            },
-            InterpreterHistoryFragmentExtra::WillStoreInFlags {
-                flags
-            } => {
-                self.flags = *flags;
-            },
+                self.memory.import(prior_index_memory, self.index);
+                self.memory_access_flags
+                    .import(index_access_flag_slice, self.index);
+            }
+
+            InterpreterHistoryFragmentExtra::WillStoreInFlags { prior_flags } => {
+                self.flags = *prior_flags;
+            }
+
             InterpreterHistoryFragmentExtra::WillReturnFromSubroutine {
-                return_address
+                prior_return_address,
             } => {
-                self.stack.push(*return_address);
-            },
+                self.stack.push(*prior_return_address);
+            }
+
+            InterpreterHistoryFragmentExtra::WillLoadAudio {
+                prior_buffer,
+                prior_index_access_flag_slice,
+            } => {
+                self.audio.buffer = *prior_buffer;
+                self.memory_access_flags
+                    .import(prior_index_access_flag_slice, self.index);
+            }
+
+            InterpreterHistoryFragmentExtra::WillSetPitch { prior_pitch } => {
+                self.audio.pitch = *prior_pitch;
+            }
         }
     }
 
@@ -499,52 +500,75 @@ impl Interpreter {
         let extra = instruction.and_then(|instruction| match instruction {
             Instruction::GenerateRandom(_, _) => Some(Box::new(
                 InterpreterHistoryFragmentExtra::WillGenerateRandom {
-                    rng: Box::new(self.rng.clone()),
-                }
+                    prior_rng: Box::new(self.rng.clone()),
+                },
             )),
 
-            Instruction::ClearScreen 
-            | Instruction::ScrollDown(_) 
-            | Instruction::ScrollLeft 
-            | Instruction::ScrollRight 
-            | Instruction::LowResolution 
+            Instruction::ClearScreen
+            | Instruction::ScrollUp(_)
+            | Instruction::ScrollDown(_)
+            | Instruction::ScrollLeft
+            | Instruction::ScrollRight
+            | Instruction::LowResolution
             | Instruction::HighResolution => Some(Box::new(
-                InterpreterHistoryFragmentExtra::WillDrawEntireDisplay { 
-                    display: Box::new(self.output.display.clone()) 
-                }
+                InterpreterHistoryFragmentExtra::WillDrawEntireDisplay {
+                    prior_display: Box::new(self.display.clone()),
+                },
             )),
 
-            Instruction::Load(_) | Instruction::Display(_, _, _) => Some(Box::new({
-                let mut index_access_flag_slice = [0; 32];
-                self.memory_access_flags.export(self.index, &mut index_access_flag_slice);
-                InterpreterHistoryFragmentExtra::WillLoadFromMemory { 
-                    index_access_flag_slice
-                }
-            })),
+            Instruction::Load(_) | Instruction::LoadRange(_, _) | Instruction::Draw(_, _, _) => {
+                Some(Box::new({
+                    let mut index_access_flag_slice = [0; 32];
+                    self.memory_access_flags
+                        .export(self.index, &mut index_access_flag_slice);
+                    InterpreterHistoryFragmentExtra::WillLoadFromMemory {
+                        prior_index_access_flag_slice: index_access_flag_slice,
+                    }
+                }))
+            }
 
-            Instruction::Store(_) | Instruction::StoreDecimal(_) => Some(Box::new({
+            Instruction::Store(_)
+            | Instruction::StoreRange(_, _)
+            | Instruction::StoreBinaryCodedDecimal(_) => Some(Box::new({
                 let mut index_memory = [0; 16];
                 let mut index_access_flag_slice = [0; 16];
                 self.memory.export(self.index, &mut index_memory);
-                self.memory_access_flags.export(self.index, &mut index_access_flag_slice);
-                InterpreterHistoryFragmentExtra::WillStoreInMemory { 
-                    index_memory,
-                    index_access_flag_slice
+                self.memory_access_flags
+                    .export(self.index, &mut index_access_flag_slice);
+                InterpreterHistoryFragmentExtra::WillStoreInMemory {
+                    prior_index_memory: index_memory,
+                    prior_index_access_flag_slice: index_access_flag_slice,
                 }
             })),
 
             Instruction::StoreFlags(_) => Some(Box::new(
-                InterpreterHistoryFragmentExtra::WillStoreInFlags { 
-                    flags: self.flags,
-                }
+                InterpreterHistoryFragmentExtra::WillStoreInFlags {
+                    prior_flags: self.flags,
+                },
             )),
 
             Instruction::SubroutineReturn => Some(Box::new(
-                InterpreterHistoryFragmentExtra::WillReturnFromSubroutine { 
-                    return_address: self.stack.last().cloned().unwrap_or_default(),
-                }
+                InterpreterHistoryFragmentExtra::WillReturnFromSubroutine {
+                    prior_return_address: self.stack.last().cloned().unwrap_or_default(),
+                },
             )),
-            
+
+            Instruction::LoadAudio => Some(Box::new({
+                let mut index_access_flag_slice = [0; 16];
+                self.memory_access_flags
+                    .export(self.index, &mut index_access_flag_slice);
+                InterpreterHistoryFragmentExtra::WillLoadAudio {
+                    prior_buffer: self.audio.buffer,
+                    prior_index_access_flag_slice: index_access_flag_slice,
+                }
+            })),
+
+            Instruction::SetPitch(_) => {
+                Some(Box::new(InterpreterHistoryFragmentExtra::WillSetPitch {
+                    prior_pitch: self.audio.pitch,
+                }))
+            }
+
             _ => None,
         });
 
@@ -566,16 +590,32 @@ impl Interpreter {
         };
 
         match instruction {
-
             Instruction::Load(vx) => {
                 let mut workspace = [0; 16];
                 let buf = &mut workspace[0..=vx as usize];
-                self.memory_access_flags.export(executed_fragment.index, buf);
-                buf.iter_mut().for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
-                self.memory_access_flags.import(buf, executed_fragment.index);
-            },
+                self.memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
+                self.memory_access_flags
+                    .import(buf, executed_fragment.index);
+            }
 
-            Instruction::Display(_, _, height) => {
+            Instruction::LoadRange(mut vstart, mut vend) => {
+                if vstart > vend {
+                    std::mem::swap(&mut vstart, &mut vend);
+                }
+                let mut workspace = [0; 16];
+                let buf = &mut workspace[vstart as usize..=vend as usize];
+                self.memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
+                self.memory_access_flags
+                    .import(buf, executed_fragment.index);
+            }
+
+            Instruction::Draw(_, _, height) => {
                 let sprite_bytes = if self.rom.config.kind == RomKind::SCHIP && height == 0 {
                     32
                 } else {
@@ -584,26 +624,59 @@ impl Interpreter {
 
                 let mut workspace = [0; 32];
                 let buf = &mut workspace[0..sprite_bytes];
-                self.memory_access_flags.export(executed_fragment.index, buf);
-                buf.iter_mut().for_each(|flags| *flags |= MEM_ACCESS_DRAW_FLAG);
-                self.memory_access_flags.import(buf, executed_fragment.index);
-            },
+                self.memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_DRAW_FLAG | MEM_ACCESS_READ_FLAG);
+                self.memory_access_flags
+                    .import(buf, executed_fragment.index);
+            }
 
             Instruction::Store(vx) => {
                 let mut workspace = [0; 16];
                 let buf = &mut workspace[0..=vx as usize];
-                self.memory_access_flags.export(executed_fragment.index, buf);
-                buf.iter_mut().for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
-                self.memory_access_flags.import(buf, executed_fragment.index);
-            },
-
-            Instruction::StoreDecimal(_) => {
-                let mut buf = [0; 3];
-                self.memory_access_flags.export(executed_fragment.index, &mut buf);
-                buf.iter_mut().for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
-                self.memory_access_flags.import(&buf, executed_fragment.index);
+                self.memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
+                self.memory_access_flags
+                    .import(buf, executed_fragment.index);
             }
-            
+
+            Instruction::StoreRange(mut vstart, mut vend) => {
+                if vstart > vend {
+                    std::mem::swap(&mut vstart, &mut vend);
+                }
+                let mut workspace = [0; 16];
+                let buf = &mut workspace[vstart as usize..=vend as usize];
+                self.memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
+                self.memory_access_flags
+                    .import(buf, executed_fragment.index);
+            }
+
+            Instruction::LoadAudio => {
+                let mut buf = [0; 16];
+                self.memory_access_flags
+                    .export(executed_fragment.index, &mut buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
+                self.memory_access_flags
+                    .import(&buf, executed_fragment.index);
+            }
+
+            Instruction::StoreBinaryCodedDecimal(_) => {
+                let mut buf = [0; 3];
+                self.memory_access_flags
+                    .export(executed_fragment.index, &mut buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
+                self.memory_access_flags
+                    .import(&buf, executed_fragment.index);
+            }
+
             _ => (),
         }
     }
@@ -611,8 +684,8 @@ impl Interpreter {
     // interpret the next instruction
     pub fn step(&mut self) -> Result<bool, String> {
         // clear ephemeral output
-        self.output.request = None;
-        self.output.waiting = false;
+        self.output = None;
+        self.waiting = false;
 
         // fetch + decode
         match self.try_fetch_decode() {
@@ -620,13 +693,15 @@ impl Interpreter {
                 log::trace!("Instruction {:#05X?} {:?} ", self.pc, instruction);
                 let prior_pc = self.pc;
 
-                self.pc = self.memory.add_addresses(self.pc, 2);
+                self.pc = self
+                    .memory
+                    .address_add(self.pc, instruction.size());
 
                 // execute instruction
                 let result = self.exec(instruction);
 
                 // revert if execution failed or if execution shouldnt continue or if the interpreter is waiting
-                if !result.as_ref().unwrap_or(&false) || self.output.waiting {
+                if !result.as_ref().unwrap_or(&false) || self.waiting {
                     self.pc = prior_pc;
                 }
 
@@ -637,23 +712,22 @@ impl Interpreter {
     }
 
     pub fn fetch(&self) -> InstructionParameters {
-        let mut bytes = [0; 2];
+        let mut bytes = [0; 4];
         self.memory.export(self.pc, &mut bytes);
-        InstructionParameters::from_bytes(bytes[0], bytes[1])
+        InstructionParameters::from(bytes)
     }
-    
+
     pub fn try_fetch_decode(&self) -> Result<Instruction, String> {
         self.fetch().try_decode(self.rom.config.kind)
     }
 
     fn exec(&mut self, inst: Instruction) -> Result<bool, String> {
+        let mut skip_next_instruction = false;
+
         match inst {
+            Instruction::Exit => return Ok(false),
 
-            Instruction::Exit => {
-                return Ok(false)
-            }
-
-            Instruction::Jump(address) => self.pc = self.memory.add_addresses(address, 0),
+            Instruction::Jump(address) => self.pc = self.memory.address_add(address, 0),
 
             Instruction::JumpWithOffset(address, vx) => {
                 let offset = if self.rom.config.kind == RomKind::SCHIP {
@@ -662,12 +736,12 @@ impl Interpreter {
                     self.registers[0] as u16
                 };
 
-                self.pc = self.memory.add_addresses(address, offset);
+                self.pc = self.memory.address_add(address, offset);
             }
 
             Instruction::CallSubroutine(address) => {
                 self.stack.push(self.pc);
-                self.pc = self.memory.add_addresses(address, 0);
+                self.pc = self.memory.address_add(address, 0);
             }
 
             Instruction::SubroutineReturn => {
@@ -679,47 +753,47 @@ impl Interpreter {
 
             Instruction::SkipIfEqualsConstant(vx, value) => {
                 if self.registers[vx as usize] == value {
-                    self.pc = self.memory.add_addresses(self.pc, 2);
+                    skip_next_instruction = true
                 }
             }
 
             Instruction::SkipIfNotEqualsConstant(vx, value) => {
                 if self.registers[vx as usize] != value {
-                    self.pc = self.memory.add_addresses(self.pc, 2);
+                    skip_next_instruction = true
                 }
             }
 
             Instruction::SkipIfEquals(vx, vy) => {
                 if self.registers[vx as usize] == self.registers[vy as usize] {
-                    self.pc = self.memory.add_addresses(self.pc, 2);
+                    skip_next_instruction = true
                 }
             }
 
             Instruction::SkipIfNotEquals(vx, vy) => {
                 if self.registers[vx as usize] != self.registers[vy as usize] {
-                    self.pc = self.memory.add_addresses(self.pc, 2);
+                    skip_next_instruction = true
                 }
             }
 
             Instruction::SkipIfKeyDown(vx) => {
                 if self.input.down_keys >> self.registers[vx as usize] & 1 == 1 {
-                    self.pc = self.memory.add_addresses(self.pc, 2);
+                    skip_next_instruction = true
                 }
             }
 
             Instruction::SkipIfKeyNotDown(vx) => {
                 if self.input.down_keys >> self.registers[vx as usize] & 1 == 0 {
-                    self.pc = self.memory.add_addresses(self.pc, 2);
+                    skip_next_instruction = true
                 }
             }
 
-            Instruction::GetKey(vx) => {
+            Instruction::WaitForKey(vx) => {
                 if let Some(key_code) =
                     self.pick_key(&self.input.just_pressed_key, &self.input.just_released_key)
                 {
                     self.registers[vx as usize] = *key_code;
                 } else {
-                    self.output.waiting = true;
+                    self.waiting = true;
                 }
             }
 
@@ -736,21 +810,21 @@ impl Interpreter {
                 if self.rom.config.kind == RomKind::COSMACVIP {
                     self.registers[VFLAG] = 0;
                 }
-            },
+            }
 
             Instruction::And(vx, vy) => {
                 self.registers[vx as usize] &= self.registers[vy as usize];
                 if self.rom.config.kind == RomKind::COSMACVIP {
                     self.registers[VFLAG] = 0;
                 }
-            },
+            }
 
             Instruction::Xor(vx, vy) => {
                 self.registers[vx as usize] ^= self.registers[vy as usize];
                 if self.rom.config.kind == RomKind::COSMACVIP {
                     self.registers[VFLAG] = 0;
                 }
-            },
+            }
 
             Instruction::Add(vx, vy) => {
                 let (value, overflowed) =
@@ -772,7 +846,7 @@ impl Interpreter {
 
             Instruction::Shift(vx, vy, right) => {
                 let bits = match self.rom.config.kind {
-                    RomKind::COSMACVIP => self.registers[vy as usize],
+                    RomKind::COSMACVIP | RomKind::XOCHIP => self.registers[vy as usize],
                     _ => self.registers[vx as usize],
                 };
 
@@ -788,74 +862,111 @@ impl Interpreter {
             Instruction::GetDelayTimer(vx) => self.registers[vx as usize] = self.input.delay_timer,
 
             Instruction::SetDelayTimer(vx) => {
-                self.output.request = Some(InterpreterRequest::SetDelayTimer(
+                self.output = Some(InterpreterOutput::SetDelayTimer(
                     self.registers[vx as usize],
                 ))
             }
 
             Instruction::SetSoundTimer(vx) => {
-                self.output.request = Some(InterpreterRequest::SetSoundTimer(
+                self.output = Some(InterpreterOutput::SetSoundTimer(
                     self.registers[vx as usize],
                 ))
             }
 
-            Instruction::SetIndex(index) => self.index = index,
+            Instruction::SetIndex(address) => self.index = address,
+
+            Instruction::SetIndexToLong(address) => self.index = address,
 
             Instruction::SetIndexToHexChar(vx) => {
                 let c = self.registers[vx as usize];
                 if c > 0xF {
-                    return Err(format!("Failed to set index: hex char \"{:X}\" does not exist", c));
+                    return Err(format!(
+                        "Failed to set index: hex char \"{:X}\" does not exist",
+                        c
+                    ));
                 }
 
-                self.index = self.memory.add_addresses(FONT_STARTING_ADDRESS, FONT_CHAR_DATA_SIZE as u16 * c as u16);
+                self.index = self
+                    .memory
+                    .address_add(FONT_STARTING_ADDRESS, FONT_CHAR_DATA_SIZE as u16 * c as u16);
             }
 
             Instruction::SetIndexToBigHexChar(vx) => {
                 let c = self.registers[vx as usize];
                 if c > 0x9 {
-                    return Err(format!("Failed to set index: big hex char \"{:X}\" does not exist", c));
+                    return Err(format!(
+                        "Failed to set index: big hex char \"{:X}\" does not exist",
+                        c
+                    ));
                 }
 
-                self.index = self.memory.add_addresses(BIG_FONT_STARTING_ADDRESS, BIG_FONT_CHAR_DATA_SIZE as u16 * c as u16);
+                self.index = self.memory.address_add(
+                    BIG_FONT_STARTING_ADDRESS,
+                    BIG_FONT_CHAR_DATA_SIZE as u16 * c as u16,
+                );
             }
 
             Instruction::AddToIndex(vx) => {
-                self.index = self.memory.add_addresses(self.index, self.registers[vx as usize] as u16);
+                self.index = self
+                    .memory
+                    .address_add(self.index, self.registers[vx as usize] as u16);
             }
 
             Instruction::Load(vx) => {
-                self.memory.export(self.index, &mut self.registers[..=vx as usize]);
-                if self.rom.config.kind == RomKind::COSMACVIP {
-                    self.index = self.memory.add_addresses(self.index, vx as u16 + 1);
+                self.memory
+                    .export(self.index, &mut self.registers[..=vx as usize]);
+                if let RomKind::COSMACVIP | RomKind::XOCHIP = self.rom.config.kind {
+                    self.index = self.memory.address_add(self.index, vx as u16 + 1);
                 }
             }
 
             Instruction::Store(vx) => {
-                self.memory.import(&self.registers[..=vx as usize], self.index);
-                if self.rom.config.kind == RomKind::COSMACVIP {
-                    self.index = self.memory.add_addresses(self.index, vx as u16 + 1);
+                self.memory
+                    .import(&self.registers[..=vx as usize], self.index);
+                if let RomKind::COSMACVIP | RomKind::XOCHIP = self.rom.config.kind {
+                    self.index = self.memory.address_add(self.index, vx as u16 + 1);
+                }
+            }
+
+            Instruction::LoadRange(mut vstart, mut vend) => {
+                let reverse = vstart > vend;
+                if reverse {
+                    std::mem::swap(&mut vstart, &mut vend);
+                }
+                let buf = &mut self.registers[vstart as usize..=vend as usize];
+                self.memory.export(self.index, buf);
+                if reverse {
+                    buf.reverse();
+                }
+            }
+
+            Instruction::StoreRange(mut vstart, mut vend) => {
+                let reverse = vstart > vend;
+                if reverse {
+                    std::mem::swap(&mut vstart, &mut vend);
+                }
+                let buf = &mut self.registers[vstart as usize..=vend as usize];
+                if reverse {
+                    buf.reverse();
+                }
+                self.memory.import(buf, self.index);
+                if reverse {
+                    buf.reverse();
                 }
             }
 
             Instruction::LoadFlags(vx) => {
-                if (vx as usize) >= self.flags.len() {
-                    return Err(format!("Failed to read from flags: flags {}..={} does not exist", self.flags.len(), vx));
-                }
                 self.flags.export(0, &mut self.registers[..=vx as usize]);
             }
 
             Instruction::StoreFlags(vx) => {
-                if (vx as usize) >= self.flags.len() {
-                    return Err(format!("Failed to write to flags: flags {}..={} does not exist", self.flags.len(), vx));
-                }
                 self.flags.import(&self.registers[..=vx as usize], 0);
             }
 
-            Instruction::StoreDecimal(vx) => {
+            Instruction::StoreBinaryCodedDecimal(vx) => {
                 let mut bcd = [0, 0, 0];
                 let decimal = self.registers[vx as usize];
-                bcd
-                    .iter_mut()
+                bcd.iter_mut()
                     .rev()
                     .enumerate()
                     .for_each(|(i, val)| *val = decimal / 10u8.pow(i as u32) % 10);
@@ -866,60 +977,83 @@ impl Interpreter {
                 self.registers[vx as usize] = (self.rng.next_u32() & bound as u32) as u8;
             }
 
-            Instruction::Display(vx, vy, height) => {
+            Instruction::Draw(vx, vy, height) => {
                 if self.rom.config.kind == RomKind::COSMACVIP && !self.input.vertical_blank {
-                    self.output.waiting = true;
+                    self.waiting = true;
                 } else {
                     self.exec_display_instruction(vx, vy, height);
-                    self.output.request = Some(InterpreterRequest::Display);
+                    self.output = Some(InterpreterOutput::Display);
                 }
             }
 
+            Instruction::ScrollUp(n) => {
+                self.display.scroll_up(n as usize);
+                self.output = Some(InterpreterOutput::Display);
+            }
+
             Instruction::ScrollDown(n) => {
-                self.output.display.scroll_down(n as usize);
-                self.output.request = Some(InterpreterRequest::Display);
+                self.display.scroll_down(n as usize);
+                self.output = Some(InterpreterOutput::Display);
             }
 
             Instruction::ScrollLeft => {
-                self.output.display.scroll_left();
-                self.output.request = Some(InterpreterRequest::Display);
+                self.display.scroll_left();
+                self.output = Some(InterpreterOutput::Display);
             }
 
             Instruction::ScrollRight => {
-                self.output.display.scroll_right();
-                self.output.request = Some(InterpreterRequest::Display);
+                self.display.scroll_right();
+                self.output = Some(InterpreterOutput::Display);
             }
 
             Instruction::LowResolution => {
-                self.output.display.set_mode(DisplayMode::LowResolution);
-                self.output.request = Some(InterpreterRequest::Display);
+                self.display.set_mode(DisplayMode::LowResolution);
+                self.output = Some(InterpreterOutput::Display);
             }
 
             Instruction::HighResolution => {
-                self.output.display.set_mode(DisplayMode::HighResolution);
-                self.output.request = Some(InterpreterRequest::Display);
+                self.display.set_mode(DisplayMode::HighResolution);
+                self.output = Some(InterpreterOutput::Display);
             }
 
             Instruction::ClearScreen => {
-                self.output.display.clear();
-                self.output.request = Some(InterpreterRequest::Display);
+                self.display.clear();
+                self.output = Some(InterpreterOutput::Display);
             }
+
+            Instruction::LoadAudio => {
+                self.memory.export(self.index, &mut self.audio.buffer);
+                self.output = Some(InterpreterOutput::UpdateAudioBuffer);
+            }
+
+            Instruction::SetPitch(vx) => {
+                self.audio.pitch = self.registers[vx as usize];
+                self.output = Some(InterpreterOutput::UpdateAudioPitch);
+            }
+        }
+
+        if skip_next_instruction {
+            self.pc = self.memory.address_add(
+                self.pc,
+                Instruction::size_or_default(&self.try_fetch_decode().ok()),
+            );
         }
 
         Ok(true)
     }
 
     fn exec_display_instruction(&mut self, vx: u8, vy: u8, height: u8) {
-        let (bytes_per_row, height) = if self.rom.config.kind == RomKind::SCHIP && height == 0 { 
-            (2, 16) 
+        let (bytes_per_row, height) = if self.rom.config.kind == RomKind::SCHIP && height == 0 {
+            (2, 16)
         } else {
             (1, height)
         };
 
         let mut sprite = [0; 32];
-        self.memory.export(self.index, &mut sprite[..(height * bytes_per_row) as usize]);
+        self.memory
+            .export(self.index, &mut sprite[..(height * bytes_per_row) as usize]);
 
-        self.registers[VFLAG] = self.output.display.draw(
+        self.registers[VFLAG] = self.display.draw(
             &sprite,
             self.registers[vx as usize] as u16,
             self.registers[vy as usize] as u16,

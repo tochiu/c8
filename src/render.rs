@@ -130,12 +130,13 @@ impl Renderer {
                 };
 
                 terminal.draw(|f| {
+                    dbg.prepare_render();
                     self.render_debugger(f, dbg, vm);
                 })?;
             } else {
                 let display =
-                    maybe_display.unwrap_or_else(|| vm.interpreter().output.display.clone());
-                let hz = vm.extract_execution_frequency().clamp(0.0, u16::MAX as f32).round() as u16;
+                    maybe_display.unwrap_or_else(|| vm.interpreter().display.clone());
+                let hz = vm.extract_execution_frequency().clamp(0.0, u32::MAX as f32).round() as u32;
                 drop(_guard);
 
                 terminal.draw(|f| {
@@ -170,7 +171,7 @@ impl Renderer {
         &self,
         f: &mut Frame<B>,
         display: &Display,
-        execution_frequency: u16,
+        execution_frequency: u32,
     ) {
         let area = f.size();
         let display_widget = DisplayWidget {

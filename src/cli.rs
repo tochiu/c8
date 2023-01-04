@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use log::{Level, LevelFilter};
 use std::path::PathBuf;
 
-const DEFAULT_EXECUTION_FREQUENCY: u16 = 2000;
+const DEFAULT_EXECUTION_FREQUENCY: u32 = 2000;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -24,7 +24,10 @@ pub enum KindOption {
     SCHIP,
 
     #[clap(aliases = &["vip"])]
-    COSMACVIP
+    COSMACVIP,
+
+    #[clap(aliases = &["xo"])]
+    XOCHIP,
 }
 
 impl KindOption {
@@ -33,6 +36,7 @@ impl KindOption {
             KindOption::CHIP8 => RomKind::CHIP8,
             KindOption::SCHIP => RomKind::SCHIP,
             KindOption::COSMACVIP => RomKind::COSMACVIP,
+            KindOption::XOCHIP => RomKind::XOCHIP,
         }
     }
 }
@@ -112,7 +116,7 @@ pub enum CliCommand {
 
         /// Sets the instructions executed per second
         #[arg(long, default_value_t = DEFAULT_EXECUTION_FREQUENCY)]
-        hz: u16,
+        hz: u32,
 
         /// Enable logging
         #[arg(short, long, value_enum, value_name = "LEVEL")]

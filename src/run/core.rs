@@ -1,6 +1,7 @@
 use super::{
     input::Key,
     rom::Rom,
+    audio::{spawn_audio_thread, AudioEvent},
     vm::{VMEvent, VM},
 };
 
@@ -21,7 +22,7 @@ use std::{
     fmt::Display,
     ops::DerefMut,
     sync::{
-        mpsc::{channel, Receiver, Sender, TryRecvError},
+        mpsc::{channel, Receiver, Sender, TryRecvError, RecvTimeoutError},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
@@ -37,10 +38,16 @@ pub type RunControlResult = Result<(), &'static str>;
 pub const GOOD_EXECUTION_FREQUENCY_PERCENT_DIFF: f64 = 1.0;
 pub const OKAY_EXECUTION_FREQUENCY_PERCENT_DIFF: f64 = 10.0;
 
-pub fn spawn_run_threads(rom: Rom, initial_target_execution_frequency: u16) -> (JoinHandle<()>, JoinHandle<RunResult>) {
+pub fn spawn_run_threads(
+    rom: Rom,
+    initial_target_execution_frequency: u32,
+) -> (JoinHandle<RunResult>, JoinHandle<()>, JoinHandle<()>) {
+    // sound
+    let (sound_sender, sound_thread) = spawn_audio_thread();
+
     // runner
     let rom_config = rom.config.clone();
-    let mut runner = Runner::spawn(rom, initial_target_execution_frequency);
+    let mut runner = Runner::spawn(rom, initial_target_execution_frequency, sound_sender);
 
     // render
     let (render_sender, render_thread) = spawn_render_thread(runner.c8(), rom_config.clone());
@@ -158,12 +165,12 @@ pub fn spawn_run_threads(rom: Rom, initial_target_execution_frequency: u16) -> (
         }
     });
 
-    (render_thread, main_thread)
+    (main_thread, render_thread, sound_thread)
 }
 
 fn update_frequency_stats(
-    stats: &mut BTreeMap<u16, (Duration, u64)>,
-    freq: u16,
+    stats: &mut BTreeMap<u32, (Duration, u64)>,
+    freq: u32,
     duration: Duration,
     instructions: u64,
 ) {
@@ -181,7 +188,7 @@ pub struct Runner {
 
     thread_handle: JoinHandle<RunResult>,
     thread_continue_sender: Sender<bool>,
-    thread_frequency_sender: Sender<u16>,
+    thread_frequency_sender: Sender<u32>,
 
     vm_event_sender: Sender<VMEvent>,
 }
@@ -207,21 +214,25 @@ impl Runner {
         self.thread_handle.is_finished()
     }
 
-    pub fn set_execution_frequency(&mut self, frequency: u16) -> Result<(), &'static str> {
+    pub fn set_execution_frequency(&mut self, frequency: u32) -> Result<(), &'static str> {
         self.thread_frequency_sender
             .send(frequency)
             .map_err(|_| "Failed to send instruction frequency to vm thread")
     }
 
-    pub fn spawn(rom: Rom, initial_target_execution_frequency: u16) -> Self {
+    pub fn spawn(
+        rom: Rom,
+        initial_target_execution_frequency: u32,
+        sound_sender: Sender<AudioEvent>,
+    ) -> Self {
         let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
         let (thread_continue_sender, thread_continue_receiver) = channel::<bool>();
-        let (thread_frequency_sender, thread_frequency_receiver) = channel::<u16>();
+        let (thread_frequency_sender, thread_frequency_receiver) = channel::<u32>();
 
         let rom_config = rom.config.clone();
 
         let c8 = Arc::new(Mutex::new({
-            let vm = VM::new(rom, vm_event_receiver);
+            let vm = VM::new(rom, vm_event_receiver, sound_sender.clone());
             let dbg = if rom_config.debugging {
                 Some(Debugger::new(&vm, initial_target_execution_frequency))
             } else {
@@ -232,7 +243,7 @@ impl Runner {
         }));
 
         let mut frequency = initial_target_execution_frequency;
-        let mut frequency_stats: BTreeMap<u16, (Duration, u64)> = BTreeMap::new();
+        let mut frequency_stats: BTreeMap<u32, (Duration, u64)> = BTreeMap::new();
 
         let thread_handle = {
             let c8 = Arc::clone(&c8);
@@ -309,9 +320,16 @@ impl Runner {
 
                     runtime_duration = runtime_duration.saturating_add(runtime_burst_duration);
 
+                    sound_sender.send(AudioEvent::Pause)
+                        .expect("Failed to pause sound thread");
+
                     // we yield until either we can continue or we must exit
 
                     if !(step_can_continue && !rom_config.debugging) && continuation.can_cont() {
+
+                        sound_sender.send(AudioEvent::Resume)
+                            .expect("Failed to resume sound thread");
+
                         just_resumed = true;
                         runtime_burst_duration = Duration::ZERO;
                         runtime_start = Instant::now();
@@ -400,18 +418,14 @@ impl RunContinuation {
     fn can_cont(&mut self) -> bool {
         loop {
             self.cont = self.recv.try_iter().last().unwrap_or(self.cont);
-            match self.recv.try_recv() {
+            match self.recv.recv_timeout(Duration::from_millis(30)) {
                 Ok(can) => self.cont = can,
-                Err(TryRecvError::Empty) => {
+                Err(RecvTimeoutError::Timeout) => {
                     if self.cont {
                         break;
-                    } else {
-                        // not using recv() because thats a busy-wait and
-                        // we aren't certain a receive will follow soon enough
-                        thread::sleep(Duration::from_millis(30));
                     }
                 }
-                Err(TryRecvError::Disconnected) => {
+                Err(RecvTimeoutError::Disconnected) => {
                     self.cont = false;
                     break;
                 }
@@ -423,7 +437,7 @@ impl RunContinuation {
 }
 
 pub struct RunAnalytics {
-    frequency_stats: BTreeMap<u16, (Duration, u64)>,
+    frequency_stats: BTreeMap<u32, (Duration, u64)>,
     rom_name: String,
 }
 

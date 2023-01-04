@@ -2,7 +2,7 @@ use super::core::Watchpoint;
 
 use crate::{
     asm::{
-        write_byte_str, Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS,
+        Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS,
     },
     run::{interp::Interpreter, mem::extract_access_flags},
 };
@@ -144,7 +144,7 @@ impl<'a> MemoryWidget<'_> {
     }
 
     fn find_nearest_drawable_addr(&self, mut addr: u16, is_forwards: bool) -> Option<u16> {
-        let addr_max = self.interpreter.memory.len() as u16 - 1;
+        let addr_max = (self.interpreter.memory.len() - 1) as u16;
         loop {
             if self.is_addr_drawable(addr) {
                 return Some(addr);
@@ -173,26 +173,12 @@ impl<'a> MemoryWidget<'_> {
 
     pub(super) fn write_to_file<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
         let mut file = File::create(path)?;
-        let mut addr_header = String::new();
-        let mut addr_opcode = String::new();
-        let mut addr_bin = String::new();
-        let mut addr_asm = String::new();
-        let mut addr_asm_desc = String::new();
         for addr in 0..self.interpreter.memory.len() as u16 {
             if !self.is_addr_drawable(addr) {
                 continue;
             }
 
-            let spans = self.addr_span(
-                addr,
-                0,
-                false,
-                &mut addr_header,
-                &mut addr_opcode,
-                &mut addr_bin,
-                &mut addr_asm,
-                &mut addr_asm_desc,
-            );
+            let spans = self.addr_span(addr, 0, false);
             for span in spans.0 {
                 write!(file, "{}", span.content)?;
             }
@@ -206,65 +192,46 @@ impl<'a> MemoryWidget<'_> {
         addr: u16,
         addr_line_width: u16,
         addr_is_selected: bool,
-        addr_header: &mut String,
-        addr_opcode: &mut String,
-        addr_bin: &mut String,
-        addr_asm: &mut String,
-        addr_asm_desc: &mut String,
     ) -> Spans {
-        let byte = self.disassembler.memory[addr as usize];
         let tag = self.disassembler.tags[addr as usize];
         let flags = self.interpreter.memory_access_flags[addr as usize];
-
-        addr_header.clear();
-        addr_opcode.clear();
-        addr_bin.clear();
-        addr_asm.clear();
-        addr_asm_desc.clear();
 
         let is_breakpoint = self.breakpoints.contains(&addr);
         let is_watchpoint = self.watchpoints.contains(&Watchpoint::Address(addr));
 
-        addr_header.push(if is_breakpoint { '@' } else { ' ' });
+        let breakpoint_char = if is_breakpoint { '@' } else { ' ' };
+        let watchpoint_char = if is_watchpoint { '*' } else { ' ' };
 
-        addr_header.push(if is_watchpoint { '*' } else { ' ' });
-
-        self.disassembler
-            .write_addr_disasm(addr, addr_header, addr_opcode, addr_asm, addr_asm_desc)
-            .ok();
+        self.disassembler.write_addr_dasm(addr).ok();
 
         let (draw, read, write, exec) = extract_access_flags(flags);
-        addr_header.push(' ');
-        addr_header.push(if draw { 'd' } else { '-' });
-        addr_header.push(if read { 'r' } else { '-' });
-        addr_header.push(if write { 'w' } else { '-' });
-        addr_header.push(if exec { 'x' } else { '-' });
-
+        
         let force_asm = addr == self.interpreter.pc;
 
-        let show_addr_asm = addr_asm.len() > 0
+        let address_formatter = self.disassembler.address_formatter.take();
+
+        let show_addr_asm = address_formatter.asm.len() > 0
             && (self.memory.verbose || tag >= InstructionTag::Valid || force_asm);
         let show_addr_bin = self.memory.verbose
             || tag < InstructionTag::Proven && (tag < InstructionTag::Parsable || !force_asm);
-        let show_addr_asm_desc = addr_asm_desc.len() > 0 && (!show_addr_bin || self.memory.verbose);
+        let show_addr_asm_desc = address_formatter.asm_desc.len() > 0 && (!show_addr_bin || self.memory.verbose);
         let show_comments = show_addr_bin || show_addr_asm_desc;
 
-        if show_addr_bin {
-            write_byte_str(addr_bin, byte, 1).ok();
-        }
-
-        let content_len = addr_header.len()
-            + addr_opcode.len()
-            + if show_addr_asm { addr_asm.len() + 1 } else { 0 };
+        let content_len = 7 
+            + address_formatter.header.len()
+            //+ address_formatter.opcode.len()
+            + if show_addr_asm { address_formatter.asm.len() + 1 } else { 0 };
         let content_len_padded = if show_comments {
-            content_len.max(INSTRUCTION_COLUMNS + 4)
+            content_len.max(INSTRUCTION_COLUMNS + 1)
         } else {
             content_len
         };
+
+        // TODO: factor in the opcode length
         let comment_len = if show_comments {
-            2 + if show_addr_bin { addr_bin.len() } else { 0 }
+            2 + if show_addr_bin { address_formatter.bin.len() } else { 0 }
                 + if show_addr_asm_desc {
-                    addr_asm_desc.len()
+                    address_formatter.asm_desc.len()
                 } else {
                     0
                 }
@@ -286,11 +253,20 @@ impl<'a> MemoryWidget<'_> {
         let mut spans: Vec<Span> = Vec::with_capacity(if show_comments { 2 } else { 1 });
 
         let mut content = String::with_capacity(content_len_padded);
-        content.push_str(&addr_header);
-        content.push_str(&addr_opcode);
+        content.push(breakpoint_char);
+        content.push(watchpoint_char);
+        content.push_str(&address_formatter.header);
+        content.push(' ');
+        content.push(if draw { 'd' } else { '-' });
+        content.push(if read { 'r' } else { '-' });
+        content.push(if write { 'w' } else { '-' });
+        content.push(if exec { 'x' } else { '-' });
+        content.push_str(&address_formatter.tag);
+        //content.push_str(&address_formatter.opcode);
+        //content.push_str(&address_formatter.bin);
         if show_addr_asm {
             content.push(' ');
-            content.push_str(&addr_asm);
+            content.push_str(&address_formatter.asm);
         }
         if show_comments {
             for _ in 0..content_len_padded.saturating_sub(content.len()) {
@@ -303,13 +279,17 @@ impl<'a> MemoryWidget<'_> {
         if show_comments {
             let mut comment = String::with_capacity(comment_len);
             comment.push_str(ADDRESS_COMMENT_TOKEN);
+            comment.push(' ');
+            comment.push_str(&address_formatter.opcode);
+
             if show_addr_bin {
                 comment.push(' ');
-                comment.push_str(&addr_bin);
+                comment.push_str(&address_formatter.bin);
             }
+
             if show_addr_asm_desc {
                 comment.push(' ');
-                comment.push_str(&addr_asm_desc);
+                comment.push_str(&address_formatter.asm_desc);
             }
 
             spans.push(Span::styled(comment, MemoryWidget::COMMENT_STYLE));
@@ -330,6 +310,8 @@ impl<'a> MemoryWidget<'_> {
             MemoryWidget::highlight_line(&mut spans, Color::White, highlight, addr_line_width);
         }
 
+        self.disassembler.address_formatter.set(address_formatter);
+
         Spans::from(spans)
     }
 }
@@ -338,7 +320,7 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
     type State = MemoryWidgetState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let addr_max = self.interpreter.memory.len() as u16 - 1;
+        let addr_max = (self.interpreter.memory.len() - 1) as u16;
 
         let (is_offset_pos, mut offset_abs) = {
             let offset = state
@@ -393,12 +375,6 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
             return;
         }
 
-        let mut addr_header = String::new();
-        let mut addr_opcode = String::new();
-        let mut addr_bin = String::new();
-        let mut addr_asm = String::new();
-        let mut addr_asm_desc = String::new();
-
         let mut lines: Vec<Spans> = Vec::with_capacity(area.height as usize);
         let lines_ahead = (area.height - area.height / 2) as usize;
 
@@ -407,16 +383,10 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
 
         while lines.len() < lines_ahead && addr <= addr_max {
             if self.is_addr_drawable(addr) {
-                lines.push(self.addr_span(
-                    addr,
-                    area.width,
-                    lines.len() == 0,
-                    &mut addr_header,
-                    &mut addr_opcode,
-                    &mut addr_bin,
-                    &mut addr_asm,
-                    &mut addr_asm_desc,
-                ));
+                lines.push(self.addr_span(addr, area.width, lines.len() == 0));
+            }
+            if addr == addr_max {
+                break;
             }
             addr += 1;
         }
@@ -427,19 +397,7 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
         while addr > 0 && lines.len() < area.height as usize {
             addr -= 1;
             if self.is_addr_drawable(addr) {
-                lines.insert(
-                    0,
-                    self.addr_span(
-                        addr,
-                        area.width,
-                        lines.len() == 0,
-                        &mut addr_header,
-                        &mut addr_opcode,
-                        &mut addr_bin,
-                        &mut addr_asm,
-                        &mut addr_asm_desc,
-                    ),
-                );
+                lines.insert(0, self.addr_span(addr, area.width, lines.len() == 0));
             }
         }
 
@@ -448,16 +406,7 @@ impl<'a> StatefulWidget for MemoryWidget<'_> {
         while addr < addr_max && lines.len() < area.height as usize {
             addr += 1;
             if self.is_addr_drawable(addr) {
-                lines.push(self.addr_span(
-                    addr,
-                    area.width,
-                    lines.len() == 0,
-                    &mut addr_header,
-                    &mut addr_opcode,
-                    &mut addr_bin,
-                    &mut addr_asm,
-                    &mut addr_asm_desc,
-                ));
+                lines.push(self.addr_span(addr, area.width, lines.len() == 0));
             }
         }
 

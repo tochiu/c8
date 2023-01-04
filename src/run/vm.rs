@@ -1,15 +1,19 @@
 use super::{
+    audio::AudioEvent,
     disp::Display,
     input::{Key, Keyboard},
-    interp::{Instruction, Interpreter, InterpreterHistoryFragment, InterpreterRequest},
+    interp::*,
     rom::Rom,
 };
 
-use std::sync::mpsc::Receiver;
+use std::{
+    sync::mpsc::{Receiver, Sender},
+    time::Duration,
+};
 
-// TODO: maybe support sound (right now the sound timer does nothing external)
+const DELAY_TIMER_TICKS_PER_SECOND: f32 = 60.0;
+const SOUND_TIMER_TICKS_PER_SECOND: f32 = 60.0;
 
-const TIMER_TICKS_PER_SECOND: f32 = 60.0;
 const VERTICAL_BLANKS_PER_SECOND: f32 = 60.0;
 
 #[derive(Debug)]
@@ -30,7 +34,7 @@ pub struct VM {
 
     // Total time step and total executions since last execution frequency measurement
     stopwatch_time: f32,
-    stopwatch_executions: u16,
+    stopwatch_executions: usize,
 
     interpreter: Interpreter,
 
@@ -39,8 +43,9 @@ pub struct VM {
     event_queue: Vec<VMEvent>,
 
     // Virtualized IO
-    display: bool,
+    display: bool, // TODO handle new frame indication outside like sound
     keyboard: Keyboard,
+    audio: Sender<AudioEvent>,
 
     // these precise external timers will be mapped
     // to a byte range when executing interpreter instructions
@@ -49,8 +54,8 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(rom: Rom, recv: Receiver<VMEvent>) -> Self {
-        VM {
+    pub fn new(rom: Rom, recv: Receiver<VMEvent>, sound: Sender<AudioEvent>) -> Self {
+        let vm = VM {
             time_step: 0.0,
 
             vertical_blank_time: 0.0,
@@ -65,33 +70,58 @@ impl VM {
 
             display: false,
             keyboard: Keyboard::default(),
+            audio: sound,
 
             // these precise external timers will be mapped
             // to a byte range when executing interpreter instructions
             sound_timer: 0.0,
             delay_timer: 0.0,
-        }
+        };
+
+        vm.audio
+            .send(AudioEvent::SetBuffer(vm.interpreter.audio.buffer))
+            .expect("Failed to initialize audio buffer");
+        vm.audio
+            .send(AudioEvent::SetPitch(vm.interpreter.audio.pitch))
+            .expect("Failed to initialize audio pitch");
+
+        vm
     }
 
     pub fn undo(&mut self, state: &VMHistoryFragment) {
         self.time_step = state.time_step;
         self.vertical_blank_time = state.vertical_blank_time;
         self.keyboard = state.keyboard;
-        self.sound_timer = state.sound_timer;
         self.delay_timer = state.delay_timer;
+        self.sound_timer = state.sound_timer;
 
-        match &state.interpreter.instruction {
-            &Some(
-                Instruction::ClearScreen
-                | Instruction::ScrollDown(_)
-                | Instruction::ScrollLeft
-                | Instruction::ScrollRight
-                | Instruction::LowResolution
-                | Instruction::HighResolution
-                | Instruction::Display(_, _, _),
-            ) => {
+        self.audio
+            .send(AudioEvent::SetTimer(Duration::from_secs_f32(
+                self.sound_timer / SOUND_TIMER_TICKS_PER_SECOND,
+            )))
+            .expect("Failed to restore sound timer");
+
+        if let Some(Instruction::Draw(_, _, _)) = state.interpreter.instruction {
+            self.display = true;
+        }
+
+        match state.interpreter.extra.as_deref() {
+            Some(&InterpreterHistoryFragmentExtra::WillDrawEntireDisplay { .. }) => {
                 self.display = true;
             }
+
+            Some(&InterpreterHistoryFragmentExtra::WillLoadAudio { prior_buffer, .. }) => {
+                self.audio
+                    .send(AudioEvent::SetBuffer(prior_buffer))
+                    .expect("Failed to restore audio pattern buffer");
+            }
+
+            Some(&InterpreterHistoryFragmentExtra::WillSetPitch { prior_pitch }) => {
+                self.audio
+                    .send(AudioEvent::SetPitch(prior_pitch))
+                    .expect("Failed to restore audio pitch");
+            }
+
             _ => (),
         }
 
@@ -127,9 +157,7 @@ impl VM {
     }
 
     pub fn clear_events(&mut self) {
-        for _ in self.event.try_iter() {
-            continue; // no-op
-        }
+        self.event.try_iter().last();
     }
 
     pub fn vsync(&self) -> f32 {
@@ -158,7 +186,7 @@ impl VM {
     pub fn extract_new_display(&mut self) -> Option<Display> {
         if self.display {
             self.display = false;
-            Some(self.interpreter.output.display.clone())
+            Some(self.interpreter.display.clone())
         } else {
             None
         }
@@ -182,9 +210,9 @@ impl VM {
         self.stopwatch_executions += 1;
 
         // update timers and clamp between the bounds of a byte because that is the data type
-        self.sound_timer = (self.sound_timer - self.time_step * TIMER_TICKS_PER_SECOND)
+        self.sound_timer = (self.sound_timer - self.time_step * SOUND_TIMER_TICKS_PER_SECOND)
             .clamp(u8::MIN as f32, u8::MAX as f32);
-        self.delay_timer = (self.delay_timer - self.time_step * TIMER_TICKS_PER_SECOND)
+        self.delay_timer = (self.delay_timer - self.time_step * DELAY_TIMER_TICKS_PER_SECOND)
             .clamp(u8::MIN as f32, u8::MAX as f32);
 
         self.vertical_blank_time += self.time_step;
@@ -210,12 +238,29 @@ impl VM {
 
         self.keyboard.clear_ephemeral_state();
 
-        // handle any external request by the executed instruction
-        if let Some(request) = self.interpreter.output.request {
-            match request {
-                InterpreterRequest::Display => self.display = true,
-                InterpreterRequest::SetDelayTimer(time) => self.delay_timer = time as f32,
-                InterpreterRequest::SetSoundTimer(time) => self.sound_timer = time as f32,
+        // handle any output by the executed instruction
+        if let Some(output) = self.interpreter.output {
+            match output {
+                InterpreterOutput::Display => self.display = true,
+                InterpreterOutput::SetDelayTimer(ticks) => self.delay_timer = ticks as f32,
+                InterpreterOutput::SetSoundTimer(ticks) => {
+                    self.sound_timer = ticks as f32;
+                    self.audio
+                        .send(AudioEvent::SetTimer(Duration::from_secs_f32(
+                            ticks as f32 / SOUND_TIMER_TICKS_PER_SECOND,
+                        )))
+                        .ok();
+                }
+                InterpreterOutput::UpdateAudioBuffer => {
+                    self.audio
+                        .send(AudioEvent::SetBuffer(self.interpreter.audio.buffer))
+                        .ok();
+                }
+                InterpreterOutput::UpdateAudioPitch => {
+                    self.audio
+                        .send(AudioEvent::SetPitch(self.interpreter.audio.pitch))
+                        .ok();
+                }
             }
         }
 
@@ -229,12 +274,13 @@ impl VM {
             keyboard: self.keyboard,
             sound_timer: self.sound_timer,
             delay_timer: self.delay_timer,
-            interpreter: self.interpreter.to_history_fragment()
+            interpreter: self.interpreter.to_history_fragment(),
         }
     }
 
     pub fn update_memory_access_flags(&mut self, executed_fragment: &InterpreterHistoryFragment) {
-        self.interpreter.update_memory_access_flags(executed_fragment);
+        self.interpreter
+            .update_memory_access_flags(executed_fragment);
     }
 }
 
@@ -259,7 +305,11 @@ impl VMHistoryFragment {
 
     pub fn log_diff(&self, other: &Self) {
         if self.time_step != other.time_step {
-            log::debug!("Time step difference {:?} -> {:?}", self.time_step, other.time_step);
+            log::debug!(
+                "Time step difference {:?} -> {:?}",
+                self.time_step,
+                other.time_step
+            );
         }
         if self.vertical_blank_time != other.vertical_blank_time {
             log::debug!(
@@ -269,7 +319,11 @@ impl VMHistoryFragment {
             );
         }
         if self.keyboard != other.keyboard {
-            log::debug!("Keyboard difference {:?} -> {:?}", self.keyboard, other.keyboard);
+            log::debug!(
+                "Keyboard difference {:?} -> {:?}",
+                self.keyboard,
+                other.keyboard
+            );
         }
         if self.sound_timer != other.sound_timer {
             log::debug!(

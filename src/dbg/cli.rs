@@ -134,7 +134,7 @@ impl FromStr for GotoOption {
             "start" => Ok(Self::SemanticLocation(SemanticLocation::Start)),
             "end" => Ok(Self::SemanticLocation(SemanticLocation::End)),
             "pc" => Ok(Self::Pointer(Pointer::Pc)),
-            "i" => Ok(Self::Pointer(Pointer::I)),
+            "i" | "index" => Ok(Self::Pointer(Pointer::I)),
             _ => parse_addr(value)
                 .map(|addr| Self::Address(addr))
                 .map_err(|_| {
@@ -156,7 +156,7 @@ impl FromStr for WatchOption {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "pc" => Ok(Self::Pointer(Pointer::Pc)),
-            "i" => Ok(Self::Pointer(Pointer::I)),
+            "i" | "index" => Ok(Self::Pointer(Pointer::I)),
             _ => {
                 if value.starts_with('v') {
                     Register::from_str(value, false)
@@ -254,7 +254,7 @@ pub enum DebugCliCommand {
     #[clap(visible_aliases = &["hz", "ips", "rate", "freq", "frequency"])]
     Hertz {
         #[arg(value_name = "FREQUENCY")]
-        hertz: u16,
+        hertz: u32,
     },
 
     /// Redo the next N (default = 1) instructions within the program history

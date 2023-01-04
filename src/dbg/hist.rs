@@ -87,12 +87,12 @@ impl History {
 
         // if vm is continuing then update memory access flags too
         if let Ok(true) = vm_result {
-            if !vm.interpreter().output.waiting {
+            if !vm.interpreter().waiting {
                 vm.update_memory_access_flags(&state.interpreter);
             }
         }
 
-        if redo_amount == 0 && !vm.interpreter().output.waiting && vm_result.is_ok() {
+        if redo_amount == 0 && !vm.interpreter().waiting && vm_result.is_ok() {
             if self.fragments.len() == HISTORY_CAPACITY {
                 self.fragments.pop_front();
             }

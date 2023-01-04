@@ -18,3 +18,4 @@ simple_logger = "4.0"
 anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
 shell-words = "1.1"
+rodio = { git = "https://github.com/RustAudio/rodio", rev = "refs/pull/442/head" }

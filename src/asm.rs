@@ -1,17 +1,16 @@
 use crate::run::{
-    interp::{
-        Instruction, InstructionParameters, Interpreter,
-        PROGRAM_STARTING_ADDRESS, PROGRAM_MEMORY_SIZE, MemoryRef,
-    },
+    interp::{Instruction, InstructionParameters, Interpreter, PROGRAM_STARTING_ADDRESS},
+    mem::{allocate_memory, MemoryRef},
     rom::{Rom, RomKind},
 };
 
 use std::{
+    cell::Cell,
     fmt::{Display, Write},
     time::Instant,
 };
 
-pub const INSTRUCTION_COLUMNS: usize = 30;
+pub const INSTRUCTION_COLUMNS: usize = 29;
 pub const INSTRUCTION_MAX_LENGTH: usize = 13;
 pub const ADDRESS_COMMENT_TOKEN: &'static str = "#";
 
@@ -104,11 +103,12 @@ pub struct Disassembler {
     pub instruction_params: Vec<InstructionParameters>,
     pub instructions: Vec<Option<Instruction>>,
     pub rom: Rom,
-    pub memory: [u8; PROGRAM_MEMORY_SIZE as usize],
+    pub memory: Vec<u8>,
     pub tags: Vec<InstructionTag>,
     pub traces: Vec<Trace>,
-}
 
+    pub address_formatter: Cell<AddressFormatter>,
+}
 pub struct Trace {
     tag: InstructionTag,
     message: String,
@@ -124,10 +124,9 @@ struct TraceEntry {
 
 impl From<Rom> for Disassembler {
     fn from(rom: Rom) -> Self {
-        let memory = Interpreter::alloc(&rom);
+        let memory = allocate_memory(&rom);
 
-        let instruction_params =
-            Interpreter::instruction_parameters(&memory).collect::<Vec<_>>();
+        let instruction_params = memory.instruction_parameters().collect::<Vec<_>>();
         let instructions = instruction_params
             .iter()
             .map(|params| params.try_decode(rom.config.kind).ok())
@@ -150,38 +149,55 @@ impl From<Rom> for Disassembler {
             memory,
             tags,
             traces: Vec::new(),
+            address_formatter: Default::default(),
         }
     }
 }
 
 impl Disassembler {
-    // it is assumed that bytes > 0 and bytes <= 16 
-    pub fn update(&mut self, interp: &Interpreter, index: u16, bytes: u16) {
-        let memory = interp.memory;
+    pub fn rerun(&mut self) {
+        self.tags
+            .iter_mut()
+            .for_each(|tag| *tag = (*tag).min(InstructionTag::Parsable));
+        self.traces.clear();
+        self.run();
+    }
+
+    // it is assumed that bytes > 0 and bytes <= 16
+    pub fn needs_rerun(&mut self, interp: &Interpreter, mut index: u16, mut bytes: u16) -> bool {
+        let memory = &interp.memory;
         let mut disasm_required = false;
 
-        let mut instruction_bytes = [0; 2];
+        let mut instruction_bytes = [0; Instruction::MAX_INSTRUCTION_SIZE as usize];
+
+        index = memory.address_sub(index, Instruction::MAX_INSTRUCTION_SIZE - 1);
+        bytes += Instruction::MAX_INSTRUCTION_SIZE - 1;
 
         for i in 0..bytes {
-            let addr = memory.add_addresses(index, i);
+            let addr = memory.address_add(index, i);
             memory.export(addr, &mut instruction_bytes);
 
-            let instruction_param_bits = ((instruction_bytes[0] as u16) << 8) | instruction_bytes[1] as u16;
+            let instruction_param_bits = u32::from_be_bytes(instruction_bytes);
             if instruction_param_bits == self.instruction_params[addr as usize].bits {
                 continue;
             }
 
-            log::debug!("Updating instruction at {:#05X} ({:04X})", addr, instruction_param_bits);
-
-            let instruction_params = InstructionParameters::from(instruction_param_bits);
+            let instruction_params = InstructionParameters::new(instruction_param_bits);
             let instruction = instruction_params.try_decode(interp.rom.config.kind).ok();
-            
+
+            log::debug!(
+                "Updating instruction at {:#05X} ({:04X})",
+                addr,
+                instruction_params
+                    .significant_bytes(Instruction::size_or_default(&instruction))
+            );
+
             let old_tag = self.tags[addr as usize];
-            
+
             disasm_required = disasm_required
                 || old_tag > InstructionTag::Parsable
                 || old_tag < InstructionTag::Parsable && instruction.is_some();
-            
+
             self.memory[addr as usize] = instruction_bytes[0];
             self.instruction_params[addr as usize] = instruction_params;
             self.instructions[addr as usize] = instruction;
@@ -192,12 +208,7 @@ impl Disassembler {
             };
         }
 
-        if disasm_required {
-            // reset tags that are >=parsable back to parsable before rerunning disassembler
-            self.tags.iter_mut().for_each(|tag| *tag = (*tag).min(InstructionTag::Parsable));
-            self.traces.clear();
-            self.run();
-        }
+        disasm_required
     }
 
     pub fn run(&mut self) {
@@ -234,7 +245,7 @@ impl Disassembler {
             // Early exit if we are not able to decode the instruction
 
             path.enter_trace(None, None);
-            path.save_trace(self, "Unable to decode instruction");
+            path.save_trace(self, format!("Unable to decode instruction \"{:04X}\"", self.instruction_params[path.addr as usize].default_significant_bytes()));
             path.leave_trace();
 
             log::trace!("path {:#05X?} is not parsable, backtracking!", path.addr);
@@ -250,7 +261,7 @@ impl Disassembler {
         };
 
         // check if path is already validated with a better tag or if it is already invalid
-        
+
         let current_tag = self.tags[path.addr as usize];
         if current_tag >= path.tag {
             log::trace!("path {:#05X?} is already good, backtracking!", path.addr);
@@ -292,7 +303,8 @@ impl Disassembler {
 
                 for i in 0..=255 {
                     path.enter_trace(Some(instruction), Some(i));
-                    let is_valid_jump = self.eval(path.fork(addr, i as u16).tag(InstructionTag::Valid));
+                    let is_valid_jump =
+                        self.eval(path.fork(addr, i as u16).tag(InstructionTag::Valid));
                     valid_jump_exists = valid_jump_exists || is_valid_jump;
                     path.leave_trace();
                 }
@@ -314,7 +326,7 @@ impl Disassembler {
             }
 
             Instruction::CallSubroutine(addr) => {
-                // i would check that path.addr + 2 is a valid address but technically the subroutine could never return
+                // i would check that the return address is a valid address but technically the subroutine could never return
                 // so it isn't certain that we traverse the next instruction, valid or not
                 path.enter_trace(Some(instruction), None);
                 let is_call_path_valid = self.eval(path.fork(addr, 0).subroutine());
@@ -322,13 +334,12 @@ impl Disassembler {
 
                 if is_call_path_valid {
                     // if the call path is valid, then the next instruction can be evaluated
-                    self.eval(path.fork_offset(2));
+                    self.eval(path.fork_offset(instruction.size()));
                 }
 
                 is_call_path_valid
             }
 
-            // TODO: return needs to do an explicit jump
             Instruction::SubroutineReturn => {
                 if path.depth > 0 {
                     true
@@ -337,10 +348,7 @@ impl Disassembler {
                     path.save_trace(self, "Cannot return with empty call stack");
                     path.leave_trace();
                     if path.tag == InstructionTag::Proven {
-                        log::error!(
-                            "Attempted return at {:#05X} when stack is empty",
-                            path.addr
-                        );
+                        log::error!("Attempted return at {:#05X} when stack is empty", path.addr);
                     }
                     false
                 }
@@ -356,18 +364,23 @@ impl Disassembler {
                 // one quirk i notice is that only 1 of the skip branches must be valid for the branch to be valid
                 // this seems sensible to me for disassembly but i could be wrong (im probably wrong)
                 //path.enter_trace(Some(instruction), Some(0));
-                let false_path_is_valid = self.eval(path.fork_offset(2));
-                //path.leave_trace();
+
+                let false_path = path.fork_offset(instruction.size());
+                let false_path_instruction_size =
+                    Instruction::size_or_default(&self.instructions[false_path.addr as usize]);
+                let false_path_is_valid = self.eval(false_path);
 
                 path.enter_trace(Some(instruction), None);
-                let true_path_is_valid = self.eval(path.fork_offset(4));
+                let true_path_is_valid = self.eval(
+                    path.fork_offset(instruction.size() + false_path_instruction_size),
+                );
                 path.leave_trace();
 
                 false_path_is_valid || true_path_is_valid
             }
 
             // if we made it this far then the instruction doesn't introduce a discontinuity so evaluate the next
-            _ => self.eval(path.fork_offset(2)),
+            _ => self.eval(path.fork_offset(instruction.size())),
         };
 
         log::trace!(
@@ -386,34 +399,53 @@ impl Disassembler {
         }
     }
 
-    pub fn write_addr_disasm(
-        &self,
-        addr: u16,
-        addr_header: &mut impl std::fmt::Write,
-        addr_bin: &mut impl std::fmt::Write,
-        addr_asm: &mut impl std::fmt::Write,
-        addr_asm_desc: &mut impl std::fmt::Write,
-    ) -> std::fmt::Result {
+    pub fn write_addr_dasm(&self, addr: u16) -> std::fmt::Result {
+        let kind = self.rom.config.kind;
         let index = addr as usize;
         let params = self.instruction_params[index];
         let tag = self.tags[index];
+        let byte = self.memory[index];
+        let instruction = self.instructions[index];
+
+        let mut f = self.address_formatter.take();
+        f.clear();
 
         // address
-        write!(addr_header, "{:#05X}", addr)?;
+        if kind == RomKind::XOCHIP {
+            write!(f.header, "{:#06X}", addr)?;
+        } else {
+            write!(f.header, "{:#05X}", addr)?;
+        }
 
         // instruction tag symbol
-        write!(addr_bin, " {}", tag.to_symbol())?;
+        write!(f.tag, " {}", tag.to_symbol())?;
 
         // instruction if parsable
         if tag >= InstructionTag::Parsable {
-            write!(addr_bin, " {:04X}", params.bits)?;
+            let bytes = Instruction::size_or_default(&instruction);
+            write!(
+                f.opcode,
+                "{:0width$X}",
+                params.significant_bytes(bytes),
+                width = 2 * bytes as usize
+            )?;
         } else {
-            write!(addr_bin, " {:02X}", self.memory[index])?;
+            write!(f.opcode, "{:02X}  ", self.memory[index])?;
         }
 
-        if let Some(instruction) = self.instructions[index].as_ref() {
-            write_inst_asm(instruction, self.rom.config.kind, addr_asm, addr_asm_desc)?;
+        // Byte at this address
+        write_byte_str(&mut f.bin, byte, 1).ok();
+
+        if let Some(instruction) = instruction.as_ref() {
+            write_inst_asm(
+                instruction,
+                self.rom.config.kind,
+                &mut f.asm,
+                &mut f.asm_desc,
+            )?;
         }
+
+        self.address_formatter.set(f);
 
         Ok(())
     }
@@ -462,9 +494,11 @@ impl Disassembler {
                         | Instruction::SkipIfEquals(_, _)
                         | Instruction::SkipIfNotEquals(_, _)
                         | Instruction::SkipIfKeyDown(_)
-                        | Instruction::SkipIfKeyNotDown(_) => {
-                            write!(f, " SKIP {:#05X}", entry.addr + 2)?
-                        }
+                        | Instruction::SkipIfKeyNotDown(_) => write!(
+                            f,
+                            " SKIP {:#05X}",
+                            self.memory.address_add(entry.addr, inst.size())
+                        )?,
                         _ => {
                             asm.clear();
                             asm_desc.clear();
@@ -518,13 +552,7 @@ impl Display for Disassembler {
             asm_content.clear();
             asm_comment.clear();
 
-            self.write_addr_disasm(
-                addr,
-                &mut bin_header,
-                &mut bin_opcode,
-                &mut asm_content,
-                &mut asm_comment,
-            )?;
+            self.write_addr_dasm(addr)?;
 
             let show_bin_comment = tag <= InstructionTag::Valid;
             let show_asm_content = tag >= InstructionTag::Valid;
@@ -565,6 +593,27 @@ impl Display for Disassembler {
     }
 }
 
+#[derive(Default)]
+pub struct AddressFormatter {
+    pub header: String,
+    pub opcode: String,
+    pub tag: String,
+    pub bin: String,
+    pub asm: String,
+    pub asm_desc: String,
+}
+
+impl AddressFormatter {
+    fn clear(&mut self) {
+        self.header.clear();
+        self.opcode.clear();
+        self.tag.clear();
+        self.bin.clear();
+        self.asm.clear();
+        self.asm_desc.clear();
+    }
+}
+
 pub fn write_byte_str(
     f: &mut impl std::fmt::Write,
     byte: u8,
@@ -585,6 +634,7 @@ pub fn write_byte_str(
     Ok(())
 }
 
+// TODO change this to quirks instead of rom kind
 pub fn write_inst_asm(
     inst: &Instruction,
     kind: RomKind,
@@ -596,13 +646,9 @@ pub fn write_inst_asm(
         Instruction::Exit => write!(f, "exit"),
         Instruction::Jump(addr) => write!(f, "jp   {:#05X}", addr),
         Instruction::JumpWithOffset(addr, x) => write!(
-            f, 
-            "jp   v{:x} {:#05X}", 
-            if kind == RomKind::SCHIP { 
-                *x 
-            } else { 
-                0 
-            }, 
+            f,
+            "jp   v{:x} {:#05X}",
+            if kind == RomKind::SCHIP { *x } else { 0 },
             addr
         ),
         Instruction::CallSubroutine(addr) => write!(f, "call {:#05X}", addr),
@@ -632,7 +678,7 @@ pub fn write_inst_asm(
             write!(f, "sknp v{:x}", vx)?;
             write!(c, "skip if v{:x} keyup", vx)
         }
-        Instruction::GetKey(vx) => {
+        Instruction::WaitForKey(vx) => {
             write!(f, "ld   v{:x} k", vx)?;
             write!(c, "v{:x} = next keypress", vx)
         }
@@ -694,9 +740,13 @@ pub fn write_inst_asm(
             write!(f, "ld   st v{:x}", vx)?;
             write!(c, "sound timer = v{:x}", vx)
         }
-        Instruction::SetIndex(value) => {
-            write!(f, "ld   i {:#05X}", value)?;
-            write!(c, "i = {:#05X}", value)
+        Instruction::SetIndex(addr) => {
+            write!(f, "ld   i {:#05X}", addr)?;
+            write!(c, "i = {:#05X}", addr)
+        }
+        Instruction::SetIndexToLong(addr) => {
+            write!(f, "lld  i {:#06X}", addr)?;
+            write!(c, "i = {:#06X}", addr)
         }
         Instruction::SetIndexToHexChar(vx) => {
             write!(f, "ld   f v{:x}", vx)?;
@@ -712,35 +762,47 @@ pub fn write_inst_asm(
         }
         Instruction::Load(vx) => {
             write!(f, "ld   v{:x} i", vx)?;
-            write!(c, "v0..=v{:x} = memory", vx)
+            write!(c, "v0..={:x} <- mem", vx)
         }
         Instruction::Store(vx) => {
             write!(f, "ld   i v{:x}", vx)?;
-            write!(c, "memory = v0..=v{:x}", vx)
+            write!(c, "mem <- v0..={:x}", vx)
+        }
+        Instruction::LoadRange(vx, vy) => {
+            write!(f, "ld   v{:x} v{:x} i", vx, vy)?;
+            write!(c, "v{:x}..={:x} <- mem", vx, vy)
+        }
+        Instruction::StoreRange(vx, vy) => {
+            write!(f, "ld   i v{:x} v{:x}", vx, vy)?;
+            write!(c, "mem <- v{:x}..={:x}", vx, vy)
         }
         Instruction::LoadFlags(vx) => {
             write!(f, "ld   v{:x} r", vx)?;
-            write!(c, "v0..=v{:x} = flags", vx)
+            write!(c, "v0..={:x} <- flags", vx)
         }
         Instruction::StoreFlags(vx) => {
             write!(f, "ld   r v{:x}", vx)?;
-            write!(c, "flags = v0..=v{:x}", vx)
+            write!(c, "flags <- v0..={:x}", vx)
         }
-        Instruction::StoreDecimal(vx) => {
+        Instruction::StoreBinaryCodedDecimal(vx) => {
             write!(f, "ld   b v{:x}", vx)?;
-            write!(c, "save dec digits from v{:x}", vx)
+            write!(c, "mem <- bcd v{:x}", vx)
         }
         Instruction::GenerateRandom(vx, bound) => {
             write!(f, "rnd  v{:x} {}", vx, bound)?;
             write!(c, "v{:x} = rand 0..={}", vx, bound)
         }
-        Instruction::Display(vx, vy, height) => {
+        Instruction::Draw(vx, vy, height) => {
             write!(f, "drw  v{:x} v{:x} {}", vx, vy, height)?;
             if *height == 0 && kind == RomKind::SCHIP {
                 write!(c, "draw 16x16 @ v{:x},v{:x}", vx, vy)
             } else {
                 write!(c, "draw 8x{} @ v{:x},v{:x}", height, vx, vy)
             }
+        }
+        Instruction::ScrollUp(n) => {
+            write!(f, "scu")?;
+            write!(c, "scroll {} up", n)
         }
         Instruction::ScrollDown(n) => {
             write!(f, "scd")?;
@@ -756,15 +818,23 @@ pub fn write_inst_asm(
         }
         Instruction::LowResolution => {
             write!(f, "low")?;
-            write!(c, "use lo-res")
+            write!(c, "lo-res display")
         }
         Instruction::HighResolution => {
             write!(f, "high")?;
-            write!(c, "use hi-res")
+            write!(c, "hi-res display")
         }
         Instruction::ClearScreen => {
             write!(f, "cls")?;
             write!(c, "clear")
+        }
+        Instruction::LoadAudio => {
+            write!(f, "ld   a i")?;
+            write!(c, "audio <- mem")
+        }
+        Instruction::SetPitch(vx) => {
+            write!(f, "ld   p v{:x}", vx)?;
+            write!(c, "pitch = v{:x}", vx)
         }
     }
 }

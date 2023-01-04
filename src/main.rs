@@ -67,18 +67,23 @@ fn main() -> Result<()> {
             std::panic::set_hook(Box::new(move |panic_info| {
                 if let Err(cleanup_err) = panic_cleanup_terminal() {
                     eprintln!("Failed to cleanup terminal after panic: {}", cleanup_err);
+                } else {
+                    eprintln!("");
                 }
                 default_panic_hook(panic_info);
             }));
 
             // spawn run threads
-            let (run_render_thread, run_main_thread) = spawn_run_threads(rom, hz);
+            let (run_main_thread, run_render_thread, run_sound_thread) = spawn_run_threads(rom, hz);
 
             // wait for threads
+            run_sound_thread
+                .join()
+                .expect("Failed to join sound thread");
             run_render_thread
                 .join()
                 .expect("Failed to join render thread");
-            match run_main_thread.join().expect("Failed to join run thread") {
+            match run_main_thread.join().expect("Failed to join main thread") {
                 Ok(analytics) => println!("{}", analytics),
                 Err(err) => println!("\n    {} {}", format!("Error").red().bold(), err),
             }

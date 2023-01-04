@@ -60,6 +60,12 @@ impl Display {
         self.buffer.fill(0);
     }
 
+    pub fn scroll_up(&mut self, amt: usize) {
+        let fill_start = self.buffer.len().saturating_sub(amt);
+        self.buffer.copy_within(amt.., 0);
+        self.buffer[fill_start..].fill(0);
+    }
+
     pub fn scroll_down(&mut self, amt: usize) {
         let range_end = self.buffer.len() - amt;
         self.buffer.copy_within(..range_end, amt);
@@ -67,11 +73,13 @@ impl Display {
     }
 
     pub fn scroll_left(&mut self) {
-        self.buffer.iter_mut().for_each(|row| *row <<= 4);
+        let amount = if self.mode == DisplayMode::HighResolution { 4 } else { 2 };
+        self.buffer.iter_mut().for_each(|row| *row <<= amount);
     }
 
     pub fn scroll_right(&mut self) {
-        self.buffer.iter_mut().for_each(|row| *row >>= 4);
+        let amount = if self.mode == DisplayMode::HighResolution { 4 } else { 2 };
+        self.buffer.iter_mut().for_each(|row| *row >>= amount);
     }
 
     pub fn draw(
@@ -125,7 +133,7 @@ pub struct DisplayWidget<'a, 'b> {
     pub logging: bool,
     pub rom_name: &'b str,
     pub rom_kind: RomKind,
-    pub execution_frequency: u16,
+    pub execution_frequency: u32,
 }
 
 impl<'a, 'b> DisplayWidget<'_, '_> {

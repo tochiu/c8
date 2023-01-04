@@ -153,6 +153,7 @@ pub struct Debugger {
     event_queue: Vec<DebugEvent>,
 
     disassembler: Disassembler,
+    disassembler_needs_update: bool,
 
     memory: Memory,
     memory_active: bool,
@@ -161,7 +162,7 @@ pub struct Debugger {
 
     keyboard_shows_qwerty: bool,
 
-    runner_target_execution_frequency: u16,
+    runner_target_execution_frequency: u32,
 
     shell: Shell,
     shell_input_active: bool,
@@ -173,7 +174,7 @@ pub struct Debugger {
 }
 
 impl Debugger {
-    pub fn new(vm: &VM, initial_target_execution_frequency: u16) -> Self {
+    pub fn new(vm: &VM, initial_target_execution_frequency: u32) -> Self {
         let mut dbg = Debugger {
             active: false,
 
@@ -186,6 +187,7 @@ impl Debugger {
             event_queue: Default::default(),
 
             disassembler: Disassembler::from(vm.interpreter().rom.clone()),
+            disassembler_needs_update: false,
 
             memory: Default::default(),
             memory_active: false,
@@ -304,12 +306,14 @@ impl Debugger {
         // update disassembler
         match self.watch_state.instruction {
             Some(Instruction::Store(vx)) => {
-                self.disassembler
-                    .update(vm.interpreter(), self.watch_state.index, vx as u16 + 1);
+                self.disassembler_needs_update |=
+                    self.disassembler
+                        .needs_rerun(vm.interpreter(), self.watch_state.index, vx as u16 + 1);
             }
-            Some(Instruction::StoreDecimal(_)) => {
-                self.disassembler
-                    .update(vm.interpreter(), self.watch_state.index, 3);
+            Some(Instruction::StoreBinaryCodedDecimal(_)) => {
+                self.disassembler_needs_update |=
+                    self.disassembler
+                        .needs_rerun(vm.interpreter(), self.watch_state.index, 3);
             }
             _ => (),
         }
@@ -498,7 +502,6 @@ impl Debugger {
 
     fn handle_command(&mut self, command: DebugCliCommand, runner: &mut Runner, vm: &mut VM) {
         match command {
-
             DebugCliCommand::Continue => {
                 if let Some(e) = self.vm_exception.as_ref() {
                     self.shell.error(e);
@@ -518,7 +521,11 @@ impl Debugger {
             }
 
             DebugCliCommand::Step { amount } => {
-                let amt_stepped = self.stepn(vm, amount, 1.0 / self.runner_target_execution_frequency as f32);
+                let amt_stepped = self.stepn(
+                    vm,
+                    amount,
+                    1.0 / self.runner_target_execution_frequency as f32,
+                );
 
                 if amt_stepped > 1 {
                     self.shell.print(format!("Stepped {} times", amt_stepped));
@@ -534,7 +541,8 @@ impl Debugger {
                 }
 
                 self.runner_target_execution_frequency = hertz;
-                self.shell.print(format!("Set execution frequency to {}Hz", hertz));
+                self.shell
+                    .print(format!("Set execution frequency to {}Hz", hertz));
             }
 
             DebugCliCommand::Redo { amount } => {
@@ -551,7 +559,7 @@ impl Debugger {
                     self.shell.output_pc(vm.interpreter());
                 }
             }
-            
+
             DebugCliCommand::Undo { amount } => {
                 let amt_rewinded = self.history.undo(vm, amount);
                 if amt_rewinded > 0 {
@@ -559,7 +567,8 @@ impl Debugger {
                     self.vm_executing = true;
                     self.memory_widget_state.get_mut().poke();
                     if amt_rewinded > 1 {
-                        self.shell.print(format!("Undid {} instructions", amt_rewinded));
+                        self.shell
+                            .print(format!("Undid {} instructions", amt_rewinded));
                     } else {
                         self.shell.output_pc(vm.interpreter());
                     }
@@ -587,7 +596,7 @@ impl Debugger {
                 let address = match location {
                     GotoOption::SemanticLocation(SemanticLocation::Start) => 0,
                     GotoOption::SemanticLocation(SemanticLocation::End) => {
-                        vm.interpreter().memory.len() as u16 - 1
+                        (vm.interpreter().memory.len() - 1) as u16
                     }
                     GotoOption::Pointer(Pointer::Pc) => vm.interpreter().pc,
                     GotoOption::Pointer(Pointer::I) => vm.interpreter().index,
@@ -844,6 +853,13 @@ impl Debugger {
             },
         }
     }
+
+    pub fn prepare_render(&mut self) {
+        if self.active && self.disassembler_needs_update {
+            self.disassembler_needs_update = false;
+            self.disassembler.rerun();
+        }
+    }
 }
 
 pub struct DebuggerWidgetState {
@@ -974,7 +990,7 @@ impl<'a> DebuggerWidget<'a> {
             );
         }
 
-        let display_mode = self.vm.interpreter().output.display.mode;
+        let display_mode = self.vm.interpreter().display.mode;
         let (mut display_window_width, mut display_window_height) =
             display_mode.window_dimensions();
         display_window_height = if self.dbg.vm_visible {
@@ -1171,12 +1187,12 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             if time_step == 0.0 {
                 0
             } else {
-                (1.0 / time_step).clamp(0.0, u16::MAX as f32).round() as u16
+                (1.0 / time_step).clamp(0.0, u32::MAX as f32).round() as u32
             }
         };
 
         let display_widget = DisplayWidget {
-            display: &self.vm.interpreter().output.display,
+            display: &self.vm.interpreter().display,
             rom_name: &self.vm.interpreter().rom.config.name,
             rom_kind: self.vm.interpreter().rom.config.kind,
             execution_frequency,
@@ -1351,7 +1367,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         // Timers
         Paragraph::new(vec![
-            Spans::from(format!(" vsync {:0>3.0}%", self.vm.vsync()*100.0)),
+            Spans::from(format!(" vsync {:0>3.0}%", self.vm.vsync() * 100.0)),
             Spans::from(format!(" sound {:0>6.2}", self.vm.sound_timer())),
             Spans::from(format!(" delay {:0>6.2}", self.vm.delay_timer())),
             Spans::from(format!("   |-> {:0>3}", interp.input.delay_timer)),

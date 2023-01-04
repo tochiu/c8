@@ -1,8 +1,9 @@
+use super::{
+    interp::PROGRAM_STARTING_ADDRESS,
+    mem::{DEFAULT_PROGRAM_MEMORY_SIZE, XOCHIP_PROGRAM_MEMORY_SIZE},
+};
+
 use std::{ffi::OsStr, fmt::Display, fs::read, io, path::Path};
-
-use super::interp::{PROGRAM_MEMORY_SIZE, PROGRAM_STARTING_ADDRESS};
-
-pub const MAX_ROM_SIZE: u16 = PROGRAM_MEMORY_SIZE - PROGRAM_STARTING_ADDRESS;
 
 #[derive(Clone)]
 pub struct RomConfig {
@@ -12,11 +13,22 @@ pub struct RomConfig {
     pub debugging: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RomKind {
-    CHIP8,
     COSMACVIP,
+    CHIP8,
     SCHIP,
+    XOCHIP,
+}
+
+impl RomKind {
+    pub fn max_size(self) -> usize {
+        if self == RomKind::XOCHIP {
+            XOCHIP_PROGRAM_MEMORY_SIZE - PROGRAM_STARTING_ADDRESS as usize
+        } else {
+            DEFAULT_PROGRAM_MEMORY_SIZE - PROGRAM_STARTING_ADDRESS as usize
+        }
+    }
 }
 
 impl Display for RomKind {
@@ -25,6 +37,7 @@ impl Display for RomKind {
             Self::CHIP8 => write!(f, "CHIP8"),
             Self::COSMACVIP => write!(f, "CHIP8 (COSMAC VIP)"),
             Self::SCHIP => write!(f, "SCHIP"),
+            Self::XOCHIP => write!(f, "X0-CHIP"),
         }
     }
 }
@@ -57,18 +70,20 @@ impl Rom {
             data: read(path)?,
         };
 
+        let max_rom_size = rom.config.kind.max_size();
+        
         if rom.data.len() < 2 {
             Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("ROM size ({}B) is below minimum size (2B)", rom.data.len()),
             ))
-        } else if rom.data.len() > MAX_ROM_SIZE as usize {
+        } else if rom.data.len() > max_rom_size as usize {
             Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
                     "ROM size ({}B) exceeds maximum size ({}B)",
                     rom.data.len(),
-                    MAX_ROM_SIZE
+                    max_rom_size
                 ),
             ))
         } else {
