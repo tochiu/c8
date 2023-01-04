@@ -1,13 +1,12 @@
 use super::rom::RomKind;
 
 use rodio::{
-    buffer::SamplesBuffer,
-    source::{Repeat, Source},
+    source::Source,
     OutputStream, Sink,
 };
 
 use std::{
-    sync::mpsc::{channel, Sender, RecvTimeoutError},
+    sync::{mpsc::{channel, Sender, RecvTimeoutError}, Arc, Mutex},
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -19,6 +18,7 @@ const AUDIO_BUFFER_SIZE_BITS: usize = AUDIO_BUFFER_SIZE_BYTES * u8::BITS as usiz
 
 const BASE_SAMPLE_RATE: u32 = 4000;
 const DEFAULT_RECV_TIMEOUT: Duration = Duration::from_millis(1000);
+const DEFAULT_VOLUME: f32 = 0.25;
 
 pub struct Audio {
     pub buffer: [u8; AUDIO_BUFFER_SIZE_BYTES],
@@ -44,6 +44,62 @@ impl From<RomKind> for Audio {
     }
 }
 
+pub struct AudioSourceData {
+    buffer: [f32; AUDIO_BUFFER_SIZE_BITS],
+    sample_rate: u32,
+    //volume: f32,
+    playback_offset: usize,
+}
+
+impl AudioSourceData {
+    fn set_buffer(&mut self, buffer: &[u8; AUDIO_BUFFER_SIZE_BYTES]) {
+        self.buffer.iter_mut().enumerate().for_each(|(i, sample)| *sample = if buffer[i / 8] >> (7 - i % 8) & 1 == 1 { 1.0 } else { 0.0 });
+    }
+}
+
+pub struct AudioSource {
+    data: Arc<Mutex<AudioSourceData>>
+}
+
+impl AudioSource {
+    pub fn new(data: Arc<Mutex<AudioSourceData>>) -> Self {
+        data.lock().unwrap().playback_offset = 0;
+        AudioSource {
+            data,
+        }
+    }
+}
+
+impl Source for AudioSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        Some(4)
+        //Some(AUDIO_BUFFER_SIZE_BITS - self.data.lock().unwrap().playback_offset)
+    }
+
+    fn channels(&self) -> u16 {
+        1
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.data.lock().unwrap().sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
+}
+
+impl Iterator for AudioSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut data = self.data.lock().unwrap();
+        let sample = data.buffer[data.playback_offset];
+        data.playback_offset = (data.playback_offset + 1) % data.buffer.len();
+        Some(sample)
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum AudioEvent {
     SetTimer(Duration),
@@ -62,8 +118,17 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
         let sink = Sink::try_new(&stream_handle)
             .expect("Failed to create audio sink");
 
+        sink.set_volume(DEFAULT_VOLUME);
+
+        let data = Arc::new(Mutex::new(AudioSourceData {
+            buffer: [0.0; AUDIO_BUFFER_SIZE_BITS],
+            sample_rate: BASE_SAMPLE_RATE,
+            //volume: DEFAULT_VOLUME,
+            playback_offset: 0,
+        }));
+
         let mut paused = false;
-        let mut playback_offset = 0.0;
+        //let mut playback_offset = 0.0;
         let mut current_buffer = [0; AUDIO_BUFFER_SIZE_BYTES];
         let mut remaining_duration = Duration::ZERO;
 
@@ -86,18 +151,22 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
                 // possible performance concern and a lot of work for something that's not really important. It is
                 // accurate enough for now to just approximate the playback offset based on playback speed and
                 // playback time elapsed.
-                playback_offset = sink.speed() * BASE_SAMPLE_RATE as f32 * elapsed_duration.as_secs_f32() % AUDIO_BUFFER_SIZE_BITS as f32;
+                // playback_offset = sink.speed() as f32 * BASE_SAMPLE_RATE as f32 * elapsed_duration.as_secs_f32() % AUDIO_BUFFER_SIZE_BITS as f32;
             }
 
-            
+            // if let Ok(event) = recv_result.as_ref() {
+            //     log::info!("Audio thread received event: {:?}", event);
+            // }
 
             match recv_result.as_ref().cloned() {
                 Ok(event) => match event {
                     AudioEvent::SetTimer(duration) => {
                         remaining_duration = duration;
+
                         if !remaining_duration.is_zero() {
                             if sink.empty() {
-                                sink.append(buffer_to_source(&current_buffer, playback_offset));
+                                sink.append(AudioSource::new(Arc::clone(&data)));
+                                //sink.append(buffer_to_source(&current_buffer, playback_offset));
                             }
                             if !paused {
                                 sink.play();
@@ -105,25 +174,25 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
                         }
                     }
                     AudioEvent::SetBuffer(buffer) => 'guard: {
-                        log::info!("Audio thread received event: {:?}", recv_result);
                         if buffer == current_buffer {
                             break 'guard;
                         }
 
                         current_buffer = buffer;
-                        if !sink.empty() {
-                            sink.clear();
-                        }
+                        data.lock().unwrap().set_buffer(&buffer); //.buffer = buffer_to_samples(&buffer);
+                        // if !sink.empty() {
+                        //     sink.clear();
+                        // }
 
-                        if !remaining_duration.is_zero() {
-                            sink.append(buffer_to_source(&current_buffer, playback_offset));
-                            if !paused {
-                                sink.play();
-                            }
-                        }
+                        // if !remaining_duration.is_zero() {
+                        //     sink.append(buffer_to_source(&current_buffer, playback_offset));
+                        //     if !paused {
+                        //         sink.play();
+                        //     }
+                        // }
                     }
                     AudioEvent::SetPitch(pitch) => {
-                        sink.set_speed(2.0_f32.powf((pitch as f32 - 64.0) / 48.0));
+                        data.lock().unwrap().sample_rate = (BASE_SAMPLE_RATE as f32 * 2.0_f32.powf((pitch as f32 - 64.0) / 48.0)).round() as u32;
                     }
                     AudioEvent::Pause => 'guard: {
                         if paused {
@@ -145,7 +214,7 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
                     return;
                 }
                 Err(RecvTimeoutError::Timeout) => (),
-            }                
+            }
 
             recv_last_instant = now;
             recv_timeout = {
@@ -155,7 +224,6 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
                     if !sink.empty() {
                         sink.clear();
                     }
-                    playback_offset = 0.0;
                     DEFAULT_RECV_TIMEOUT
                 } else {
                     remaining_duration
@@ -165,22 +233,4 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
     });
 
     (event_sender, handle)
-}
-
-fn buffer_to_source(buffer: &[u8; AUDIO_BUFFER_SIZE_BYTES], playback_offset: f32) -> Repeat<SamplesBuffer<f32>> {
-    let mut data = Vec::with_capacity(AUDIO_BUFFER_SIZE_BITS);
-    data.extend(
-        buffer
-            .iter()
-            .map(|byte| {
-                (0..8)
-                    .rev()
-                    .into_iter()
-                    .map(|shift| if *byte >> shift & 1 == 1 { 1.0 } else { 0.0 })
-            })
-            .flatten(),
-    );
-    data.rotate_left(playback_offset.round() as usize % AUDIO_BUFFER_SIZE_BITS);
-
-    SamplesBuffer::new(1, BASE_SAMPLE_RATE, data).repeat_infinite()
 }
