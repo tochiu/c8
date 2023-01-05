@@ -47,6 +47,7 @@ pub struct AudioSourceData {
     buffer: [f32; AUDIO_BUFFER_SIZE_BITS],
     sample_rate: u32,
     playback_offset: usize,
+    volume: f32,
 }
 
 impl AudioSourceData {
@@ -100,7 +101,7 @@ impl Iterator for AudioSource {
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut data = self.data.lock().expect("Unable to lock audio source data");
-        let sample = data.buffer[data.playback_offset];
+        let sample = data.volume*data.buffer[data.playback_offset];
         data.playback_offset = (data.playback_offset + 1) % data.buffer.len();
         Some(sample)
     }
@@ -129,14 +130,19 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
             buffer: [0.0; AUDIO_BUFFER_SIZE_BITS],
             sample_rate: BASE_SAMPLE_RATE,
             playback_offset: 0,
+            volume: 0.0,
         }));
 
         let mut paused = false;
+        let mut is_silent = true;
         let mut current_buffer = [0; AUDIO_BUFFER_SIZE_BYTES];
         let mut remaining_duration = Duration::ZERO;
 
         let mut recv_last_instant = Instant::now();
         let mut recv_timeout = DEFAULT_RECV_TIMEOUT;
+
+        sink.append(AudioSource::new(Arc::clone(&data)));
+        sink.play();
 
         loop {
             let recv_result = event_receiver.recv_timeout(recv_timeout);
@@ -151,20 +157,19 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
             }
 
             if let Ok(event) = recv_result.as_ref() {
-                log::trace!("Audio thread received event: {:?}", event);
+                log::info!("Audio thread received event: {:?}", event);
             }
 
             match recv_result.as_ref().cloned() {
                 Ok(event) => match event {
                     AudioEvent::SetTimer(duration) => {
                         remaining_duration = duration;
-
                         if !remaining_duration.is_zero() {
-                            if sink.empty() {
-                                sink.append(AudioSource::new(Arc::clone(&data)));
-                            }
-                            if !paused {
-                                sink.play();
+                            if is_silent {
+                                data.lock()
+                                    .expect("Unable to lock audio source data")
+                                    .volume = 1.0;
+                                is_silent = false;
                             }
                         }
                     }
@@ -207,12 +212,13 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
 
             recv_last_instant = now;
             recv_timeout = {
-                if paused || sink.empty() {
+                if paused || is_silent {
                     DEFAULT_RECV_TIMEOUT
                 } else if remaining_duration.is_zero() {
-                    if !sink.empty() {
-                        sink.clear();
-                    }
+                    data.lock()
+                        .expect("Unable to lock audio source data")
+                        .volume = 0.0;
+                    is_silent = true;
                     DEFAULT_RECV_TIMEOUT
                 } else {
                     remaining_duration
