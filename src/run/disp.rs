@@ -98,16 +98,18 @@ impl Display {
     }
 
     pub fn scroll_up(&mut self, amt: usize) {
+        let (_, height) = self.mode.dimensions();
         for buffer in self.selected_planes_mut() {
-            let fill_start = buffer.len().saturating_sub(amt);
+            let fill_start = (height as usize).saturating_sub(amt);
             buffer.copy_within(amt.., 0);
-            buffer[fill_start..].fill(0);
+            buffer[fill_start..height as usize].fill(0);
         }
     }
 
     pub fn scroll_down(&mut self, amt: usize) {
+        let (_, height) = self.mode.dimensions();
         for buffer in self.selected_planes_mut() {
-            let range_end = buffer.len() - amt;
+            let range_end = height as usize - amt;
             buffer.copy_within(..range_end, amt);
             buffer[..amt].fill(0);
         }
@@ -117,7 +119,7 @@ impl Display {
         let amount = if self.mode == DisplayMode::HighResolution {
             4
         } else {
-            2
+            4 // Octo does 4 no matter what
         };
         for buffer in self.selected_planes_mut() {
             buffer.iter_mut().for_each(|row| *row <<= amount);
@@ -128,7 +130,7 @@ impl Display {
         let amount = if self.mode == DisplayMode::HighResolution {
             4
         } else {
-            2
+            4 // Octo does 4 no matter what
         };
         for buffer in self.selected_planes_mut() {
             buffer.iter_mut().for_each(|row| *row >>= amount);
