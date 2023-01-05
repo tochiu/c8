@@ -1,8 +1,8 @@
-use crate::asm::write_inst_asm;
+use crate::asm::write_inst_dasm;
 
 use super::{
     audio::{Audio, AUDIO_BUFFER_SIZE_BYTES},
-    disp::{Display, DisplayMode},
+    disp::{Display, DisplayMode, DisplayPlaneSelection},
     input::Key,
     mem::*,
     rom::{Rom, RomKind},
@@ -112,9 +112,10 @@ impl InstructionParameters {
             (0xB, __x, __y, __n) => Instruction::JumpWithOffset(nnn, x),
             (0xC, __x, __y, __n) => Instruction::GenerateRandom(x, nn),
             (0xD, __x, __y, __n) => Instruction::Draw(x, y, n),
-            (0xF, 0x0, 0x0, 0x0) => Instruction::SetIndexToLong(nnnn),
             (0xE, __x, 0x9, 0xE) => Instruction::SkipIfKeyDown(x),
             (0xE, __x, 0xA, 0x1) => Instruction::SkipIfKeyNotDown(x),
+            (0xF, 0x0, 0x0, 0x0) => Instruction::SetIndexToLong(nnnn),
+            (0xF, __x, 0x0, 0x1) => Instruction::SetPlane(x),
             (0xF, 0x0, 0x0, 0x2) => Instruction::LoadAudio,
             (0xF, __x, 0x0, 0x7) => Instruction::GetDelayTimer(x),
             (0xF, __x, 0x0, 0xA) => Instruction::WaitForKey(x),
@@ -161,6 +162,13 @@ impl InstructionParameters {
                     return Err(self.compatibility_issue_msg(instruction, RomKind::XOCHIP, kind));
                 }
             }
+            Instruction::SetPlane(n) => {
+                if kind < RomKind::XOCHIP {
+                    return Err(self.compatibility_issue_msg(instruction, RomKind::XOCHIP, kind));
+                } else if n > 0b11 {
+                    return Err(format!("Invalid plane number {}", n));
+                }
+            }
             _ => (),
         };
 
@@ -175,7 +183,7 @@ impl InstructionParameters {
     ) -> String {
         let mut message = String::new();
         let mut comment = String::new();
-        write_inst_asm(&instruction, expected_kind, &mut message, &mut comment).ok();
+        write_inst_dasm(&instruction, expected_kind, &mut message, &mut comment).ok();
         format!(
             "{:04X} a.k.a. \"{}\" ({}) is at least a {} instruction but ROM is {}",
             self.significant_bytes(instruction.size()), message, comment, expected_kind, actual_kind
@@ -232,6 +240,7 @@ pub enum Instruction {
     StoreFlags(u8),
     StoreBinaryCodedDecimal(u8),
     GenerateRandom(u8, u8),
+    SetPlane(u8),
     Draw(u8, u8, u8),
     ScrollUp(u8),
     ScrollDown(u8),
@@ -285,6 +294,9 @@ pub enum InterpreterOutput {
 pub enum InterpreterHistoryFragmentExtra {
     WillGenerateRandom {
         prior_rng: Box<StdRng>,
+    },
+    WillSetPlane {
+        prior_selected_plane: DisplayPlaneSelection,
     },
     WillDrawEntireDisplay {
         prior_display: Box<Display>,
@@ -371,6 +383,7 @@ pub struct Interpreter {
     pub audio: Audio,
     pub input: InterpreterInput,
     pub output: Option<InterpreterOutput>,
+    pub workspace: [u8; 64],
 }
 
 impl From<Rom> for Interpreter {
@@ -394,6 +407,7 @@ impl From<Rom> for Interpreter {
             audio: Audio::from(rom.config.kind),
             input: Default::default(),
             output: None,
+            workspace: [0; 64],
             rom,
         }
     }
@@ -489,18 +503,25 @@ impl Interpreter {
             InterpreterHistoryFragmentExtra::WillSetPitch { prior_pitch } => {
                 self.audio.pitch = *prior_pitch;
             }
+
+            InterpreterHistoryFragmentExtra::WillSetPlane { prior_selected_plane } => {
+                self.display.set_plane(*prior_selected_plane);
+            }
         }
     }
 
     pub fn to_history_fragment(&self) -> InterpreterHistoryFragment {
-        let mut index_memory = [0; 32];
-        self.memory.export(self.index, &mut index_memory);
-
         let instruction = self.try_fetch_decode().ok();
         let extra = instruction.and_then(|instruction| match instruction {
             Instruction::GenerateRandom(_, _) => Some(Box::new(
                 InterpreterHistoryFragmentExtra::WillGenerateRandom {
                     prior_rng: Box::new(self.rng.clone()),
+                },
+            )),
+
+            Instruction::SetPlane(_) => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillSetPlane {
+                    prior_selected_plane: self.display.selected_plane,
                 },
             )),
 
@@ -516,16 +537,16 @@ impl Interpreter {
                 },
             )),
 
-            Instruction::Load(_) | Instruction::LoadRange(_, _) | Instruction::Draw(_, _, _) => {
-                Some(Box::new({
-                    let mut index_access_flag_slice = [0; 32];
-                    self.memory_access_flags
-                        .export(self.index, &mut index_access_flag_slice);
-                    InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                        prior_index_access_flag_slice: index_access_flag_slice,
-                    }
-                }))
-            }
+            Instruction::Load(_) 
+            | Instruction::LoadRange(_, _) 
+            | Instruction::Draw(_, _, _) => Some(Box::new({
+                let mut index_access_flag_slice = [0; 32];
+                self.memory_access_flags
+                    .export(self.index, &mut index_access_flag_slice);
+                InterpreterHistoryFragmentExtra::WillLoadFromMemory {
+                    prior_index_access_flag_slice: index_access_flag_slice,
+                }
+            })),
 
             Instruction::Store(_)
             | Instruction::StoreRange(_, _)
@@ -591,8 +612,7 @@ impl Interpreter {
 
         match instruction {
             Instruction::Load(vx) => {
-                let mut workspace = [0; 16];
-                let buf = &mut workspace[0..=vx as usize];
+                let buf = &mut self.workspace[0..=vx as usize];
                 self.memory_access_flags
                     .export(executed_fragment.index, buf);
                 buf.iter_mut()
@@ -605,8 +625,7 @@ impl Interpreter {
                 if vstart > vend {
                     std::mem::swap(&mut vstart, &mut vend);
                 }
-                let mut workspace = [0; 16];
-                let buf = &mut workspace[vstart as usize..=vend as usize];
+                let buf = &mut self.workspace[vstart as usize..=vend as usize];
                 self.memory_access_flags
                     .export(executed_fragment.index, buf);
                 buf.iter_mut()
@@ -622,8 +641,7 @@ impl Interpreter {
                     height as usize
                 };
 
-                let mut workspace = [0; 32];
-                let buf = &mut workspace[0..sprite_bytes];
+                let buf = &mut self.workspace[0..sprite_bytes];
                 self.memory_access_flags
                     .export(executed_fragment.index, buf);
                 buf.iter_mut()
@@ -633,8 +651,7 @@ impl Interpreter {
             }
 
             Instruction::Store(vx) => {
-                let mut workspace = [0; 16];
-                let buf = &mut workspace[0..=vx as usize];
+                let buf = &mut self.workspace[0..=vx as usize];
                 self.memory_access_flags
                     .export(executed_fragment.index, buf);
                 buf.iter_mut()
@@ -647,8 +664,8 @@ impl Interpreter {
                 if vstart > vend {
                     std::mem::swap(&mut vstart, &mut vend);
                 }
-                let mut workspace = [0; 16];
-                let buf = &mut workspace[vstart as usize..=vend as usize];
+
+                let buf = &mut self.workspace[vstart as usize..=vend as usize];
                 self.memory_access_flags
                     .export(executed_fragment.index, buf);
                 buf.iter_mut()
@@ -658,9 +675,9 @@ impl Interpreter {
             }
 
             Instruction::LoadAudio => {
-                let mut buf = [0; 16];
+                let buf = &mut self.workspace[..16];
                 self.memory_access_flags
-                    .export(executed_fragment.index, &mut buf);
+                    .export(executed_fragment.index, buf);
                 buf.iter_mut()
                     .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
                 self.memory_access_flags
@@ -668,9 +685,9 @@ impl Interpreter {
             }
 
             Instruction::StoreBinaryCodedDecimal(_) => {
-                let mut buf = [0; 3];
+                let buf = &mut self.workspace[..3];
                 self.memory_access_flags
-                    .export(executed_fragment.index, &mut buf);
+                    .export(executed_fragment.index, buf);
                 buf.iter_mut()
                     .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
                 self.memory_access_flags
@@ -776,13 +793,15 @@ impl Interpreter {
             }
 
             Instruction::SkipIfKeyDown(vx) => {
-                if self.input.down_keys >> self.registers[vx as usize] & 1 == 1 {
+                let key = self.registers[vx as usize];
+                if key <= 0xF && self.input.down_keys >> key & 1 == 1 {
                     skip_next_instruction = true
                 }
             }
 
             Instruction::SkipIfKeyNotDown(vx) => {
-                if self.input.down_keys >> self.registers[vx as usize] & 1 == 0 {
+                let key = self.registers[vx as usize];
+                if key > 0xF || self.input.down_keys >> key & 1 == 0 {
                     skip_next_instruction = true
                 }
             }
@@ -964,17 +983,27 @@ impl Interpreter {
             }
 
             Instruction::StoreBinaryCodedDecimal(vx) => {
-                let mut bcd = [0, 0, 0];
                 let decimal = self.registers[vx as usize];
-                bcd.iter_mut()
+                self.workspace[..3]
+                    .iter_mut()
                     .rev()
                     .enumerate()
                     .for_each(|(i, val)| *val = decimal / 10u8.pow(i as u32) % 10);
-                self.memory.import(&bcd, self.index);
+                self.memory.import(&self.workspace[..3], self.index);
             }
 
             Instruction::GenerateRandom(vx, bound) => {
                 self.registers[vx as usize] = (self.rng.next_u32() & bound as u32) as u8;
+            }
+
+            Instruction::SetPlane(n) => {
+                self.display.set_plane(match n {
+                    0b00 => DisplayPlaneSelection::NoPlane,
+                    0b01 => DisplayPlaneSelection::FirstPlane,
+                    0b10 => DisplayPlaneSelection::SecondPlane,
+                    0b11 => DisplayPlaneSelection::BothPlanes,
+                    _ => unreachable!("Plane selection must be 0b00, 0b01, 0b10, or 0b11"),
+                });
             }
 
             Instruction::Draw(vx, vy, height) => {
@@ -1043,22 +1072,22 @@ impl Interpreter {
     }
 
     fn exec_display_instruction(&mut self, vx: u8, vy: u8, height: u8) {
-        let (bytes_per_row, height) = if self.rom.config.kind == RomKind::SCHIP && height == 0 {
+        let (bytes_per_row, height) = if self.rom.config.kind >= RomKind::SCHIP && height == 0 {
             (2, 16)
         } else {
-            (1, height)
+            (1, height as usize)
         };
 
-        let mut sprite = [0; 32];
         self.memory
-            .export(self.index, &mut sprite[..(height * bytes_per_row) as usize]);
+            .export(self.index, &mut self.workspace[..(height * bytes_per_row * self.display.selected_planes().len())]);
 
         self.registers[VFLAG] = self.display.draw(
-            &sprite,
+            &self.workspace,
             self.registers[vx as usize] as u16,
             self.registers[vy as usize] as u16,
-            height as u16,
-            bytes_per_row == 2,
+            height,
+            bytes_per_row,
+            self.rom.config.kind == RomKind::XOCHIP
         ) as u8;
     }
 }

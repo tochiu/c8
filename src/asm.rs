@@ -437,7 +437,7 @@ impl Disassembler {
         write_byte_str(&mut f.bin, byte, 1).ok();
 
         if let Some(instruction) = instruction.as_ref() {
-            write_inst_asm(
+            write_inst_dasm(
                 instruction,
                 self.rom.config.kind,
                 &mut f.asm,
@@ -502,7 +502,7 @@ impl Disassembler {
                         _ => {
                             asm.clear();
                             asm_desc.clear();
-                            write_inst_asm(inst, self.rom.config.kind, &mut asm, &mut asm_desc)
+                            write_inst_dasm(inst, self.rom.config.kind, &mut asm, &mut asm_desc)
                                 .expect("Writing instruction to string failed");
                             write!(f, " {}", &asm)?;
                             if asm_desc.len() > 0 {
@@ -523,11 +523,6 @@ impl Disassembler {
 
 impl Display for Disassembler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut bin_header = String::new();
-        let mut bin_opcode = String::new();
-        let mut asm_content = String::new();
-        let mut asm_comment = String::new();
-
         for (addr, byte, tag) in self.tags[PROGRAM_STARTING_ADDRESS as usize..]
             .iter()
             .take(self.rom.data.len())
@@ -547,44 +542,50 @@ impl Display for Disassembler {
                         .map_or(false, |&tag| tag >= InstructionTag::Proven)
             })
         {
-            bin_header.clear();
-            bin_opcode.clear();
-            asm_content.clear();
-            asm_comment.clear();
 
             self.write_addr_dasm(addr)?;
 
+            let address_formatter = self.address_formatter.take();
+
             let show_bin_comment = tag <= InstructionTag::Valid;
             let show_asm_content = tag >= InstructionTag::Valid;
-            let show_asm_comment = show_asm_content && asm_comment.len() > 0;
+
+            // TODO: remove show_asm_comment since it always runs
+            //let show_asm_comment = show_asm_content; // && address_formatter.asm_desc.len() > 0;
 
             let mut content_length = 0;
 
-            f.write_str(&bin_header)?;
-            f.write_str(&bin_opcode)?;
-            content_length += bin_header.len() + bin_opcode.len();
+            f.write_str(&address_formatter.header)?;
+            // f.write_str(&address_formatter.opcode)?;
+            content_length += address_formatter.header.len(); // + bin_opcode.len();
 
             if show_asm_content {
                 f.write_char(' ')?;
-                f.write_str(&asm_content)?;
-                content_length += asm_content.len() + 1;
+                f.write_str(&address_formatter.asm)?;
+                content_length += address_formatter.asm.len() + 1;
             }
 
-            if show_bin_comment || show_asm_comment {
-                write!(
-                    f,
-                    "{}{} ",
-                    " ".repeat(INSTRUCTION_COLUMNS.saturating_sub(content_length)),
-                    ADDRESS_COMMENT_TOKEN
-                )?;
-            }
+            write!(
+                f,
+                "{}{}",
+                " ".repeat(INSTRUCTION_COLUMNS.saturating_sub(content_length)),
+                ADDRESS_COMMENT_TOKEN
+            )?;
+
+            f.write_str(&address_formatter.tag)?;
+            f.write_char(' ')?;
+            f.write_str(&address_formatter.opcode)?;
+            write!(f, "{}", " ".repeat(2*Instruction::MAX_INSTRUCTION_SIZE as usize - address_formatter.opcode.len()))?;
 
             if show_bin_comment {
-                write!(f, "2X GRAPHIC ")?;
+                write!(f, " 2X GRAPHIC ")?;
                 write_byte_str(f, byte, 2)?;
-            } else if show_asm_comment {
-                f.write_str(&asm_comment)?;
+            } else {
+                f.write_char(' ')?;
+                f.write_str(&address_formatter.asm_desc)?;
             }
+
+            self.address_formatter.set(address_formatter);
 
             f.write_char('\n')?;
         }
@@ -635,7 +636,7 @@ pub fn write_byte_str(
 }
 
 // TODO change this to quirks instead of rom kind
-pub fn write_inst_asm(
+pub fn write_inst_dasm(
     inst: &Instruction,
     kind: RomKind,
     f: &mut impl std::fmt::Write,
@@ -791,6 +792,10 @@ pub fn write_inst_asm(
         Instruction::GenerateRandom(vx, bound) => {
             write!(f, "rnd  v{:x} {}", vx, bound)?;
             write!(c, "v{:x} = rand 0..={}", vx, bound)
+        }
+        Instruction::SetPlane(n) => {
+            write!(f, "pln  {}", n)?;
+            write!(c, "select plane {}", n)
         }
         Instruction::Draw(vx, vy, height) => {
             write!(f, "drw  v{:x} v{:x} {}", vx, vy, height)?;

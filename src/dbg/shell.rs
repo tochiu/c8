@@ -1,4 +1,4 @@
-use crate::{asm::write_inst_asm, run::interp::Interpreter};
+use crate::{asm::write_inst_dasm, run::interp::Interpreter};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use tui::{
@@ -145,7 +145,7 @@ impl Shell {
         let mut inst_asm = String::new();
         let mut inst_comment = String::new();
         if let Ok(inst) = interp.try_fetch_decode() {
-            write_inst_asm(
+            write_inst_dasm(
                 &inst,
                 interp.rom.config.kind,
                 &mut inst_asm,
