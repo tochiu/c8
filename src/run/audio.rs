@@ -157,7 +157,7 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
             }
 
             if let Ok(event) = recv_result.as_ref() {
-                log::info!("Audio thread received event: {:?}", event);
+                log::trace!("Audio thread received event: {:?}", event);
             }
 
             match recv_result.as_ref().cloned() {
