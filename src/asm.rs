@@ -519,6 +519,19 @@ impl Disassembler {
 
         Ok(())
     }
+
+    pub fn is_address_overlapping_instruction_tag(&self, address: u16, tag: InstructionTag) -> bool {
+        for address_diff in 1..Instruction::MAX_INSTRUCTION_SIZE {
+            let prior_address = self.memory.address_sub(address, address_diff) as usize;
+            if self.tags[prior_address] >= tag 
+                && Instruction::size_or_default(&self.instructions[prior_address]) > address_diff 
+            {
+                return true;
+            }
+        }
+
+        false
+    }
 }
 
 impl Display for Disassembler {
@@ -535,11 +548,9 @@ impl Display for Disassembler {
                 )
             })
             .filter(|(addr, _, tag)| {
-                *tag >= InstructionTag::Proven
-                    || !self
-                        .tags
-                        .get(*addr as usize - 1)
-                        .map_or(false, |&tag| tag >= InstructionTag::Proven)
+                
+                *tag >= InstructionTag::Proven 
+                    || !self.is_address_overlapping_instruction_tag(*addr, InstructionTag::Proven)
             })
         {
 

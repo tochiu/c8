@@ -131,16 +131,12 @@ impl<'a> MemoryWidget<'_> {
 
     fn is_addr_drawable(&self, addr: u16) -> bool {
         let tag = self.disassembler.tags[addr as usize];
-        self.memory.verbose
+        let overrides_is_drawable = self.memory.verbose
             || tag >= InstructionTag::Proven
             || addr == 0
             || addr == self.interpreter.pc
-            || addr == self.interpreter.index
-            || !self
-                .disassembler
-                .tags
-                .get(addr as usize - 1)
-                .map_or(false, |&tag| tag >= InstructionTag::Proven)
+            || addr == self.interpreter.index;
+        overrides_is_drawable || !self.disassembler.is_address_overlapping_instruction_tag(addr, InstructionTag::Proven)
     }
 
     fn find_nearest_drawable_addr(&self, mut addr: u16, is_forwards: bool) -> Option<u16> {
@@ -219,7 +215,6 @@ impl<'a> MemoryWidget<'_> {
 
         let content_len = 7 
             + address_formatter.header.len()
-            //+ address_formatter.opcode.len()
             + if show_addr_asm { address_formatter.asm.len() + 1 } else { 0 };
         let content_len_padded = if show_comments {
             content_len.max(INSTRUCTION_COLUMNS + 1)
@@ -262,8 +257,6 @@ impl<'a> MemoryWidget<'_> {
         content.push(if write { 'w' } else { '-' });
         content.push(if exec { 'x' } else { '-' });
         content.push_str(&address_formatter.tag);
-        //content.push_str(&address_formatter.opcode);
-        //content.push_str(&address_formatter.bin);
         if show_addr_asm {
             content.push(' ');
             content.push_str(&address_formatter.asm);
