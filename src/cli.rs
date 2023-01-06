@@ -74,7 +74,7 @@ impl LogLevelOption {
 
 #[derive(Subcommand)]
 pub enum CliCommand {
-    /// C8 CHECK: Statically checks a CHIP-8 ROM for issues
+    /// Statically checks a CHIP-8 ROM for potential issues
     Check {
         /// Path of the ROM to load
         #[arg(value_name = "ROM")]
@@ -89,7 +89,7 @@ pub enum CliCommand {
         kind: Option<KindOption>,
     },
 
-    /// C8 DASM: Disassembles a CHIP-8 ROM
+    /// Disassembles a CHIP-8 ROM
     Dasm {
         /// Path of the ROM to load
         #[arg(value_name = "ROM")]
@@ -104,7 +104,7 @@ pub enum CliCommand {
         kind: Option<KindOption>,
     },
 
-    /// C8 RUN: Loads a CHIP-8 ROM and runs it
+    /// Loads a CHIP-8 ROM and runs it
     Run {
         /// Path of the ROM to load
         #[arg(value_name = "ROM")]
