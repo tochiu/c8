@@ -27,7 +27,7 @@ fn main() -> Result<()> {
             }
 
             let mut disasm =
-                Disassembler::from(Rom::read(path, kind.to_kind(), log.is_some(), false)?);
+                Disassembler::from(Rom::read(path, kind.map(cli::KindOption::to_kind), log.is_some(), false)?);
             disasm.run();
             disasm.write_issue_traces(&mut stdout())?;
         }
@@ -37,7 +37,7 @@ fn main() -> Result<()> {
             }
 
             let mut disasm =
-                Disassembler::from(Rom::read(path, kind.to_kind(), log.is_some(), false)?);
+                Disassembler::from(Rom::read(path, kind.map(cli::KindOption::to_kind), log.is_some(), false)?);
             disasm.run();
             print!("{}", disasm);
         }
@@ -48,8 +48,8 @@ fn main() -> Result<()> {
             log,
             kind,
         } => {
-            let kind = kind.to_kind();
-            let rom = Rom::read(path, kind, log.is_some(), debug)?;
+            let rom = Rom::read(path, kind.map(cli::KindOption::to_kind), log.is_some(), debug)?;
+            let kind = rom.config.kind;
 
             if let Some(level) = log {
                 tui_logger::init_logger(level.to_level_filter())?;

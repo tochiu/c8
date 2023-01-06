@@ -85,8 +85,8 @@ pub enum CliCommand {
         log: Option<LogLevelOption>,
 
         /// Sets the ROM kind
-        #[arg(long, value_enum, default_value_t = KindOption::CHIP8)]
-        kind: KindOption,
+        #[arg(long, value_enum)]
+        kind: Option<KindOption>,
     },
 
     /// C8 DASM: Disassembles a CHIP-8 ROM
@@ -100,8 +100,8 @@ pub enum CliCommand {
         log: Option<LogLevelOption>,
 
         /// Sets the ROM kind
-        #[arg(long, value_enum, default_value_t = KindOption::CHIP8)]
-        kind: KindOption,
+        #[arg(long, value_enum)]
+        kind: Option<KindOption>,
     },
 
     /// C8 RUN: Loads a CHIP-8 ROM and runs it
@@ -123,7 +123,7 @@ pub enum CliCommand {
         log: Option<LogLevelOption>,
 
         /// Sets the ROM kind
-        #[arg(long, value_enum, default_value_t = KindOption::CHIP8)]
-        kind: KindOption,
+        #[arg(long, value_enum)]
+        kind: Option<KindOption>,
     },
 }

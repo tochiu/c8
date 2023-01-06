@@ -51,10 +51,26 @@ pub struct Rom {
 impl Rom {
     pub fn read<P: AsRef<Path>>(
         path: P,
-        kind: RomKind,
+        kind: Option<RomKind>,
         logging: bool,
         debugging: bool,
     ) -> io::Result<Rom> {
+
+        let data = read(path.as_ref())?;
+        let kind = kind.unwrap_or_else(|| {
+            match path.as_ref().extension().and_then(OsStr::to_str) {
+                Some("sc8") => RomKind::SCHIP,
+                Some("xo8") => RomKind::XOCHIP,
+                _ => {
+                    if data.len() > DEFAULT_PROGRAM_MEMORY_SIZE {
+                        RomKind::XOCHIP
+                    } else {
+                        RomKind::CHIP8
+                    }
+                }
+            }
+        });
+
         let rom = Rom {
             config: RomConfig {
                 name: path
