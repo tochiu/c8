@@ -1,5 +1,157 @@
-# c8
-Multiplatform terminal-based CHIP-8 toolkit complete with a virtual machine, debugger, and disassembler.
-Supports the modern CHIP-8 specification with SCHIP and XO-CHIP support coming soon.
+<h1 align="center">
+  <b>C8</b>
+</h1>
 
-actually good readme coming soon!
+<h4 align="center"><b>CHIP-8 / S-CHIP / XO-CHIP</b> tui toolkit featuring an emulator, debugger, and disassembler</h4>
+
+<p align="center">
+  <a href="#about">About</a> •
+  <a href="#motivation">Motivation</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#usage">Usage</a>
+</p>
+
+---
+
+<p align="center">
+ <img src="https://cdn.nerdschalk.com/wp-content/uploads/2021/09/screenshot-098.png" alt="Dorito App Screenshot">
+</p>
+
+---
+
+## About
+
+C8 is a cross-platform, terminal user interface for **CHIP-8**, **S-CHIP**, and **XO-CHIP** games. This application is meant to be a simple way to run and debug roms from the terminal. At its core you can 
+* run a rom with `c8 run [ROM_PATH]`
+    * add `--debug` to enable debug mode
+    * add `--kind` followed by `vip`, `schip`, or `xochip` to force other CHIP-8 variants
+    * add `--hz` followed by your target instructions per second if needed
+* disassemble a rom into a file with `c8 dasm [ROM_PATH] > [OUTPUT_FILE_PATH]`
+* check a rom for potential issues* with `c8 check [ROM_PATH]`
+
+## Motivation
+This is my first _completed_ rust project (haha). A friend of mine sent me an [article](https://tobiasvl.github.io/blog/write-a-chip-8-emulator/) on how to get started with writing emulators with CHIP-8 it was a super interesting read and a good excuse to learn Rust. After I finished the emulator, I thought I could go even further. So here we are. If you're  thinking about writing your own CHIP-8 emulator, you should! It's a great start to emulation development and building on top of it with other CHIP-8 variants is an excellent exercise in writing extensible software.
+
+## Installation
+
+At this moment C8 can only be installed from source with [cargo](https://crates.io/).
+
+```
+$ git clone https://github.com/tochiu/c8.git
+$ cd c8
+$ cargo install --path ./
+```
+### Caveats
+
+On Linux, the X11 development libraries are additionally required to query keyboard state from the OS since terminals generally do not support key up events.
+
+On Ubuntu/Debian:
+```
+$ sudo apt install libx11-dev
+```
+
+On Fedora/RHEL/CentOS:
+```
+$ sudo dnf install xorg-x11-server-devel
+```
+
+On newer versions of MacOS, you may run into issues where you only see meta keys such as shift,
+backspace, et cetera. This is due to a permission issue. To work around this:
+
+* open the MacOS system preferences
+* go to Security -> Privacy
+* scroll down to Accessibility and unlock it
+* add your terminal to the list
+
+<h1><b>⚠️ BELOW THIS LINE IS A WORK IN PROGRESS ⚠️</b></h1>
+
+## Usage
+
+### c8
+
+```
+Usage: c8 <COMMAND>
+
+Commands:
+  check  Statically checks a CHIP-8 ROM for potential issues
+  dasm   Disassembles a CHIP-8 ROM
+  run    Loads a CHIP-8 ROM and runs it
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help information
+  -V, --version  Print version information
+```
+### c8 run
+```
+Usage: c8 run [OPTIONS] <ROM>
+
+Arguments:
+  <ROM>  Path of the ROM to load
+
+Options:
+  -d, --debug        Runs the ROM in debug mode
+      --hz <HZ>      Sets the instructions executed per second [default: 2000]
+  -l, --log <LEVEL>  Enable logging [possible values: trace, debug, info, warn, error]
+      --kind <KIND>  Sets the ROM kind [possible values: chip8, schip, cosmacvip, xochip]
+  -h, --help         Print help information
+```
+### c8db (debugger) commands
+```
+Usage: <COMMAND>
+
+Commands: 
+  continue  Continue running the program until the next breakpoint, watchpoint or error [aliases: c, cont]
+  step      Run the next N (default = 1) instructions of the program [aliases: s]
+  hertz     Set the instructions executed per second of the program [aliases: hz, ips, rate, freq, frequency]
+  redo      Redo the next N (default = 1) instructions within the program history [aliases: ff, fast-forward, >>]
+  undo      Undo the last N (default = 1) instructions within the program history [aliases: rw, rewind, <<]
+  history   Navigate the program history view [aliases: hist]
+  output    Navigate the output view [aliases: o, out]
+  memory    Navigate the memory view [aliases: m, mem]
+  goto      Go to a location in memory [aliases: g]
+  follow    Follow a pointer in memory [aliases: f]
+  unfollow  Unfollow the followed pointer [aliases: uf]
+  break     Set a breakpoint at an address [aliases: b]
+  watch     Watch a register, pointer, or address for change [aliases: w]
+  show      Execute show subcommand
+  hide      Execute hide subcommand
+  info      Execute info subcommand [aliases: i]
+  key       Execute keyboard subcommand [aliases: k]
+  clear     Execute clear subcommand [aliases: clr]
+  dump      Execute dump subcommand [aliases: d]
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help information
+  -V, --version  Print version information
+```
+
+### c8 dasm
+```
+Disassembles a CHIP-8 ROM
+
+Usage: c8 dasm [OPTIONS] <ROM>
+
+Arguments:
+  <ROM>  Path of the ROM to load
+
+Options:
+  -l, --log <LEVEL>  Enable logging [possible values: trace, debug, info, warn, error]
+      --kind <KIND>  Sets the ROM kind [possible values: chip8, schip, cosmacvip, xochip]
+  -h, --help         Print help information
+```
+### c8 check
+```
+Statically checks a CHIP-8 ROM for potential issues
+
+Usage: c8 check [OPTIONS] <ROM>
+
+Arguments:
+  <ROM>  Path of the ROM to load
+
+Options:
+  -l, --log <LEVEL>  Enable logging [possible values: trace, debug, info, warn, error]
+      --kind <KIND>  Sets the ROM kind [possible values: chip8, schip, cosmacvip, xochip]
+  -h, --help         Print help information
+```
