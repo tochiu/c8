@@ -169,7 +169,7 @@ impl<'a> MemoryWidget<'_> {
 
     pub(super) fn write_to_file<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
         let mut file = File::create(path)?;
-        for addr in 0..self.interpreter.memory.len() as u16 {
+        for addr in 0..=(self.interpreter.memory.len() - 1) as u16 {
             if !self.is_addr_drawable(addr) {
                 continue;
             }
