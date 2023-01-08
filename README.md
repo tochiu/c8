@@ -2,13 +2,13 @@
   <b>C8</b>
 </h1>
 
-<h4 align="center"><b>CHIP-8 / S-CHIP / XO-CHIP</b> tui toolkit featuring an emulator, debugger, and disassembler</h4>
+<h4 align="center"><b>CHIP-8 / S-CHIP / XO-CHIP</b> tui toolkit featuring a virtual machine, debugger, and disassembler</h4>
 
 <p align="center">
   <a href="#about">About</a> •
-  <a href="#motivation">Motivation</a> •
   <a href="#installation">Installation</a> •
-  <a href="#usage">Usage</a>
+  <a href="#usage">Usage</a> •
+  <a href="#motivation">Motivation</a>
 </p>
 
 ---
@@ -21,7 +21,7 @@
 
 ## About
 
-C8 is a cross-platform, terminal user interface for **CHIP-8**, **S-CHIP**, and **XO-CHIP** games. This application is meant to be a simple way to run and debug roms from the terminal. At its core you can 
+C8 is a terminal user interface tooklit for **CHIP-8**, **S-CHIP**, and **XO-CHIP** games. This application is meant to be a simple way to run and debug roms from the terminal. At its core you can 
 * run a rom with `c8 run [ROM_PATH]`
     * add `--debug` to enable debug mode
     * add `--kind` followed by `vip`, `schip`, or `xochip` to force other CHIP-8 variants
@@ -29,30 +29,32 @@ C8 is a cross-platform, terminal user interface for **CHIP-8**, **S-CHIP**, and 
 * disassemble a rom into a file with `c8 dasm [ROM_PATH] > [OUTPUT_FILE_PATH]`
 * check a rom for potential issues* with `c8 check [ROM_PATH]`
 
-## Motivation
-This is my first _completed_ rust project (haha). A friend of mine sent me an [article](https://tobiasvl.github.io/blog/write-a-chip-8-emulator/) on how to get started with writing emulators with CHIP-8 it was a super interesting read and a good excuse to learn Rust. After I finished the emulator, I thought I could go even further. So here we are. If you're  thinking about writing your own CHIP-8 emulator, you should! It's a great start to emulation development and building on top of it with other CHIP-8 variants is an excellent exercise in writing extensible software.
-
 ## Installation
 
-At this moment C8 can only be installed from source with [cargo](https://crates.io/).
+At this moment C8 can only be installed from source with [cargo](https://crates.io/)
 
 ```
-$ git clone https://github.com/tochiu/c8.git
-$ cd c8
-$ cargo install --path ./
+git clone https://github.com/tochiu/c8.git
+cd c8
+cargo install --path ./
 ```
+To be sure, run the classic IBM Logo ROM from the repository directory
+```
+c8 run roms/c8/ibm_logo.ch8
+```
+
 ### Caveats
 
 On Linux, the X11 development libraries are additionally required to query keyboard state from the OS since terminals generally do not support key up events.
 
 On Ubuntu/Debian:
 ```
-$ sudo apt install libx11-dev
+sudo apt install libx11-dev
 ```
 
 On Fedora/RHEL/CentOS:
 ```
-$ sudo dnf install xorg-x11-server-devel
+sudo dnf install xorg-x11-server-devel
 ```
 
 On newer versions of MacOS, you may run into issues where you only see meta keys such as shift,
@@ -67,21 +69,6 @@ backspace, et cetera. This is due to a permission issue. To work around this:
 
 ## Usage
 
-### c8
-
-```
-Usage: c8 <COMMAND>
-
-Commands:
-  check  Statically checks a CHIP-8 ROM for potential issues
-  dasm   Disassembles a CHIP-8 ROM
-  run    Loads a CHIP-8 ROM and runs it
-  help   Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help     Print help information
-  -V, --version  Print version information
-```
 ### c8 run
 ```
 Usage: c8 run [OPTIONS] <ROM>
@@ -155,3 +142,5 @@ Options:
       --kind <KIND>  Sets the ROM kind [possible values: chip8, schip, cosmacvip, xochip]
   -h, --help         Print help information
 ```
+## Motivation
+This is my first _completed_ rust project (haha). A friend of mine sent me an [article](https://tobiasvl.github.io/blog/write-a-chip-8-emulator/) on how to get started with writing emulators with CHIP-8. It was a super interesting read and a good excuse to learn Rust! After I finished the emulator, I thought I could go further. So here we are. If you're thinking about writing your own CHIP-8 emulator, you should! It's a great start to emulation development and building on top of it with other CHIP-8 variants is an excellent exercise in writing extensible software.
