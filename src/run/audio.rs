@@ -12,6 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+// ???
+pub const FREQUENCY_MULTIPLIER: f32 = 0.891;
+
 pub const AUDIO_BUFFER_SIZE_BYTES: usize = 16;
 
 const BASE_SAMPLE_RATE: u32 = 4000;
@@ -56,7 +59,7 @@ impl AudioSource {
             buffer: [Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))],
             playback_offset: Arc::new(AtomicU8::new(0)),
             is_audible: Arc::new(AtomicBool::new(false)),
-            sample_rate: Arc::new(AtomicU32::new(BASE_SAMPLE_RATE)),
+            sample_rate: Arc::new(AtomicU32::new((FREQUENCY_MULTIPLIER*BASE_SAMPLE_RATE as f32).round() as u32)),
         }
     }
 }
@@ -81,8 +84,8 @@ impl AudioSource {
         }
         self.is_audible.store(is_audible, Ordering::Release);
     }
-    fn set_sample_rate(&self, sample_rate: u32) {
-        self.sample_rate.store(sample_rate, Ordering::Release);
+    fn set_sample_rate(&self, sample_rate: f32) {
+        self.sample_rate.store((sample_rate*FREQUENCY_MULTIPLIER).round() as u32, Ordering::Release);
     }
 }
 
@@ -191,8 +194,7 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
                     }
                     AudioEvent::SetPitch(pitch) => {
                         source.set_sample_rate(
-                            (BASE_SAMPLE_RATE as f32 * 2.0_f32.powf((pitch as f32 - 64.0) / 48.0))
-                                .round() as u32,
+                            BASE_SAMPLE_RATE as f32 * 2.0_f32.powf((pitch as f32 - 64.0) / 48.0)
                         );
                     }
                     AudioEvent::Pause => 'guard: {
