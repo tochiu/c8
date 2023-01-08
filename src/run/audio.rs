@@ -4,20 +4,19 @@ use rodio::{source::Source, OutputStream, Sink};
 
 use std::{
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         mpsc::{channel, RecvTimeoutError, Sender},
-        Arc
+        Arc,
     },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
 
-// ???
-pub const FREQUENCY_MULTIPLIER: f32 = 0.891;
+pub const RODIO_SAMPLING_RATE: u32 = 96000;
 
 pub const AUDIO_BUFFER_SIZE_BYTES: usize = 16;
 
-const BASE_SAMPLE_RATE: u32 = 4000;
+const BASE_SAMPLE_RATE: f32 = 4000.0;
 const DEFAULT_RECV_TIMEOUT: Duration = Duration::from_millis(1000);
 const DEFAULT_VOLUME: f32 = 0.25;
 
@@ -48,18 +47,18 @@ impl From<RomKind> for Audio {
 #[derive(Clone)]
 pub struct AudioSource {
     buffer: [Arc<AtomicU64>; 2],
-    playback_offset: Arc<AtomicU8>,
+    playback_offset_bits: Arc<AtomicU32>,
     is_audible: Arc<AtomicBool>,
-    sample_rate: Arc<AtomicU32>,
+    sample_rate_bits: Arc<AtomicU32>,
 }
 
 impl AudioSource {
     pub fn new() -> Self {
         AudioSource {
             buffer: [Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))],
-            playback_offset: Arc::new(AtomicU8::new(0)),
+            playback_offset_bits: Arc::new(AtomicU32::new(0)),
             is_audible: Arc::new(AtomicBool::new(false)),
-            sample_rate: Arc::new(AtomicU32::new((FREQUENCY_MULTIPLIER*BASE_SAMPLE_RATE as f32).round() as u32)),
+            sample_rate_bits: Arc::new(AtomicU32::new(BASE_SAMPLE_RATE.to_bits())),
         }
     }
 }
@@ -78,20 +77,23 @@ impl AudioSource {
                 atomic64.store(bit64, Ordering::Release);
             });
     }
+
     fn set_audible(&self, is_audible: bool) {
         if is_audible {
-            self.playback_offset.store(0, Ordering::Release);
+            self.playback_offset_bits.store(0, Ordering::Release);
         }
         self.is_audible.store(is_audible, Ordering::Release);
     }
+
     fn set_sample_rate(&self, sample_rate: f32) {
-        self.sample_rate.store((sample_rate*FREQUENCY_MULTIPLIER).round() as u32, Ordering::Release);
+        self.sample_rate_bits
+            .store(sample_rate.to_bits(), Ordering::Release);
     }
 }
 
 impl Source for AudioSource {
     fn current_frame_len(&self) -> Option<usize> {
-        Some(8)
+        None
     }
 
     fn channels(&self) -> u16 {
@@ -99,7 +101,7 @@ impl Source for AudioSource {
     }
 
     fn sample_rate(&self) -> u32 {
-        self.sample_rate.load(Ordering::Acquire)
+        RODIO_SAMPLING_RATE
     }
 
     fn total_duration(&self) -> Option<Duration> {
@@ -111,12 +113,25 @@ impl Iterator for AudioSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let playback_offset = self.playback_offset.fetch_add(1, Ordering::SeqCst) % 128;
+        let sampling_rate = f32::from_bits(self.sample_rate_bits.load(Ordering::Acquire));
+
+        let Ok(playback_offset_bits) = self.playback_offset_bits.fetch_update(
+            Ordering::SeqCst, 
+            Ordering::SeqCst, 
+            |playback_offset_bits| {
+                let next_offset = (f32::from_bits(playback_offset_bits) + sampling_rate / RODIO_SAMPLING_RATE as f32) % 128.0;
+                Some(next_offset.to_bits())
+            }
+        ) else {
+            unreachable!("fetch_update should never return None")
+        };
+
+        let playback_offset = (f32::from_bits(playback_offset_bits).round() % 128.0) as usize;
+
         if self.is_audible.load(Ordering::Acquire) {
-            let is_waveform_peak = self.buffer[playback_offset as usize / 64]
-                .load(Ordering::Acquire)
+            let is_waveform_peak = self.buffer[playback_offset / 64].load(Ordering::Acquire)
                 >> (63 - (playback_offset % 64))
-                & 1 
+                & 1
                 == 1;
             Some(if is_waveform_peak { 1.0 } else { 0.0 })
         } else {
@@ -194,7 +209,7 @@ pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
                     }
                     AudioEvent::SetPitch(pitch) => {
                         source.set_sample_rate(
-                            BASE_SAMPLE_RATE as f32 * 2.0_f32.powf((pitch as f32 - 64.0) / 48.0)
+                            BASE_SAMPLE_RATE as f32 * 2.0_f32.powf((pitch as f32 - 64.0) / 48.0),
                         );
                     }
                     AudioEvent::Pause => 'guard: {
