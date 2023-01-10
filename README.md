@@ -31,30 +31,34 @@ C8 is a terminal user interface tooklit for **CHIP-8**, **S-CHIP**, and **XO-CHI
 
 ## Installation
 
-At this moment C8 can only be installed from source with [cargo](https://crates.io/)
+C8 is tested mostly on WIndows. If on linux, see [below](#caveats) for required system packages before you continue.
+
+At this moment C8 can only be installed from source with [cargo](https://crates.io/). Rust 1.65.0 or greater is required.
 
 ```
 git clone https://github.com/tochiu/c8.git
 cd c8
 cargo install --path ./
 ```
-To be sure, run the classic IBM Logo ROM from the repository directory
+To be sure C8 is installed correctly, run the classic IBM Logo ROM from the repository directory
 ```
 c8 run roms/c8/ibm_logo.ch8
 ```
 
 ### Caveats
 
-On Linux, the X11 development libraries are additionally required to query keyboard state from the OS since terminals generally do not support key up events.
+On Linux, the X11 development libraries are required to query keyboard state from the OS since terminals generally do not support key up events. In addition, the Advanced Linux Sound Architecture (ALSA) development libraries are required on the system.
 
 On Ubuntu/Debian:
 ```
 sudo apt install libx11-dev
+sudo apt install librust-alsa-sys-dev
 ```
 
 On Fedora/RHEL/CentOS:
 ```
 sudo dnf install xorg-x11-server-devel
+sudo dnf install alsa-lib-devel
 ```
 
 On newer versions of MacOS, you may run into issues where you only see meta keys such as shift,
