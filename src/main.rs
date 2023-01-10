@@ -10,7 +10,7 @@ use {
     asm::Disassembler,
     cli::{Cli, CliCommand},
     render::panic_cleanup_terminal,
-    run::{core::spawn_run_threads, rom::Rom},
+    run::{rom::Rom, spawn_run_threads},
 };
 
 use anyhow::Result;

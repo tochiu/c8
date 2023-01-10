@@ -1,4 +1,4 @@
-use super::core::Watchpoint;
+use super::Watchpoint;
 
 use crate::{
     asm::{
