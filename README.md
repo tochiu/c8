@@ -31,7 +31,7 @@ C8 is a terminal user interface tooklit for **CHIP-8**, **S-CHIP**, and **XO-CHI
 
 ## Installation
 
-C8 is tested mostly on WIndows. If on linux, see [below](#caveats) for required system packages before you continue.
+C8 is tested mostly on Windows but should work on Mac and Linux. If on Linux, see [below](#caveats) for required system packages before you continue.
 
 At this moment C8 can only be installed from source with [cargo](https://crates.io/). Rust 1.65.0 or greater is required.
 
