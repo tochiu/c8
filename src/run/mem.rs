@@ -1,4 +1,4 @@
-use super::{rom::{RomKind, Rom}, interp::{PROGRAM_STARTING_ADDRESS, InstructionParameters}};
+use super::{rom::{RomKind, Rom}, interp::PROGRAM_STARTING_ADDRESS, instruct::InstructionParameters};
 
 pub const MEM_ACCESS_DRAW_FLAG: u8 = 0b1;
 pub const MEM_ACCESS_READ_FLAG: u8 = 0b10;

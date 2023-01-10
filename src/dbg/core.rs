@@ -11,7 +11,8 @@ use crate::{
         core::Runner,
         disp::{DisplayMode, DisplayWidget},
         input::KEY_ORDERING,
-        interp::{Instruction, Interpreter},
+        instruct::Instruction,
+        interp::Interpreter,
         vm::VM,
     },
 };

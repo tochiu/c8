@@ -1,5 +1,6 @@
 use crate::run::{
-    interp::{Instruction, InstructionParameters, Interpreter, PROGRAM_STARTING_ADDRESS},
+    instruct::{Instruction, InstructionParameters},
+    interp::{Interpreter, PROGRAM_STARTING_ADDRESS},
     mem::{allocate_memory, MemoryRef},
     rom::{Rom, RomKind},
 };

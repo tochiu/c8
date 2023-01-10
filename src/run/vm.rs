@@ -2,6 +2,7 @@ use super::{
     audio::AudioEvent,
     disp::Display,
     input::{Key, Keyboard},
+    instruct::Instruction,
     interp::*,
     rom::Rom,
 };

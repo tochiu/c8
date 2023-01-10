@@ -1,6 +1,7 @@
 pub mod core;
 pub mod disp;
 pub mod input;
+pub mod instruct;
 pub mod interp;
 pub mod mem;
 pub mod rom;
