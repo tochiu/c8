@@ -83,7 +83,7 @@ impl History {
             redo_amount = 0;
         }
 
-        let vm_result = vm.step();
+        let vm_result = vm.stepn(1);
 
         // if vm is continuing then update memory access flags too
         if let Ok(true) = vm_result {

@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use log::{Level, LevelFilter};
 use std::path::PathBuf;
 
-const DEFAULT_EXECUTION_FREQUENCY: u32 = 2000;
+const DEFAULT_EXECUTION_FREQUENCY: u32 = 1800;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

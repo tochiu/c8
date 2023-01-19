@@ -5,10 +5,8 @@ use rodio::{source::Source, OutputStream, Sink};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
-        mpsc::{channel, RecvTimeoutError, Sender},
         Arc,
     },
-    thread::JoinHandle,
     time::{Duration, Instant},
 };
 
@@ -17,7 +15,6 @@ pub const RODIO_SAMPLING_RATE: u32 = 96000;
 pub const AUDIO_BUFFER_SIZE_BYTES: usize = 16;
 
 const BASE_SAMPLE_RATE: f32 = 4000.0;
-const DEFAULT_RECV_TIMEOUT: Duration = Duration::from_millis(1000);
 const DEFAULT_VOLUME: f32 = 0.25;
 
 pub struct Audio {
@@ -149,105 +146,101 @@ pub enum AudioEvent {
     Resume,
 }
 
-pub fn spawn_audio_thread() -> (Sender<AudioEvent>, JoinHandle<()>) {
-    let (event_sender, event_receiver) = channel();
-    let handle = std::thread::spawn(move || {
-        // Get a output stream handle to the default physical sound device
-        let (_stream, stream_handle) =
-            OutputStream::try_default().expect("Failed to get default audio output stream");
-        let sink = Sink::try_new(&stream_handle).expect("Failed to create audio sink");
+pub struct AudioController {
+    sink: Sink,
+    source: AudioSource,
+    paused: bool,
+    silent: bool,
+    buffer: [u8; AUDIO_BUFFER_SIZE_BYTES],
+    remaining_duration: Duration,
+    remaining_duration_instant: Instant
+}
 
-        sink.set_volume(DEFAULT_VOLUME);
-
+impl AudioController {
+    fn new(sink: Sink) -> Self {
         let source = AudioSource::new();
 
-        let mut paused = false;
-        let mut is_silent = true;
-        let mut current_buffer = [0; AUDIO_BUFFER_SIZE_BYTES];
-        let mut remaining_duration = Duration::ZERO;
-
-        let mut recv_last_instant = Instant::now();
-        let mut recv_timeout = DEFAULT_RECV_TIMEOUT;
-
+        sink.set_volume(DEFAULT_VOLUME);
         sink.append(source.clone());
         sink.play();
 
-        loop {
-            let recv_result = event_receiver.recv_timeout(recv_timeout);
+        let controller = AudioController {
+            sink,
+            source,
+            paused: false,
+            silent: true,
+            buffer: [0; AUDIO_BUFFER_SIZE_BYTES],
+            remaining_duration: Duration::ZERO,
+            remaining_duration_instant: Instant::now()
+        };
 
-            let now = Instant::now();
+        controller
+    }
 
-            if !paused {
-                let elapsed_duration = now
-                    .duration_since(recv_last_instant)
-                    .min(remaining_duration);
-                remaining_duration -= elapsed_duration;
-            }
-
-            if let Ok(event) = recv_result.as_ref() {
-                log::trace!("Audio thread received event: {:?}", event);
-            }
-
-            match recv_result.as_ref().cloned() {
-                Ok(event) => match event {
-                    AudioEvent::SetTimer(duration) => {
-                        remaining_duration = duration;
-                        if !remaining_duration.is_zero() {
-                            if is_silent {
-                                source.set_audible(true);
-                                is_silent = false;
-                            }
-                        }
-                    }
-                    AudioEvent::SetBuffer(buffer) => 'guard: {
-                        if buffer == current_buffer {
-                            break 'guard;
-                        }
-
-                        current_buffer = buffer;
-                        source.set_buffer(&buffer);
-                    }
-                    AudioEvent::SetPitch(pitch) => {
-                        source.set_sample_rate(
-                            BASE_SAMPLE_RATE as f32 * 2.0_f32.powf((pitch as f32 - 64.0) / 48.0),
-                        );
-                    }
-                    AudioEvent::Pause => 'guard: {
-                        if paused {
-                            break 'guard;
-                        }
-                        paused = true;
-                        sink.pause();
-                    }
-                    AudioEvent::Resume => 'guard: {
-                        if !paused {
-                            break 'guard;
-                        }
-                        paused = false;
-                        sink.play();
-                    }
-                },
-                Err(RecvTimeoutError::Disconnected) => {
-                    sink.stop();
-                    return;
-                }
-                Err(RecvTimeoutError::Timeout) => (),
-            }
-
-            recv_last_instant = now;
-            recv_timeout = {
-                if paused || is_silent {
-                    DEFAULT_RECV_TIMEOUT
-                } else if remaining_duration.is_zero() {
-                    source.set_audible(false);
-                    is_silent = true;
-                    DEFAULT_RECV_TIMEOUT
-                } else {
-                    remaining_duration
-                }
-            };
+    pub fn update(&mut self) {
+        let now = Instant::now();
+        if !self.paused {
+            self.remaining_duration = self.remaining_duration.saturating_sub(now.duration_since(self.remaining_duration_instant));
         }
-    });
+        self.remaining_duration_instant = now;
+        if self.remaining_duration.is_zero() {
+            self.source.set_audible(false);
+            self.silent = true;
+        }
+    }
 
-    (event_sender, handle)
+    pub fn apply_event(&mut self, event: AudioEvent) {
+        match event {
+            AudioEvent::SetTimer(duration) => {
+                self.remaining_duration = duration;
+                if !self.remaining_duration.is_zero() {
+                    if self.silent {
+                        self.source.set_audible(true);
+                        self.silent = false;
+                    }
+
+                    self.remaining_duration_instant = Instant::now();
+                }
+            }
+            AudioEvent::SetBuffer(buffer) => 'guard: {
+                if buffer == self.buffer {
+                    break 'guard;
+                }
+
+                self.buffer = buffer;
+                self.source.set_buffer(&buffer);
+            }
+            AudioEvent::SetPitch(pitch) => {
+                self.source.set_sample_rate(
+                    BASE_SAMPLE_RATE as f32 * 2.0_f32.powf((pitch as f32 - 64.0) / 48.0),
+                );
+            }
+            AudioEvent::Pause => 'guard: {
+                if self.paused {
+                    break 'guard;
+                }
+                self.paused = true;
+                self.sink.pause();
+            }
+            AudioEvent::Resume => 'guard: {
+                if !self.paused {
+                    break 'guard;
+                }
+                self.paused = false;
+                self.sink.play();
+            }
+        }
+    }
+}
+
+pub fn spawn_audio_stream() -> (OutputStream, AudioController) {
+    // Get a output stream handle to the default physical sound device
+    let (stream, stream_handle) =
+        OutputStream::try_default().expect("Failed to get default audio output stream");
+    let controller = AudioController::new(
+        Sink::try_new(&stream_handle)
+            .expect("Failed to create audio sink")
+    );
+
+    (stream, controller)
 }

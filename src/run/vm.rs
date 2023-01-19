@@ -1,21 +1,21 @@
 use super::{
-    audio::AudioEvent,
+    audio::{AudioEvent, AudioController},
     disp::Display,
     input::{Key, Keyboard},
     instruct::Instruction,
     interp::*,
-    rom::Rom,
+    rom::{Rom, RomKind},
 };
 
 use std::{
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::Receiver,
     time::Duration,
 };
 
-const DELAY_TIMER_TICKS_PER_SECOND: f32 = 60.0;
-const SOUND_TIMER_TICKS_PER_SECOND: f32 = 60.0;
+const DELAY_TIMER_TICKS_PER_SECOND: f64 = 60.0;
+const SOUND_TIMER_TICKS_PER_SECOND: f64 = 60.0;
 
-const VERTICAL_BLANKS_PER_SECOND: f32 = 60.0;
+const VERTICAL_BLANKS_PER_SECOND: f64 = 60.0;
 
 #[derive(Debug)]
 pub enum VMEvent {
@@ -28,14 +28,11 @@ pub enum VMEvent {
 
 pub struct VM {
     // Time elapsed since last time step was called
-    pub time_step: f32,
+    pub time_step: f64,
 
     // Vertical blank is time elapsed since draw instruction was last allowed to execute (COSMAC VIP only)
-    vertical_blank_time: f32,
-
-    // Total time step and total executions since last execution frequency measurement
-    stopwatch_time: f32,
-    stopwatch_executions: usize,
+    vertical_blank_time: f64,
+    vertical_sync_enabled: bool,
 
     interpreter: Interpreter,
 
@@ -46,47 +43,41 @@ pub struct VM {
     // Virtualized IO
     display: bool, // TODO handle new frame indication outside like sound
     keyboard: Keyboard,
-    audio: Sender<AudioEvent>,
+    audio: AudioController,
 
     // these precise external timers will be mapped
     // to a byte range when executing interpreter instructions
-    sound_timer: f32,
-    delay_timer: f32,
+    sound_timer: f64,
+    delay_timer: f64,
 }
 
 impl VM {
-    pub fn new(rom: Rom, recv: Receiver<VMEvent>, sound: Sender<AudioEvent>) -> Self {
-        let vm = VM {
+    pub fn new(rom: Rom, recv: Receiver<VMEvent>, mut audio: AudioController) -> Self {
+        let interpreter = Interpreter::from(rom);
+
+        audio.apply_event(AudioEvent::SetBuffer(interpreter.audio.buffer));
+        audio.apply_event(AudioEvent::SetPitch(interpreter.audio.pitch));
+
+        VM {
             time_step: 0.0,
 
             vertical_blank_time: 0.0,
-
-            stopwatch_time: 0.0,
-            stopwatch_executions: 0,
-
-            interpreter: Interpreter::from(rom),
+            vertical_sync_enabled: interpreter.rom.config.kind == RomKind::COSMACVIP,
 
             event: recv,
             event_queue: Vec::new(),
 
             display: false,
             keyboard: Keyboard::default(),
-            audio: sound,
+            audio,
+
+            interpreter,
 
             // these precise external timers will be mapped
             // to a byte range when executing interpreter instructions
             sound_timer: 0.0,
             delay_timer: 0.0,
-        };
-
-        vm.audio
-            .send(AudioEvent::SetBuffer(vm.interpreter.audio.buffer))
-            .expect("Failed to initialize audio buffer");
-        vm.audio
-            .send(AudioEvent::SetPitch(vm.interpreter.audio.pitch))
-            .expect("Failed to initialize audio pitch");
-
-        vm
+        }
     }
 
     pub fn undo(&mut self, state: &VMHistoryFragment) {
@@ -96,11 +87,7 @@ impl VM {
         self.delay_timer = state.delay_timer;
         self.sound_timer = state.sound_timer;
 
-        self.audio
-            .send(AudioEvent::SetTimer(Duration::from_secs_f32(
-                self.sound_timer / SOUND_TIMER_TICKS_PER_SECOND,
-            )))
-            .expect("Failed to restore sound timer");
+        self.audio.apply_event(AudioEvent::SetTimer(Duration::from_secs_f64(self.sound_timer / SOUND_TIMER_TICKS_PER_SECOND)));
 
         if let Some(Instruction::Draw(_, _, _)) = state.interpreter.instruction {
             self.display = true;
@@ -113,14 +100,12 @@ impl VM {
 
             Some(&InterpreterHistoryFragmentExtra::WillLoadAudio { prior_buffer, .. }) => {
                 self.audio
-                    .send(AudioEvent::SetBuffer(prior_buffer))
-                    .expect("Failed to restore audio pattern buffer");
+                    .apply_event(AudioEvent::SetBuffer(prior_buffer));
             }
 
             Some(&InterpreterHistoryFragmentExtra::WillSetPitch { prior_pitch }) => {
                 self.audio
-                    .send(AudioEvent::SetPitch(prior_pitch))
-                    .expect("Failed to restore audio pitch");
+                    .apply_event(AudioEvent::SetPitch(prior_pitch));
             }
 
             _ => (),
@@ -141,11 +126,23 @@ impl VM {
         &mut self.keyboard
     }
 
-    pub fn sound_timer(&self) -> f32 {
+    pub fn update_audio(&mut self) {
+        self.audio.update()
+    }
+
+    pub fn pause_audio(&mut self) {
+        self.audio.apply_event(AudioEvent::Pause)
+    }
+
+    pub fn resume_audio(&mut self) {
+        self.audio.apply_event(AudioEvent::Resume)
+    }
+
+    pub fn sound_timer(&self) -> f64 {
         self.sound_timer
     }
 
-    pub fn delay_timer(&self) -> f32 {
+    pub fn delay_timer(&self) -> f64 {
         self.delay_timer
     }
 
@@ -161,7 +158,7 @@ impl VM {
         self.event.try_iter().last();
     }
 
-    pub fn vsync(&self) -> f32 {
+    pub fn vsync(&self) -> f64 {
         self.vertical_blank_time * VERTICAL_BLANKS_PER_SECOND
     }
 
@@ -193,79 +190,75 @@ impl VM {
         }
     }
 
-    pub fn extract_execution_frequency(&mut self) -> f32 {
-        let frequency = if self.stopwatch_time > 0.0 {
-            self.stopwatch_executions as f32 / self.stopwatch_time
-        } else {
-            0.0
-        };
-        self.stopwatch_time = 0.0;
-        self.stopwatch_executions = 0;
-        frequency
-    }
-
-    pub fn step(&mut self) -> Result<bool, String> {
+    pub fn stepn(&mut self, amt: u32) -> Result<bool, String> {
         self.drain_event_queue();
 
-        self.stopwatch_time += self.time_step;
-        self.stopwatch_executions += 1;
+        self.keyboard.flush(&mut self.interpreter.input);
 
-        // update timers and clamp between the bounds of a byte because that is the data type
-        self.sound_timer = (self.sound_timer - self.time_step * SOUND_TIMER_TICKS_PER_SECOND)
-            .clamp(u8::MIN as f32, u8::MAX as f32);
-        self.delay_timer = (self.delay_timer - self.time_step * DELAY_TIMER_TICKS_PER_SECOND)
-            .clamp(u8::MIN as f32, u8::MAX as f32);
-
-        self.vertical_blank_time += self.time_step;
-        let vertical_blank = if self.vertical_blank_time >= (1.0 / VERTICAL_BLANKS_PER_SECOND) {
-            self.vertical_blank_time = self
-                .vertical_blank_time
-                .rem_euclid(1.0 / VERTICAL_BLANKS_PER_SECOND);
-            true
-        } else {
-            false
-        };
-
-        // update interpreter input
-        let delay_timer = self.truncated_delay_timer();
-        let mut input = &mut self.interpreter.input;
-
-        self.keyboard.flush(input);
-        input.delay_timer = delay_timer;
-        input.vertical_blank = vertical_blank;
-
-        // interpret next instruction
-        let should_continue = self.interpreter.step()?;
+        let should_continue = self.step_interpreter()?;
 
         self.keyboard.clear_ephemeral_state();
+        self.keyboard.flush(&mut self.interpreter.input);
 
-        // handle any output by the executed instruction
+        if !should_continue {
+            return Ok(false);
+        }
+
+        for _ in 0..amt - 1 {
+            if !self.step_interpreter()? {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn step_interpreter(&mut self) -> Result<bool, String> {
+        // update timers and clamp between the bounds of a byte because that is the data type
+        self.sound_timer = (self.sound_timer - self.time_step * SOUND_TIMER_TICKS_PER_SECOND).max(0.0);
+        self.delay_timer = (self.delay_timer - self.time_step * DELAY_TIMER_TICKS_PER_SECOND).max(0.0);
+
+        if self.vertical_sync_enabled {
+            self.vertical_blank_time += self.time_step;
+            self.interpreter.input.vertical_blank = if self.vertical_blank_time >= (1.0 / VERTICAL_BLANKS_PER_SECOND) {
+                self.vertical_blank_time = self
+                    .vertical_blank_time
+                    .rem_euclid(1.0 / VERTICAL_BLANKS_PER_SECOND);
+                true
+            } else {
+                false
+            };
+        }
+
+        // update interpreter input
+        self.interpreter.input.delay_timer = self.truncated_delay_timer();
+
+        // interpret next instruction
+        let result = self.interpreter.step();
+
         if let Some(output) = self.interpreter.output {
             match output {
                 InterpreterOutput::Display => self.display = true,
-                InterpreterOutput::SetDelayTimer(ticks) => self.delay_timer = ticks as f32,
+                InterpreterOutput::SetDelayTimer(ticks) => self.delay_timer = ticks as f64,
                 InterpreterOutput::SetSoundTimer(ticks) => {
-                    self.sound_timer = ticks as f32;
+                    self.sound_timer = ticks as f64;
                     self.audio
-                        .send(AudioEvent::SetTimer(Duration::from_secs_f32(
-                            ticks as f32 / SOUND_TIMER_TICKS_PER_SECOND,
-                        )))
-                        .ok();
+                        .apply_event(AudioEvent::SetTimer(Duration::from_secs_f64(
+                            ticks as f64 / SOUND_TIMER_TICKS_PER_SECOND,
+                        )));
                 }
                 InterpreterOutput::UpdateAudioBuffer => {
                     self.audio
-                        .send(AudioEvent::SetBuffer(self.interpreter.audio.buffer))
-                        .ok();
+                        .apply_event(AudioEvent::SetBuffer(self.interpreter.audio.buffer));
                 }
                 InterpreterOutput::UpdateAudioPitch => {
                     self.audio
-                        .send(AudioEvent::SetPitch(self.interpreter.audio.pitch))
-                        .ok();
+                        .apply_event(AudioEvent::SetPitch(self.interpreter.audio.pitch));
                 }
             }
         }
 
-        Ok(should_continue)
+        result
     }
 
     pub fn to_history_fragment(&self) -> VMHistoryFragment {
@@ -287,11 +280,11 @@ impl VM {
 
 #[derive(PartialEq)]
 pub struct VMHistoryFragment {
-    pub time_step: f32,
-    pub vertical_blank_time: f32,
+    pub time_step: f64,
+    pub vertical_blank_time: f64,
     pub keyboard: Keyboard,
-    pub sound_timer: f32,
-    pub delay_timer: f32,
+    pub sound_timer: f64,
+    pub delay_timer: f64,
     pub interpreter: InterpreterHistoryFragment,
 }
 

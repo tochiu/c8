@@ -10,13 +10,12 @@ pub mod vm;
 use {
     input::Key,
     rom::Rom,
-    audio::{spawn_audio_thread, AudioEvent},
     vm::{VMEvent, VM},
 };
 
 use crate::{
     dbg::Debugger, 
-    render::spawn_render_thread
+    render::{spawn_render_thread, TARGET_FRAME_RATE}
 };
 
 use anyhow::Result;
@@ -41,25 +40,26 @@ use std::{
     time::{Duration, Instant},
 };
 
+use self::audio::AudioController;
+
 pub type C8 = (VM, Option<Debugger>);
 pub type C8Lock = Arc<Mutex<C8>>;
 
 pub type RunResult = Result<RunAnalytics, String>;
 pub type RunControlResult = Result<(), &'static str>;
 
-pub const GOOD_EXECUTION_FREQUENCY_PERCENT_DIFF: f32 = 1.0;
-pub const OKAY_EXECUTION_FREQUENCY_PERCENT_DIFF: f32 = 10.0;
+pub const GOOD_EXECUTION_FREQUENCY_PERCENT_DIFF: f64 = 1.0;
+pub const OKAY_EXECUTION_FREQUENCY_PERCENT_DIFF: f64 = 10.0;
 
 pub fn spawn_run_threads(
     rom: Rom,
     initial_target_execution_frequency: u32,
-) -> (JoinHandle<RunResult>, JoinHandle<()>, JoinHandle<()>) {
-    // sound
-    let (sound_sender, sound_thread) = spawn_audio_thread();
+    audio_controller: AudioController,
+) -> (JoinHandle<RunResult>, JoinHandle<()>) {
 
     // runner
     let rom_config = rom.config.clone();
-    let mut runner = Runner::spawn(rom, initial_target_execution_frequency, sound_sender);
+    let mut runner = Runner::spawn(rom, initial_target_execution_frequency, audio_controller);
 
     // render
     let (render_sender, render_thread) = spawn_render_thread(runner.c8(), rom_config.clone());
@@ -177,22 +177,7 @@ pub fn spawn_run_threads(
         }
     });
 
-    (main_thread, render_thread, sound_thread)
-}
-
-fn update_frequency_stats(
-    stats: &mut BTreeMap<u32, (Duration, u64)>,
-    freq: u32,
-    duration: Duration,
-    instructions: u64,
-) {
-    if instructions == 0 {
-        return;
-    }
-
-    let (total_duration, count) = stats.entry(freq).or_insert((Duration::ZERO, 0));
-    *total_duration = total_duration.saturating_add(duration);
-    *count += instructions;
+    (main_thread, render_thread)
 }
 
 pub struct Runner {
@@ -235,7 +220,7 @@ impl Runner {
     pub fn spawn(
         rom: Rom,
         initial_target_execution_frequency: u32,
-        sound_sender: Sender<AudioEvent>,
+        audio_controller: AudioController
     ) -> Self {
         let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
         let (thread_continue_sender, thread_continue_receiver) = channel::<bool>();
@@ -244,7 +229,7 @@ impl Runner {
         let rom_config = rom.config.clone();
 
         let c8 = Arc::new(Mutex::new({
-            let vm = VM::new(rom, vm_event_receiver, sound_sender.clone());
+            let vm = VM::new(rom, vm_event_receiver, audio_controller);
             let dbg = if rom_config.debugging {
                 Some(Debugger::new(&vm, initial_target_execution_frequency))
             } else {
@@ -254,7 +239,7 @@ impl Runner {
             (vm, dbg)
         }));
 
-        let mut frequency = initial_target_execution_frequency;
+        let mut cycles_per_frame = ((initial_target_execution_frequency as f64) / TARGET_FRAME_RATE).round().max(1.0) as u32;
         let mut frequency_stats: BTreeMap<u32, (Duration, u64)> = BTreeMap::new();
 
         let thread_handle = {
@@ -264,10 +249,11 @@ impl Runner {
                 // calls the next instruction with said state,
                 // and handles the output of said instruction
 
-                // let mut timer_instant = Instant::now();
+                let thread_start = Instant::now();
+
                 let mut interval = Interval::new(
                     "interp",
-                    Duration::from_secs_f32(1.0 / frequency as f32),
+                    Duration::from_secs_f64(1.0 / TARGET_FRAME_RATE),
                     Duration::from_millis(8),
                     IntervalAccuracy::High,
                 );
@@ -277,17 +263,19 @@ impl Runner {
                     recv: thread_continue_receiver,
                 };
 
-                let mut runtime_start = Instant::now();
-                let mut runtime_timestep = 0.0;
-                let mut runtime_burst_duration = Duration::ZERO;
-                let mut runtime_duration = Duration::ZERO;
-                let mut instructions_executed = 0;
+                let mut burst_start = Instant::now();
+                let mut burst_elapsed = Duration::ZERO;
+                
+                let mut freq_duration = Duration::ZERO;
+                let mut freq_instructions_executed = 0_u64;
+
+                let mut total_simulated_time = 0.0;
+
                 let mut just_resumed = false;
-
-                let uptime_start = Instant::now();
-                let mut time_step_total = 0.0;
-
+                
+                // 1 frame of work
                 loop {
+
                     // vm runner step
                     let mut _guard = c8.lock().expect("Failed to lock C8 for main loop");
                     let (vm, maybe_dbg) = _guard.deref_mut();
@@ -300,83 +288,88 @@ impl Runner {
                         if just_resumed {
                             just_resumed = false;
                             vm.clear_events();
+                            vm.resume_audio();
                         }
 
-                        let time_elapsed = runtime_start.elapsed().as_secs_f32() - runtime_timestep;
-                        //timer_instant = Instant::now();
-                        vm.time_step = time_elapsed;
-                        runtime_timestep += time_elapsed;
-                        time_step_total += time_elapsed;
+                        vm.update_audio();
+                        
+                        let time_per_cycle = 1.0 / (cycles_per_frame as f64 * TARGET_FRAME_RATE);
 
-                        // dbg.step will never return an Err variant because if the vm steps into an invalid
-                        // state then the debugger step will return false which will pause the thread
+                        vm.time_step = time_per_cycle;
 
-                        // because dbg is what continues the thread it is assumed that it will never
-                        // send the signal to resume the thread from an invalid state.. if it ever resumes
-                        // then it must be from a rolled-back state
-
-                        step_can_continue = if let Some(dbg) = maybe_dbg {
-                            dbg.step(vm)
+                        step_can_continue = true;
+                        
+                        let now = Instant::now();
+                        if let Some(dbg) = maybe_dbg {
+                            for _ in 0..cycles_per_frame {
+                                if !dbg.step(vm) {
+                                    step_can_continue = false;
+                                    break
+                                }
+                            }
                         } else {
-                            vm.step()?
-                        };
+                            step_can_continue = vm.stepn(cycles_per_frame)?
+                        }
+                        
+                        let elapsed = now.elapsed();
 
-                        drop(_guard);
+                        if step_can_continue {
+                            log::info!("Completed {} cycles in {} us", cycles_per_frame, elapsed.as_micros());
+                        }
+
+                        vm.update_audio();
 
                         continuation.try_cont();
-                        continuation.cont = continuation.cont && step_can_continue;
+                        continuation.cont &= step_can_continue;
 
                         if continuation.cont {
+                            drop(_guard);
                             interval.sleep();
-                            instructions_executed += 1;
-                            runtime_burst_duration = runtime_start.elapsed();
+                            freq_instructions_executed += cycles_per_frame as u64;
+                            total_simulated_time += time_per_cycle*cycles_per_frame as f64;
+                            burst_elapsed = burst_start.elapsed();
                             continue;
-                        }
-                    } else {
-                        drop(_guard);
+                        } 
                     }
 
-                    runtime_duration = runtime_duration.saturating_add(runtime_burst_duration);
+                    vm.pause_audio();
 
-                    sound_sender.send(AudioEvent::Pause)
-                        .expect("Failed to pause sound thread");
+                    drop(_guard);
+
+                    freq_duration = freq_duration.saturating_add(burst_elapsed);
 
                     // we yield until either we can continue or we must exit
 
                     if !(step_can_continue && !rom_config.debugging) && continuation.can_cont() {
-
-                        sound_sender.send(AudioEvent::Resume)
-                            .expect("Failed to resume sound thread");
-
-                        just_resumed = true;
-                        runtime_burst_duration = Duration::ZERO;
-                        runtime_start = Instant::now();
-                        runtime_timestep = 0.0;
-                        //timer_instant = Instant::now();
+                        
                         if let Some(freq) = thread_frequency_receiver.try_iter().last() {
                             update_frequency_stats(
                                 &mut frequency_stats,
-                                frequency,
-                                runtime_duration,
-                                instructions_executed,
+                                (TARGET_FRAME_RATE*cycles_per_frame as f64).round() as u32,
+                                freq_duration,
+                                freq_instructions_executed,
                             );
-                            interval.interval = Duration::from_secs_f32(1.0 / freq as f32);
-                            frequency = freq;
-                            runtime_duration = Duration::ZERO;
-                            instructions_executed = 0;
+                            cycles_per_frame = ((freq as f64) / TARGET_FRAME_RATE).round().max(1.0) as u32;
+                            freq_duration = Duration::ZERO;
+                            freq_instructions_executed = 0;
                         }
+
                         interval.reset();
+                        just_resumed = true;
+                        burst_elapsed = Duration::ZERO;
+                        burst_start = Instant::now();
                     } else {
                         update_frequency_stats(
                             &mut frequency_stats,
-                            frequency,
-                            runtime_duration,
-                            instructions_executed,
+                            (TARGET_FRAME_RATE*cycles_per_frame as f64).round() as u32,
+                            freq_duration,
+                            freq_instructions_executed,
                         );
+
                         return Ok(RunAnalytics {
                             frequency_stats,
-                            uptime: uptime_start.elapsed(),
-                            program_time: time_step_total,
+                            up_time: thread_start.elapsed(),
+                            simulated_time: total_simulated_time,
                             rom_name: rom_config.name,
                         });
                     }
@@ -459,8 +452,8 @@ impl RunContinuation {
 
 pub struct RunAnalytics {
     frequency_stats: BTreeMap<u32, (Duration, u64)>,
-    uptime: Duration,
-    program_time: f32,
+    up_time: Duration,
+    simulated_time: f64,
     rom_name: String,
 }
 
@@ -475,8 +468,8 @@ impl Display for RunAnalytics {
 
         for (&target_ips, &(runtime_duration, instructions_executed)) in self.frequency_stats.iter()
         {
-            let ips = instructions_executed as f32 / runtime_duration.as_secs_f32();
-            let ips_diff = (ips - target_ips as f32) / target_ips as f32 * 100.0;
+            let ips = instructions_executed as f64 / runtime_duration.as_secs_f64();
+            let ips_diff = (ips - target_ips as f64) / target_ips as f64 * 100.0;
             let color_ips_diff = if ips_diff.abs() > OKAY_EXECUTION_FREQUENCY_PERCENT_DIFF {
                 Stylize::red
             } else if ips_diff.abs() > GOOD_EXECUTION_FREQUENCY_PERCENT_DIFF {
@@ -496,7 +489,7 @@ impl Display for RunAnalytics {
                 "\n    {} Runner ({:#04}Hz): {:.3}s",
                 format!("|").blue().bold(),
                 target_ips,
-                runtime_duration.as_secs_f32()
+                runtime_duration.as_secs_f64()
             )?;
             write!(
                 f,
@@ -527,23 +520,38 @@ impl Display for RunAnalytics {
 
             write!(
                 f,
-                "\n    {} Program Uptime: {:.3}s",
+                "\n    {}  Simulated Time: {:.3}s",
                 format!("=").blue().bold(),
                 //target_ips,
-                self.program_time
+                self.simulated_time
             )?;
 
             write!(
                 f,
-                "\n    {}      C8 Uptime: {:.3}s",
+                "\n    {} C8 Program Time: {:.3}s",
                 format!("=").blue().bold(),
                 //target_ips,
-                self.uptime.as_secs_f32()
+                self.up_time.as_secs_f64()
             )?;
         }
 
         Ok(())
     }
+}
+
+fn update_frequency_stats(
+    stats: &mut BTreeMap<u32, (Duration, u64)>,
+    freq: u32,
+    duration: Duration,
+    instructions: u64,
+) {
+    if instructions == 0 {
+        return;
+    }
+
+    let (total_duration, count) = stats.entry(freq).or_insert((Duration::ZERO, 0));
+    *total_duration = total_duration.saturating_add(duration);
+    *count += instructions;
 }
 
 /*

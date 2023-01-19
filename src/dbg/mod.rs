@@ -241,7 +241,7 @@ impl Debugger {
         self.active = false;
     }
 
-    fn stepn(&mut self, vm: &mut VM, amt: usize, time_step: f32) -> usize {
+    fn stepn(&mut self, vm: &mut VM, amt: usize, time_step: f64) -> usize {
         let mut amt_stepped = 0;
 
         vm.time_step = time_step;
@@ -523,14 +523,13 @@ impl Debugger {
                 self.history.clear_redo_history();
                 vm.clear_event_queue();
                 vm.keyboard_mut().clear();
-                vm.extract_execution_frequency();
             }
 
             DebugCliCommand::Step { amount } => {
                 let amt_stepped = self.stepn(
                     vm,
                     amount,
-                    1.0 / self.runner_target_execution_frequency as f32,
+                    1.0 / self.runner_target_execution_frequency as f64,
                 );
 
                 if amt_stepped > 1 {
@@ -1193,7 +1192,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             if time_step == 0.0 {
                 0
             } else {
-                (1.0 / time_step).clamp(0.0, u32::MAX as f32).round() as u32
+                (1.0 / time_step).clamp(0.0, u32::MAX as f64).round() as u32
             }
         };
 

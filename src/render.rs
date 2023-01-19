@@ -32,6 +32,8 @@ use std::{
 
 type Terminal = tui::Terminal<CrosstermBackend<io::Stdout>>;
 
+pub const TARGET_FRAME_RATE: f64 = 60.0;
+
 fn cleanup_terminal(terminal: &mut Terminal) -> Result<()> {
     // clean up the terminal so its usable after program exit
     disable_raw_mode().context("Failed to disable terminal raw mode")?;
@@ -136,7 +138,7 @@ impl Renderer {
             } else {
                 let display =
                     maybe_display.unwrap_or_else(|| vm.interpreter().display.clone());
-                let hz = vm.extract_execution_frequency().clamp(0.0, u32::MAX as f32).round() as u32;
+                let hz = (1.0/vm.time_step).clamp(0.0, u32::MAX as f64).round() as u32;
                 drop(_guard);
 
                 terminal.draw(|f| {

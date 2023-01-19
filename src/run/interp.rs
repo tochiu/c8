@@ -472,14 +472,10 @@ impl Interpreter {
         }
     }
 
-    pub fn fetch(&self) -> InstructionParameters {
+    pub fn try_fetch_decode(&self) -> Result<Instruction, String> {
         let mut bytes = [0; 4];
         self.memory.export(self.pc, &mut bytes);
-        InstructionParameters::from(bytes)
-    }
-
-    pub fn try_fetch_decode(&self) -> Result<Instruction, String> {
-        self.fetch().try_decode(self.rom.config.kind)
+        InstructionParameters::try_decode_from_u32(u32::from_be_bytes(bytes), self.rom.config.kind)
     }
 
     fn exec(&mut self, inst: Instruction) -> Result<bool, String> {

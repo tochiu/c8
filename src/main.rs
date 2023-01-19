@@ -19,6 +19,8 @@ use crossterm::style::Stylize;
 
 use std::io::stdout;
 
+use crate::run::audio::spawn_audio_stream;
+
 fn main() -> Result<()> {
     match Cli::parse().command {
         CliCommand::Check { path, log, kind } => {
@@ -63,6 +65,7 @@ fn main() -> Result<()> {
                 kind
             );
 
+            // override panic hook to cleanup terminal before panic
             let default_panic_hook = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |panic_info| {
                 if let Err(cleanup_err) = panic_cleanup_terminal() {
@@ -73,13 +76,13 @@ fn main() -> Result<()> {
                 default_panic_hook(panic_info);
             }));
 
+            // spawn audio stream
+            let (_audio_stream, audio_controller) = spawn_audio_stream();
+
             // spawn run threads
-            let (run_main_thread, run_render_thread, run_sound_thread) = spawn_run_threads(rom, hz);
+            let (run_main_thread, run_render_thread) = spawn_run_threads(rom, hz, audio_controller);
 
             // wait for threads
-            run_sound_thread
-                .join()
-                .expect("Failed to join sound thread");
             run_render_thread
                 .join()
                 .expect("Failed to join render thread");
