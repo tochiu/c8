@@ -14,7 +14,7 @@
 ---
 
 <p align="center">
- <img src="https://cdn.nerdschalk.com/wp-content/uploads/2021/09/screenshot-098.png" alt="Dorito App Screenshot">
+ <img src="https://github.com/tochiu/c8/blob/main/img/super_neatboy_debug.jpg?raw=true" alt="C8 Screenshot">
 </p>
 
 ---
