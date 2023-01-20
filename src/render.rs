@@ -16,9 +16,9 @@ use crossterm::{
 use tui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
-    widgets::{Block, Borders},
-    Frame,
+    style::{Color, Style, Modifier},
+    widgets::{Block, Borders, Gauge},
+    Frame, text::Span,
 };
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
 
@@ -135,10 +135,11 @@ impl Renderer {
                 let display =
                     maybe_display.unwrap_or_else(|| vm.interpreter().display.clone());
                 let hz = (1.0/vm.time_step).clamp(0.0, u32::MAX as f64).round() as u32;
+                let volume = vm.audio().volume();
                 drop(_guard);
 
                 terminal.draw(|f| {
-                    self.render_virtual_machine(f, &display, hz);
+                    self.render_virtual_machine(f, &display, hz, volume);
                 })?;
             }
         }
@@ -170,6 +171,7 @@ impl Renderer {
         f: &mut Frame<B>,
         display: &Display,
         execution_frequency: u32,
+        volume: f32
     ) {
         let area = f.size();
         let display_widget = DisplayWidget {
@@ -189,11 +191,12 @@ impl Renderer {
             ])
             .split(area)[..] else { unreachable!() };
 
-        let [display_row, logger_row] = Layout::default()
+        let [display_row, volume_row, logger_row] = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(display_height),
-                Constraint::Length(area.height.saturating_sub(display_height)),
+                Constraint::Length(1),
+                Constraint::Length(area.height.saturating_sub(display_height + 1)),
             ])
             .split(area)[..] else { unreachable!() };
 
@@ -214,6 +217,16 @@ impl Renderer {
         let display_area = display_row.intersection(display_column);
         f.render_widget(display_widget, display_block.inner(display_area));
         f.render_widget(display_block, display_area);
+
+        let volume_area = volume_row.intersection(display_column);
+        f.render_widget(
+            Gauge::default()
+                .block(Block::default().borders(Borders::LEFT.union(Borders::RIGHT)))
+                .gauge_style(Style::default().fg(Color::White).bg(Color::Gray).add_modifier(Modifier::BOLD))
+                .label(Span::styled("(DOWN - ) Volume (UP   = )", Style::default().fg(Color::Black)))
+                .percent((volume * 100.0).round().clamp(0.0, 100.0) as u16), 
+            volume_area
+        );
     }
 }
 

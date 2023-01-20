@@ -15,7 +15,7 @@ pub const RODIO_SAMPLING_RATE: u32 = 96000;
 pub const AUDIO_BUFFER_SIZE_BYTES: usize = 16;
 
 const BASE_SAMPLE_RATE: f32 = 4000.0;
-const DEFAULT_VOLUME: f32 = 0.25;
+const DEFAULT_VOLUME: f32 = 0.5;
 
 pub struct Audio {
     pub buffer: [u8; AUDIO_BUFFER_SIZE_BYTES],
@@ -151,6 +151,7 @@ pub struct AudioController {
     source: AudioSource,
     paused: bool,
     silent: bool,
+    volume: f32,
     buffer: [u8; AUDIO_BUFFER_SIZE_BYTES],
     remaining_duration: Duration,
     remaining_duration_instant: Instant
@@ -169,6 +170,7 @@ impl AudioController {
             source,
             paused: false,
             silent: true,
+            volume: DEFAULT_VOLUME,
             buffer: [0; AUDIO_BUFFER_SIZE_BYTES],
             remaining_duration: Duration::ZERO,
             remaining_duration_instant: Instant::now()
@@ -187,6 +189,15 @@ impl AudioController {
             self.source.set_audible(false);
             self.silent = true;
         }
+    }
+
+    pub fn volume(&self) -> f32 {
+        self.volume
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume = volume;
+        self.sink.set_volume(volume);
     }
 
     pub fn apply_event(&mut self, event: AudioEvent) {

@@ -60,7 +60,7 @@ C8 is a terminal user interface tooklit for **CHIP-8**, **S-CHIP**, and **XO-CHI
 
 ### Todo (Other)
 
-- [ ] Volume Adjuster
+- [x] Volume Adjuster
 - [ ] Reload Rom (Preserve RPL Flags)
 
 

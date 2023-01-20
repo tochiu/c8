@@ -24,6 +24,7 @@ pub enum VMEvent {
     Focus,
     Unfocus,
     FocusingKeyDown(Key),
+    VolumeChange(bool),
 }
 
 pub struct VM {
@@ -126,6 +127,10 @@ impl VM {
         &mut self.keyboard
     }
 
+    pub fn audio(&self) -> &AudioController {
+        &self.audio
+    }
+
     pub fn update_audio(&mut self) {
         self.audio.update()
     }
@@ -177,6 +182,13 @@ impl VM {
                 VMEvent::Focus => self.keyboard.handle_focus(),
                 VMEvent::Unfocus => self.keyboard.handle_unfocus(),
                 VMEvent::FocusingKeyDown(key) => self.keyboard.handle_focusing_key_down(key),
+                VMEvent::VolumeChange(increasing) => {
+                    if increasing {
+                        self.audio.set_volume((self.audio.volume() + 0.05).clamp(0.0, 1.0))
+                    } else {
+                        self.audio.set_volume((self.audio.volume() - 0.05).clamp(0.0, 1.0))
+                    }
+                }
             }
         }
     }

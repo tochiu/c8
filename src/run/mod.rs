@@ -133,12 +133,22 @@ pub fn spawn_run_threads(
                             // exit virtual machine
                             return runner.exit();
                         } else if !sink_vm_events {
-                            // kinda expecting a crossterm key event to mean renderer is in focus
-                            if let KeyEventKind::Repeat | KeyEventKind::Press = key_event.kind {
-                                if let Ok(key) = Key::try_from(key_event.code) {
-                                    vm_event_sender
-                                        .send(VMEvent::FocusingKeyDown(key))
-                                        .expect("Unable to send VM focusing key down event");
+                            match key_event.code {
+                                CrosstermKey::Char('-') => {
+                                    vm_event_sender.send(VMEvent::VolumeChange(false)).ok();
+                                }
+                                CrosstermKey::Char('=') => {
+                                    vm_event_sender.send(VMEvent::VolumeChange(true)).ok();
+                                }
+                                _ => {
+                                    // kinda expecting a crossterm key event to mean renderer is in focus
+                                    if let KeyEventKind::Repeat | KeyEventKind::Press = key_event.kind {
+                                        if let Ok(key) = Key::try_from(key_event.code) {
+                                            vm_event_sender
+                                                .send(VMEvent::FocusingKeyDown(key))
+                                                .expect("Unable to send VM focusing key down event");
+                                        }
+                                    }
                                 }
                             }
                         }
