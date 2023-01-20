@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="#about">About</a> •
+  <a href="#features">Features</a> •
   <a href="#installation">Installation</a> •
   <a href="#usage">Usage</a> •
   <a href="#motivation">Motivation</a>
@@ -28,6 +29,40 @@ C8 is a terminal user interface tooklit for **CHIP-8**, **S-CHIP**, and **XO-CHI
     * add `--hz` followed by your target instructions per second if needed
 * disassemble a rom into a file with `c8 dasm [ROM_PATH] > [OUTPUT_FILE_PATH]`
 * check a rom for potential issues* with `c8 check [ROM_PATH]`
+
+## Features
+| Feature                                            | C8
+|----------------------------------------------------|-
+| Full Chip-8 + VIP, SuperChip, and XO-Chip Support  | ✔
+| Full Sound Support                                 | ✔
+| Full 4-bit Color Support                           |
+| `debug` Undo, Redo, and Step through Execution     | ✔
+| `debug` Virtual Machine State Introspection        | ✔ *
+| `debug` Register and Address Watchpoints           | ✔
+| `debug` Instruction Breakpoints                    | ✔
+| `debug` Program Execution History                  | ✔
+| `debug` Keyboard State Modification                | ✔
+| `debug` Dump Executing Program Memory              | ✔
+| Configurable Cycles per Frame                      | ✔
+| Static Tracing Disassembler                        | ✔
+| Compatibility Profiles                             | ✔
+| Pre-defined and Custom Color Palettes              |
+| Individual Configurable Quirks                     |
+| Multiple Font choices                              | 
+###### Features labeled `debug` are only available in debug mode
+
+
+
+### Todo (Virtual Machine State Introspection)
+
+- [ ] Show Audio Buffer
+- [ ] Show RPL User Flags
+
+### Todo (Other)
+
+- [ ] Volume Adjuster
+
+
 
 ## Installation
 
