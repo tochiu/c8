@@ -4,7 +4,7 @@ use crate::{
         disp::{Display, DisplayWidget},
         rom::RomConfig,
         vm::VM,
-        C8Lock, Interval, IntervalAccuracy
+        C8Lock
     },
 };
 
@@ -27,12 +27,12 @@ use std::{
     ops::DerefMut,
     sync::mpsc::{channel, Sender, TryRecvError},
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 type Terminal = tui::Terminal<CrosstermBackend<io::Stdout>>;
 
-pub const TARGET_FRAME_RATE: f64 = 60.0;
+pub const TARGET_FRAME_DURATION: Duration = Duration::from_nanos(16_666_667); // 60 FPS
 
 fn cleanup_terminal(terminal: &mut Terminal) -> Result<()> {
     // clean up the terminal so its usable after program exit
@@ -71,14 +71,9 @@ pub fn spawn_render_thread(c8: C8Lock, config: RomConfig) -> (Sender<()>, JoinHa
             config,
         };
 
-        let mut interval = Interval::new(
-            "render",
-            Duration::from_millis(16),
-            Duration::from_millis(16),
-            IntervalAccuracy::Default,
-        );
-
         let mut should_redraw = false;
+
+        let mut frame_start = Instant::now();
 
         loop {
             if render_receiver.try_iter().last().is_some() {
@@ -97,7 +92,8 @@ pub fn spawn_render_thread(c8: C8Lock, config: RomConfig) -> (Sender<()>, JoinHa
                 .expect("Failed render step");
             should_redraw = false;
 
-            interval.sleep();
+            frame_start = frame_start.checked_add(TARGET_FRAME_DURATION).expect("Could not calculate next frame start");
+            thread::sleep(frame_start.saturating_duration_since(Instant::now()));
         }
     });
 

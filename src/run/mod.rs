@@ -14,8 +14,8 @@ use {
 };
 
 use crate::{
-    dbg::Debugger, 
-    render::{spawn_render_thread, TARGET_FRAME_RATE}
+    dbg::Debugger,
+    render::{spawn_render_thread, TARGET_FRAME_DURATION},
 };
 
 use anyhow::Result;
@@ -33,7 +33,7 @@ use std::{
     fmt::Display,
     ops::DerefMut,
     sync::{
-        mpsc::{channel, Receiver, Sender, TryRecvError, RecvTimeoutError},
+        mpsc::{channel, Receiver, RecvTimeoutError, Sender, TryRecvError},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
@@ -56,7 +56,6 @@ pub fn spawn_run_threads(
     initial_target_execution_frequency: u32,
     audio_controller: AudioController,
 ) -> (JoinHandle<RunResult>, JoinHandle<()>) {
-
     // runner
     let rom_config = rom.config.clone();
     let mut runner = Runner::spawn(rom, initial_target_execution_frequency, audio_controller);
@@ -220,8 +219,10 @@ impl Runner {
     pub fn spawn(
         rom: Rom,
         initial_target_execution_frequency: u32,
-        audio_controller: AudioController
+        audio_controller: AudioController,
     ) -> Self {
+        let target_frame_duration_seconds: f64 = TARGET_FRAME_DURATION.as_secs_f64();
+
         let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
         let (thread_continue_sender, thread_continue_receiver) = channel::<bool>();
         let (thread_frequency_sender, thread_frequency_receiver) = channel::<u32>();
@@ -239,7 +240,10 @@ impl Runner {
             (vm, dbg)
         }));
 
-        let mut cycles_per_frame = ((initial_target_execution_frequency as f64) / TARGET_FRAME_RATE).round().max(1.0) as u32;
+        let mut cycles_per_frame = (target_frame_duration_seconds
+            * initial_target_execution_frequency as f64)
+            .round()
+            .max(1.0) as u32;
         let mut frequency_stats: BTreeMap<u32, (Duration, u64)> = BTreeMap::new();
 
         let thread_handle = {
@@ -251,31 +255,24 @@ impl Runner {
 
                 let thread_start = Instant::now();
 
-                let mut interval = Interval::new(
-                    "interp",
-                    Duration::from_secs_f64(1.0 / TARGET_FRAME_RATE),
-                    Duration::from_millis(8),
-                    IntervalAccuracy::High,
-                );
-
                 let mut continuation = RunContinuation {
                     cont: false,
                     recv: thread_continue_receiver,
                 };
 
-                let mut burst_start = Instant::now();
-                let mut burst_elapsed = Duration::ZERO;
-                
+                let mut total_simulated_time = 0.0;
+
                 let mut freq_duration = Duration::ZERO;
                 let mut freq_instructions_executed = 0_u64;
 
-                let mut total_simulated_time = 0.0;
+                let mut burst_start = Instant::now();
+                let mut burst_elapsed = Duration::ZERO;
+                let mut burst_just_started = true;
 
-                let mut just_resumed = false;
-                
+                let mut frame_start = Instant::now();
+
                 // 1 frame of work
                 loop {
-
                     // vm runner step
                     let mut _guard = c8.lock().expect("Failed to lock C8 for main loop");
                     let (vm, maybe_dbg) = _guard.deref_mut();
@@ -285,36 +282,42 @@ impl Runner {
                     if continuation.try_cont() {
                         // we can step synchronously
 
-                        if just_resumed {
-                            just_resumed = false;
+                        if burst_just_started {
+                            burst_just_started = false;
                             vm.clear_events();
                             vm.resume_audio();
+                            frame_start = Instant::now();
                         }
 
                         vm.update_audio();
-                        
-                        let time_per_cycle = 1.0 / (cycles_per_frame as f64 * TARGET_FRAME_RATE);
+
+                        let time_per_cycle =
+                            target_frame_duration_seconds / cycles_per_frame as f64;
 
                         vm.time_step = time_per_cycle;
 
                         step_can_continue = true;
-                        
+
                         let now = Instant::now();
                         if let Some(dbg) = maybe_dbg {
                             for _ in 0..cycles_per_frame {
                                 if !dbg.step(vm) {
                                     step_can_continue = false;
-                                    break
+                                    break;
                                 }
                             }
                         } else {
                             step_can_continue = vm.stepn(cycles_per_frame)?
                         }
-                        
+
                         let elapsed = now.elapsed();
 
                         if step_can_continue {
-                            log::info!("Completed {} cycles in {} us", cycles_per_frame, elapsed.as_micros());
+                            log::trace!(
+                                "Completed {} cycles in {} us",
+                                cycles_per_frame,
+                                elapsed.as_micros()
+                            );
                         }
 
                         vm.update_audio();
@@ -324,12 +327,32 @@ impl Runner {
 
                         if continuation.cont {
                             drop(_guard);
-                            interval.sleep();
+
+                            frame_start = frame_start
+                                .checked_add(TARGET_FRAME_DURATION)
+                                .expect("Could not calculate next frame start");
+                            let sleep_start = Instant::now();
+                            let sleep_duration = frame_start.saturating_duration_since(sleep_start);
+                            spin_sleep::sleep(sleep_duration);
+
+                            if sleep_duration.is_zero() {
+                                log::warn!(
+                                    "Overran frame budget by {} us! Skipping sleep and starting next frame immediately", 
+                                    sleep_start.duration_since(frame_start).as_micros()
+                                );
+                                frame_start = sleep_start;
+                            } else {
+                                log::trace!(
+                                    "Overslept remaining frame budget by {} us",
+                                    Instant::now().duration_since(frame_start).as_micros()
+                                );
+                            }
+
                             freq_instructions_executed += cycles_per_frame as u64;
-                            total_simulated_time += time_per_cycle*cycles_per_frame as f64;
+                            total_simulated_time += time_per_cycle * cycles_per_frame as f64;
                             burst_elapsed = burst_start.elapsed();
                             continue;
-                        } 
+                        }
                     }
 
                     vm.pause_audio();
@@ -341,27 +364,29 @@ impl Runner {
                     // we yield until either we can continue or we must exit
 
                     if !(step_can_continue && !rom_config.debugging) && continuation.can_cont() {
-                        
                         if let Some(freq) = thread_frequency_receiver.try_iter().last() {
                             update_frequency_stats(
                                 &mut frequency_stats,
-                                (TARGET_FRAME_RATE*cycles_per_frame as f64).round() as u32,
+                                (cycles_per_frame as f64 / target_frame_duration_seconds).round()
+                                    as u32,
                                 freq_duration,
                                 freq_instructions_executed,
                             );
-                            cycles_per_frame = ((freq as f64) / TARGET_FRAME_RATE).round().max(1.0) as u32;
+                            cycles_per_frame = (target_frame_duration_seconds * freq as f64)
+                                .round()
+                                .max(1.0) as u32;
                             freq_duration = Duration::ZERO;
                             freq_instructions_executed = 0;
                         }
 
-                        interval.reset();
-                        just_resumed = true;
+                        burst_just_started = true;
                         burst_elapsed = Duration::ZERO;
                         burst_start = Instant::now();
                     } else {
                         update_frequency_stats(
                             &mut frequency_stats,
-                            (TARGET_FRAME_RATE*cycles_per_frame as f64).round() as u32,
+                            (cycles_per_frame as f64 / target_frame_duration_seconds).round()
+                                as u32,
                             freq_duration,
                             freq_instructions_executed,
                         );
@@ -392,7 +417,8 @@ impl Runner {
             thread_handle,
             ..
         } = self;
-        drop(thread_continue_sender); // vm thread should detect sender was dropped (we are the only one) and exit thread if still alive
+        // vm thread should detect sender was dropped (we are the only one) and exit thread if still alive
+        drop(thread_continue_sender); 
         thread_handle.join().expect("Runner exited without result")
     }
 
@@ -478,11 +504,7 @@ impl Display for RunAnalytics {
                 Stylize::green
             };
 
-            write!(
-                f,
-                "\n    {}",
-                format!("|").blue().bold()
-            )?;
+            write!(f, "\n    {}", format!("|").blue().bold())?;
 
             writeln!(
                 f,
@@ -512,11 +534,7 @@ impl Display for RunAnalytics {
                 )?;
             }
 
-            write!(
-                f,
-                "\n    {}",
-                format!("|").blue().bold()
-            )?;
+            write!(f, "\n    {}", format!("|").blue().bold())?;
 
             write!(
                 f,
@@ -552,127 +570,4 @@ fn update_frequency_stats(
     let (total_duration, count) = stats.entry(freq).or_insert((Duration::ZERO, 0));
     *total_duration = total_duration.saturating_add(duration);
     *count += instructions;
-}
-
-/*
- * Intervals keep state about the time elapsed since the previous sleep call
- * and compensate for it in the next sleep call so the starting time of logic
- * running between each sleep will be spaced apart by the desired interval
- *
- * Because sleep fundamentally cannot execute for exactly the amount requested and logic between each sleep will elapse for a nonzero duration
- * we cut the duration overslept and the execution time of the logic from the original sleep duration to try and resynchronize
- *
- * Deviations from the target interval that require more than one interval to compensate for will not be compensated for but instead forgotten
- * For example if we execute for 0.8 seconds but are supposed to execute within 0.2 second intervals at a time then
- * we will not try to compensate for the extra 0.6 seconds across multiple intervals and instead refuse to sleep in the next interval (0.2 - 0.6 <= 0)
- * and forget the remaining time to cut out
- *
- * This behavior exists because recovering from time deviations bigger than the target interval will lead to subsequent intervals being much
- * smaller than our target interval when what we are optimizing for is minimal absolute deviation
- *
- * I don't really think this construct is necessary but I thought I might need it
- * Anyway having this gives me peace of mind and also I already wrote it and could probably use it somewhere else later
- */
-
-#[derive(PartialEq, Eq)]
-pub enum IntervalAccuracy {
-    Default,
-    High,
-}
-
-pub struct Interval {
-    // interval name
-    #[allow(dead_code)]
-    name: &'static str,
-
-    // desired duration of interval
-    interval: Duration,
-
-    // max_quantum is the maximum duration we can go without sleeping before being forced to sleep
-    // compensation can lead to no sleeping if oversleeping and/or executing logic between sleeps is longer than the desired interval
-    // allowing this to occur unchecked can lead to deadlock since other threads could potentially be starved of execution time
-    max_quantum: Duration,
-
-    // instant last sleep was complete
-    task_start: Instant,
-
-    // how much we overslept by
-    oversleep_duration: Duration,
-
-    // how long weve gone since an actual sleep
-    quantum_duration: Duration,
-
-    accuracy: IntervalAccuracy,
-}
-
-impl Interval {
-    pub fn new(
-        name: &'static str,
-        interval: Duration,
-        max_quantum: Duration,
-        accuracy: IntervalAccuracy,
-    ) -> Self {
-        Interval {
-            name,
-            interval,
-            max_quantum,
-            task_start: Instant::now(),
-            oversleep_duration: Duration::ZERO,
-            quantum_duration: Duration::ZERO,
-            accuracy,
-        }
-    }
-
-    pub fn reset(&mut self) {
-        self.task_start = Instant::now();
-        self.oversleep_duration = Duration::ZERO;
-        self.quantum_duration = Duration::ZERO;
-    }
-
-    pub fn sleep(&mut self) {
-        let task_duration = self.task_start.elapsed(); // time since the end of our last sleep
-
-        // update our quantum duration
-        self.quantum_duration += task_duration;
-
-        // we kept track of how much we overslept last time so this and our task duration combined is our overshoot
-        // we must subtract from the original to stay on schedule
-        let mut sleep_duration = self
-            .interval
-            .saturating_sub(task_duration)
-            .saturating_sub(self.oversleep_duration);
-
-        // if our compensation leads to no sleeping and we havent exceeded our max quantum then we dont sleep
-        if sleep_duration.is_zero() && self.quantum_duration < self.max_quantum {
-            self.oversleep_duration = Duration::ZERO;
-        } else {
-            // otherwise if were not sleeping but we are past our max quantum we must sleep (right now its hardcoded to a constant 1ns)
-            if sleep_duration.is_zero() && self.quantum_duration >= self.max_quantum {
-                sleep_duration = Duration::from_nanos(1);
-            }
-
-            let now = Instant::now();
-
-            if self.accuracy == IntervalAccuracy::High {
-                spin_sleep::sleep(sleep_duration);
-            } else {
-                thread::sleep(sleep_duration);
-            }
-
-            // store how much we overslept by and reset our quantum duration since we slept for a nonzero duration
-            self.oversleep_duration = now.elapsed().saturating_sub(sleep_duration);
-            self.quantum_duration = Duration::ZERO;
-        }
-
-        // log::trace!(
-        //     "name: {}, task: {} us, sleep: {} us, oversleep: {} us",
-        //     self.name,
-        //     task_duration.as_micros(),
-        //     sleep_duration.as_micros(),
-        //     self.oversleep_duration.as_micros()
-        // );
-
-        // update task start to now since sleep is done
-        self.task_start = Instant::now();
-    }
 }
