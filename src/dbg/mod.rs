@@ -18,7 +18,7 @@ use crate::{
         instruct::Instruction,
         interp::Interpreter,
         vm::VM,
-        Runner
+        Runner,
     },
 };
 
@@ -312,9 +312,11 @@ impl Debugger {
         // update disassembler
         match self.watch_state.instruction {
             Some(Instruction::Store(vx)) => {
-                self.disassembler_needs_update |=
-                    self.disassembler
-                        .needs_rerun(vm.interpreter(), self.watch_state.index, vx as u16 + 1);
+                self.disassembler_needs_update |= self.disassembler.needs_rerun(
+                    vm.interpreter(),
+                    self.watch_state.index,
+                    vx as u16 + 1,
+                );
             }
             Some(Instruction::StoreBinaryCodedDecimal(_)) => {
                 self.disassembler_needs_update |=
@@ -1303,32 +1305,38 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
             .render(layout_areas.keyboard, buf);
 
         // Pointers
+        let pc_is_watchpoint = self
+            .dbg
+            .watchpoints
+            .contains(&Watchpoint::Pointer(MemoryPointer::ProgramCounter));
+        let index_is_watchpoint = self
+            .dbg
+            .watchpoints
+            .contains(&Watchpoint::Pointer(MemoryPointer::Index));
         Paragraph::new(vec![
-            Spans::from(format!(
-                "{}pc {:#05X}",
-                if self
-                    .dbg
-                    .watchpoints
-                    .contains(&Watchpoint::Pointer(MemoryPointer::ProgramCounter))
-                {
-                    "*"
+            Spans::from(Span::styled(
+                format!(
+                    "{}pc {:#05X}",
+                    if pc_is_watchpoint { "*" } else { "-" },
+                    interp.pc
+                ),
+                if pc_is_watchpoint {
+                    Style::default().fg(Color::Blue)
                 } else {
-                    "-"
+                    Style::default()
                 },
-                interp.pc
             )),
-            Spans::from(format!(
-                "{}i  {:#05X}",
-                if self
-                    .dbg
-                    .watchpoints
-                    .contains(&Watchpoint::Pointer(MemoryPointer::Index))
-                {
-                    "*"
+            Spans::from(Span::styled(
+                format!(
+                    "{}i  {:#05X}",
+                    if index_is_watchpoint { "*" } else { "-" },
+                    interp.index
+                ),
+                if index_is_watchpoint {
+                    Style::default().fg(Color::Blue)
                 } else {
-                    "-"
+                    Style::default()
                 },
-                interp.index
             )),
         ])
         .block(
@@ -1345,20 +1353,23 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
                 .iter()
                 .enumerate()
                 .map(|(i, val)| {
-                    Spans::from(format!(
-                        "{}v{:x} {:0>3} ({:#04X})",
-                        if self
-                            .dbg
-                            .watchpoints
-                            .contains(&Watchpoint::Register(i as u8))
-                        {
-                            "*"
+                    let is_watched = self
+                        .dbg
+                        .watchpoints
+                        .contains(&Watchpoint::Register(i as u8));
+                    Spans::from(Span::styled(
+                        format!(
+                            "{}v{:x} {:0>3} ({:#04X})",
+                            if is_watched { "*" } else { "-" },
+                            i,
+                            val,
+                            val
+                        ),
+                        if is_watched {
+                            Style::default().fg(Color::Blue)
                         } else {
-                            "-"
+                            Style::default()
                         },
-                        i,
-                        val,
-                        val
                     ))
                 })
                 .collect::<Vec<_>>(),
