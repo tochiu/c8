@@ -27,7 +27,7 @@ use std::{
     ops::DerefMut,
     sync::mpsc::{channel, Sender, TryRecvError},
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::{Duration, Instant}, cell::Cell,
 };
 
 type Terminal = tui::Terminal<CrosstermBackend<io::Stdout>>;
@@ -103,7 +103,7 @@ pub fn spawn_render_thread(c8: C8Lock, config: RomConfig) -> (Sender<()>, JoinHa
 struct Renderer {
     config: RomConfig,
     dbg_visible: bool,
-    dbg_widget_state: DebuggerWidgetState,
+    dbg_widget_state: Cell<DebuggerWidgetState>,
 }
 
 impl Renderer {
@@ -147,7 +147,7 @@ impl Renderer {
         Ok(())
     }
 
-    fn render_debugger<B: Backend>(&mut self, f: &mut Frame<B>, dbg: &Debugger, vm: &VM) {
+    fn render_debugger<B: Backend>(&self, f: &mut Frame<B>, dbg: &Debugger, vm: &VM) {
         let dbg_area = f.size();
         let dbg_widget = DebuggerWidget {
             dbg,
@@ -155,15 +155,19 @@ impl Renderer {
             logging: self.config.logging,
         };
 
-        if let Some((x, y)) = dbg_widget.cursor_position(dbg_area, &mut self.dbg_widget_state) {
+        let mut dbg_widget_state = self.dbg_widget_state.take();
+
+        if let Some((x, y)) = dbg_widget.cursor_position(dbg_area, &mut dbg_widget_state) {
             f.set_cursor(x, y);
         }
 
-        f.render_stateful_widget(dbg_widget, dbg_area, &mut self.dbg_widget_state);
+        f.render_stateful_widget(dbg_widget, dbg_area, &mut dbg_widget_state);
         f.render_widget(
-            logger_widget(self.dbg_widget_state.logger_border),
-            self.dbg_widget_state.logger_area,
+            logger_widget(dbg_widget_state.logger_border),
+            dbg_widget_state.logger_area,
         );
+
+        self.dbg_widget_state.set(dbg_widget_state);
     }
 
     fn render_virtual_machine<B: Backend>(
