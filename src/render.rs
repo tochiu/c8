@@ -17,7 +17,7 @@ use tui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
     style::{Color, Style, Modifier},
-    widgets::{Block, Borders, Gauge},
+    widgets::{Block, Borders, Gauge, Paragraph},
     Frame, text::Span,
 };
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
@@ -136,10 +136,11 @@ impl Renderer {
                     maybe_display.unwrap_or_else(|| vm.interpreter().display.clone());
                 let hz = (1.0/vm.time_step).clamp(0.0, u32::MAX as f64).round() as u32;
                 let volume = vm.audio().volume();
+                let is_dbg_enabled = maybe_dbg.is_some();
                 drop(_guard);
 
                 terminal.draw(|f| {
-                    self.render_virtual_machine(f, &display, hz, volume);
+                    self.render_virtual_machine(f, &display, hz, volume, is_dbg_enabled);
                 })?;
             }
         }
@@ -175,7 +176,8 @@ impl Renderer {
         f: &mut Frame<B>,
         display: &Display,
         execution_frequency: u32,
-        volume: f32
+        volume: f32,
+        is_dbg_enabled: bool
     ) {
         let area = f.size();
         let display_widget = DisplayWidget {
@@ -185,6 +187,14 @@ impl Renderer {
             execution_frequency,
             display,
         };
+
+        let [area, bottom_area] = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(area.height.saturating_sub(1)),
+                Constraint::Length(1)
+            ])
+            .split(area)[..] else { unreachable!() };
 
         let (display_width, display_height) = display.mode.window_dimensions();
         let [display_column, logger_column, ..] = Layout::default()
@@ -200,7 +210,7 @@ impl Renderer {
             .constraints([
                 Constraint::Length(display_height),
                 Constraint::Length(1),
-                Constraint::Length(area.height.saturating_sub(display_height + 1)),
+                Constraint::Length(area.height.saturating_sub(display_height + 1))
             ])
             .split(area)[..] else { unreachable!() };
 
@@ -230,6 +240,22 @@ impl Renderer {
                 .label(Span::styled("(DOWN - ) Volume (UP   = )", Style::default().fg(Color::Black)))
                 .percent((volume * 100.0).round().clamp(0.0, 100.0) as u16), 
             volume_area
+        );
+
+        let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
+        
+        f.render_widget(Block::default().style(bottom_area_style), bottom_area);
+        f.render_widget(
+            Paragraph
+                ::new(
+                    if is_dbg_enabled {
+                        " Esc to drop into the debugger, Ctrl+C to exit" 
+                    } else { 
+                        " Ctrl+C to exit" 
+                    }
+                )
+                .style(bottom_area_style), 
+            bottom_area
         );
     }
 }

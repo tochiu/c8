@@ -1421,19 +1421,19 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         } else if self.dbg.shell_output_active {
             let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
             buf.set_style(layout_areas.command_line, bottom_area_style);
-            Paragraph::new("Esc to exit output navigation")
+            Paragraph::new(" Esc to exit output navigation")
                 .style(bottom_area_style)
                 .render(layout_areas.command_line, buf);
         } else if self.dbg.memory_active {
             let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
             buf.set_style(layout_areas.command_line, bottom_area_style);
-            Paragraph::new("Esc to exit memory navigation")
+            Paragraph::new(" Esc to exit memory navigation")
                 .style(bottom_area_style)
                 .render(layout_areas.command_line, buf);
         } else if self.dbg.history_active {
             let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
             buf.set_style(layout_areas.command_line, bottom_area_style);
-            Paragraph::new("Esc to exit history navigation")
+            Paragraph::new(" Esc to exit history navigation")
                 .style(bottom_area_style)
                 .render(layout_areas.command_line, buf);
         }
