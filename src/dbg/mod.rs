@@ -318,6 +318,13 @@ impl Debugger {
                     vx as u16 + 1,
                 );
             }
+            Some(Instruction::StoreRange(vstart, vend)) => {
+                self.disassembler_needs_update |= self.disassembler.needs_rerun(
+                    vm.interpreter(),
+                    self.watch_state.index,
+                    vstart.abs_diff(vend) as u16 + 1,
+                );
+            }
             Some(Instruction::StoreBinaryCodedDecimal(_)) => {
                 self.disassembler_needs_update |=
                     self.disassembler
