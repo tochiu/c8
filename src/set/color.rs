@@ -40,7 +40,7 @@ pub struct ColorViewWidget;
 
 impl Widget for ColorViewWidget {
     fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
-        let h = 0.0;
+        let h = 24.0;
 
         let sat_len = 32.min(area.width);
 
@@ -112,7 +112,7 @@ impl Widget for ColorPickerWidget {
             ])
             .split(preset_list_area)[..] else { unreachable!() };
 
-        Paragraph::new("#FF0000")
+        Paragraph::new("#FF6600")
             .alignment(Alignment::Center)
             .block(
                 Block::default()
@@ -123,7 +123,7 @@ impl Widget for ColorPickerWidget {
             .style(Style::default().fg(Color::Black))
             .render(custom_hex_color_area, buf);
 
-        Paragraph::new("255 000 000")
+        Paragraph::new("255 102 000")
             .alignment(Alignment::Center)
             .block(
                 Block::default()
@@ -134,7 +134,7 @@ impl Widget for ColorPickerWidget {
             .style(Style::default().fg(Color::Black))
             .render(custom_rgb_color_area, buf);
 
-        Paragraph::new("360° 100% 100%")
+        Paragraph::new("024° 100% 100%")
             .alignment(Alignment::Center)
             .block(
                 Block::default()

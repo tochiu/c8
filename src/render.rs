@@ -224,32 +224,39 @@ impl Renderer {
                 },
             );
         } 
-        // else {
-        //     let b = Block::default()
-        //         .title(" Color Picker ")
-        //         .borders(Borders::ALL);
-        //     let ba = Layout::default()
-        //         .direction(Direction::Horizontal)
-        //         .constraints([
-        //             Constraint::Length(50),
-        //             Constraint::Length(1)
-        //         ])
-        //         .split(
-        //             if logger_column.area() >= logger_row.area() {
-        //                 logger_column
-        //             } else {
-        //                 logger_row
-        //             }
-        //         )[0];
-        //     let area = b.inner(ba);
+        else {
+            // let b = Block::default()
+            //     .title(" Color Picker ")
+            //     .borders(Borders::ALL);
+            // let ba = Layout::default()
+            //     .direction(Direction::Horizontal)
+            //     .constraints([
+            //         Constraint::Length(50),
+            //         Constraint::Length(1)
+            //     ])
+            //     .split(
+            //         if logger_column.area() >= logger_row.area() {
+            //             logger_column
+            //         } else {
+            //             logger_row
+            //         }
+            //     )[0];
+            // let ba = Layout::default()
+            //     .direction(Direction::Vertical)
+            //     .constraints([
+            //         Constraint::Length(18),
+            //         Constraint::Length(1)
+            //     ])
+            //     .split(ba)[0];
+            // let area = b.inner(ba);
 
-        //     f.render_widget(
-        //         crate::set::color::ColorPickerWidget,
-        //         area    
-        //     );
+            // f.render_widget(
+            //     crate::set::color::ColorPickerWidget,
+            //     area    
+            // );
 
-        //     f.render_widget(b, ba);
-        // }
+            // f.render_widget(b, ba);
+        }
 
         let display_block = Block::default()
             .title(display_widget.title())
