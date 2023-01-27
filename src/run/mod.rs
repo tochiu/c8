@@ -306,18 +306,11 @@ impl Runner {
 
                         vm.time_step = time_per_cycle;
 
-                        step_can_continue = true;
-
                         let now = Instant::now();
                         if let Some(dbg) = maybe_dbg {
-                            for _ in 0..cycles_per_frame {
-                                if !dbg.step(vm) {
-                                    step_can_continue = false;
-                                    break;
-                                }
-                            }
+                            step_can_continue = dbg.step(vm, cycles_per_frame as usize);
                         } else {
-                            step_can_continue = vm.stepn(cycles_per_frame)?
+                            step_can_continue = vm.flush_and_stepn(cycles_per_frame)?
                         }
 
                         let elapsed = now.elapsed();

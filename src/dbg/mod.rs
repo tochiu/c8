@@ -71,7 +71,7 @@ impl From<&Interpreter> for WatchState {
             index: interp.index,
             pc: interp.pc,
             addresses: Default::default(),
-            instruction: interp.try_fetch_decode().ok(),
+            instruction: interp.instruction,
         }
     }
 }
@@ -138,7 +138,6 @@ impl WatchState {
         self.pc = interp.pc;
         self.index = interp.index;
         self.registers.copy_from_slice(&interp.registers);
-        self.instruction = interp.try_fetch_decode().ok();
     }
 }
 
@@ -248,7 +247,7 @@ impl Debugger {
         vm.clear_event_queue();
         self.history.clear_redo_history();
         for step in 0..amt {
-            if !self.step(vm) {
+            if !self.step(vm, 1) {
                 break;
             }
             amt_stepped = step + 1;
@@ -262,7 +261,7 @@ impl Debugger {
         let mut amt_stepped = 0;
         vm.clear_event_queue();
         for step in 0..amt {
-            if !self.step(vm) {
+            if !self.step(vm, 1) {
                 break;
             }
             amt_stepped = step + 1;
@@ -275,28 +274,15 @@ impl Debugger {
         amt_stepped
     }
 
-    pub fn step(&mut self, vm: &mut VM) -> bool {
-        if let Some(e) = self.vm_exception.as_ref() {
-            self.shell.error(e);
-            self.activate(vm);
-            return false;
-        }
-
-        if !self.vm_executing {
-            self.shell.print("Program has finished executing.");
-            self.activate(vm);
-            return false;
-        }
-
+    fn step_once(&mut self, vm: &mut VM) -> bool {
         let mut should_continue = match self.history.step(vm) {
-            Ok(should_continue) => {
-                if !should_continue {
+            Ok(cont) => {
+                if !cont {
                     self.shell.print("Program has finished executing.");
                     self.vm_executing = false;
                     self.activate(vm);
                 }
-
-                should_continue
+                cont
             }
             Err(e) => {
                 self.shell.error(&e);
@@ -306,8 +292,6 @@ impl Debugger {
                 false
             }
         };
-
-        self.memory_widget_state.get_mut().poke();
 
         // update disassembler
         match self.watch_state.instruction {
@@ -343,44 +327,79 @@ impl Debugger {
                 .push(DebugEvent::BreakpointReached(vm.interpreter().pc));
         }
 
-        // handle debug events emitted
         if !self.event_queue.is_empty() {
             should_continue = false;
             self.activate(vm);
-            for debug_event in self.event_queue.drain(..) {
-                match debug_event {
-                    DebugEvent::BreakpointReached(addr) => {
-                        self.shell
-                            .print(format!("Breakpoint {:#05X} reached", addr));
-                    }
-                    DebugEvent::WatchpointTrigger(watchpoint, old, new) => match watchpoint {
-                        Watchpoint::Pointer(pointer) => {
-                            let identifier = match pointer {
-                                MemoryPointer::Index => "i",
-                                MemoryPointer::ProgramCounter => "pc",
-                            };
+        }
 
-                            self.shell.print(format!("Pointer {} changed", identifier));
-                            self.shell.print(format!("Old value = {:#05X}", old));
-                            self.shell.print(format!("New value = {:#05X}", new));
-                        }
-                        Watchpoint::Register(register) => {
-                            self.shell
-                                .print(format!("Register v{:x} changed", register));
-                            self.shell
-                                .print(format!("Old value = {:0>3} ({:#05X})", old, old));
-                            self.shell
-                                .print(format!("New value = {:0>3} ({:#05X})", new, new));
-                        }
-                        Watchpoint::Address(addr) => {
-                            self.shell.print(format!("Address {:#05X} changed", addr));
-                            self.shell
-                                .print(format!("Old value = {:0>3} ({:#04X})", old, old));
-                            self.shell
-                                .print(format!("New value = {:0>3} ({:#04X})", new, new));
-                        }
-                    },
+        should_continue
+    }
+
+    pub fn step(&mut self, vm: &mut VM, amt: usize) -> bool {
+        if let Some(e) = self.vm_exception.as_ref() {
+            self.shell.error(e);
+            self.activate(vm);
+            return false;
+        }
+
+        if !self.vm_executing {
+            self.shell.print("Program has finished executing.");
+            self.activate(vm);
+            return false;
+        }
+
+        vm.flush();
+
+        let mut should_continue = self.step_once(vm);
+
+        vm.clear_ephemeral_state();
+        vm.flush();
+
+        if should_continue {
+            for _ in 0..amt - 1 {
+                if !self.step_once(vm) {
+                    should_continue = false;
+                    break;
                 }
+            }
+        }
+
+        self.memory_widget_state.get_mut().poke();
+
+        // handle debug events emitted
+        for debug_event in self.event_queue.drain(..) {
+            match debug_event {
+                DebugEvent::BreakpointReached(addr) => {
+                    self.shell
+                        .print(format!("Breakpoint {:#05X} reached", addr));
+                }
+                DebugEvent::WatchpointTrigger(watchpoint, old, new) => match watchpoint {
+                    Watchpoint::Pointer(pointer) => {
+                        let identifier = match pointer {
+                            MemoryPointer::Index => "i",
+                            MemoryPointer::ProgramCounter => "pc",
+                        };
+
+                        self.shell.print(format!("Pointer {} changed", identifier));
+                        self.shell.print(format!("Old value = {:#05X}", old));
+                        self.shell.print(format!("New value = {:#05X}", new));
+                    }
+                    Watchpoint::Register(register) => {
+                        self.shell
+                            .print(format!("Register v{:x} changed", register));
+                        self.shell
+                            .print(format!("Old value = {:0>3} ({:#05X})", old, old));
+                        self.shell
+                            .print(format!("New value = {:0>3} ({:#05X})", new, new));
+                    }
+                    Watchpoint::Address(addr) => {
+                        self.shell.print(format!("Address {:#05X} changed", addr));
+                        self.shell
+                            .print(format!("Old value = {:0>3} ({:#04X})", old, old));
+                        self.shell
+                            .print(format!("New value = {:0>3} ({:#04X})", new, new));
+                    }
+                },
             }
         }
 

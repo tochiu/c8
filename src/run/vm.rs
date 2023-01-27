@@ -202,21 +202,32 @@ impl VM {
         }
     }
 
-    pub fn stepn(&mut self, amt: u32) -> Result<bool, String> {
+    pub fn flush(&mut self) {
         self.drain_event_queue();
-
         self.keyboard.flush(&mut self.interpreter.input);
+    }
+
+    pub fn clear_ephemeral_state(&mut self) {
+        self.keyboard.clear_ephemeral_state();
+    }
+
+    pub fn flush_and_stepn(&mut self, amt: u32) -> Result<bool, String> {
+        self.flush();
 
         let should_continue = self.step_interpreter()?;
 
-        self.keyboard.clear_ephemeral_state();
-        self.keyboard.flush(&mut self.interpreter.input);
+        self.clear_ephemeral_state();
+        self.flush();
 
         if !should_continue {
             return Ok(false);
         }
 
-        for _ in 0..amt - 1 {
+        self.stepn(amt - 1)
+    }
+
+    pub fn stepn(&mut self, amt: u32) -> Result<bool, String> {
+        for _ in 0..amt {
             if !self.step_interpreter()? {
                 return Ok(false);
             }

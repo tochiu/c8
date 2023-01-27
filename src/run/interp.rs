@@ -1,9 +1,10 @@
 use super::{
     audio::{Audio, AUDIO_BUFFER_SIZE_BYTES},
-    disp::{Display, DisplayMode, DisplayBuffer},
+    disp::{Display, DisplayBuffer, DisplayMode},
     input::Key,
+    instruct::{Instruction, InstructionParameters},
     mem::*,
-    rom::{Rom, RomKind}, instruct::{Instruction, InstructionParameters},
+    rom::{Rom, RomKind},
 };
 
 use rand::rngs::StdRng;
@@ -43,7 +44,7 @@ pub enum InterpreterHistoryFragmentExtra {
         prior_selected_plane_bitflags: u8,
     },
     WillDrawEntireDisplay {
-        prior_display_buffers: [Option<Box<DisplayBuffer>>; 4]
+        prior_display_buffers: [Option<Box<DisplayBuffer>>; 4],
     },
     WillLoadFromMemory {
         prior_index_access_flags: Vec<u8>,
@@ -127,13 +128,15 @@ pub struct Interpreter {
     pub audio: Audio,
     pub input: InterpreterInput,
     pub output: Option<InterpreterOutput>,
+    pub instruction: Option<Instruction>,
     pub workspace: [u8; 128],
+    error: String,
 }
 
 impl From<Rom> for Interpreter {
     fn from(rom: Rom) -> Self {
         let memory = allocate_memory(&rom);
-        Interpreter {
+        let mut interp = Interpreter {
             memory_access_flags: if rom.config.debugging {
                 vec![0; memory.len()]
             } else {
@@ -151,9 +154,14 @@ impl From<Rom> for Interpreter {
             audio: Audio::from(rom.config.kind),
             input: Default::default(),
             output: None,
+            instruction: None,
             workspace: [0; 128],
+            error: String::new(),
             rom,
-        }
+        };
+
+        interp.fetch_decode();
+        interp
     }
 }
 
@@ -168,9 +176,14 @@ impl Interpreter {
     }
 
     pub fn undo(&mut self, prior_state: &InterpreterHistoryFragment) {
+        let Some(instruction) = prior_state.instruction.as_ref() else {
+            unreachable!("Cannot undo to a state without an instruction")
+        };
+
         self.pc = prior_state.pc;
         self.index = prior_state.index;
         self.registers = prior_state.registers;
+        self.instruction = Some(*instruction);
 
         log::debug!(
             "Restoring memory access flags: {:?} -> {:?}",
@@ -178,10 +191,6 @@ impl Interpreter {
             prior_state.pc_access_flags
         );
         self.memory_access_flags[self.pc as usize] = prior_state.pc_access_flags;
-
-        let Some(instruction) = prior_state.instruction.as_ref() else {
-            unreachable!("Cannot undo to a state without an instruction")
-        };
 
         log::trace!("Undoing instruction: {:?}", instruction);
 
@@ -205,8 +214,15 @@ impl Interpreter {
                 self.rng = prior_rng.as_ref().clone();
             }
 
-            InterpreterHistoryFragmentExtra::WillDrawEntireDisplay { prior_display_buffers } => {
-                for (plane, maybe_prior_plane) in self.display.planes.iter_mut().zip(prior_display_buffers.into_iter()) {
+            InterpreterHistoryFragmentExtra::WillDrawEntireDisplay {
+                prior_display_buffers,
+            } => {
+                for (plane, maybe_prior_plane) in self
+                    .display
+                    .planes
+                    .iter_mut()
+                    .zip(prior_display_buffers.into_iter())
+                {
                     let Some(prior_plane) = maybe_prior_plane.as_deref() else {
                         continue
                     };
@@ -254,14 +270,16 @@ impl Interpreter {
                 self.audio.pitch = *prior_pitch;
             }
 
-            InterpreterHistoryFragmentExtra::WillSetPlane { prior_selected_plane_bitflags } => {
+            InterpreterHistoryFragmentExtra::WillSetPlane {
+                prior_selected_plane_bitflags,
+            } => {
                 self.display.selected_plane_bitflags = *prior_selected_plane_bitflags;
             }
         }
     }
 
     pub fn to_history_fragment(&self) -> InterpreterHistoryFragment {
-        let instruction = self.try_fetch_decode().ok();
+        let instruction = self.instruction;
         let extra = instruction.and_then(|instruction| match instruction {
             Instruction::GenerateRandom(_, _) => Some(Box::new(
                 InterpreterHistoryFragmentExtra::WillGenerateRandom {
@@ -269,11 +287,11 @@ impl Interpreter {
                 },
             )),
 
-            Instruction::SetPlane(_) => Some(Box::new(
-                InterpreterHistoryFragmentExtra::WillSetPlane {
+            Instruction::SetPlane(_) => {
+                Some(Box::new(InterpreterHistoryFragmentExtra::WillSetPlane {
                     prior_selected_plane_bitflags: self.display.selected_plane_bitflags,
-                },
-            )),
+                }))
+            }
 
             Instruction::ClearScreen
             | Instruction::ScrollUp(_)
@@ -283,7 +301,13 @@ impl Interpreter {
             | Instruction::LowResolution
             | Instruction::HighResolution => Some(Box::new(
                 InterpreterHistoryFragmentExtra::WillDrawEntireDisplay {
-                    prior_display_buffers: [0, 1, 2, 3].map(|i| if self.display.selected_plane_bitflags >> i == 1 { Some(Box::new(self.display.planes[i])) } else { None } )
+                    prior_display_buffers: [0, 1, 2, 3].map(|i| {
+                        if self.display.selected_plane_bitflags >> i == 1 {
+                            Some(Box::new(self.display.planes[i]))
+                        } else {
+                            None
+                        }
+                    }),
                 },
             )),
 
@@ -292,7 +316,7 @@ impl Interpreter {
                 self.memory_access_flags
                     .export(self.index, &mut prior_index_access_flags);
                 InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                    prior_index_access_flags
+                    prior_index_access_flags,
                 }
             })),
 
@@ -301,16 +325,16 @@ impl Interpreter {
                 self.memory_access_flags
                     .export(self.index, &mut prior_index_access_flags);
                 InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                    prior_index_access_flags
+                    prior_index_access_flags,
                 }
             })),
-            
+
             Instruction::Draw(_, _, n) => Some(Box::new({
                 let mut prior_index_access_flags = vec![0; self.get_sprite_draw_info(n).2];
                 self.memory_access_flags
                     .export(self.index, &mut prior_index_access_flags);
                 InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                    prior_index_access_flags
+                    prior_index_access_flags,
                 }
             })),
 
@@ -459,40 +483,49 @@ impl Interpreter {
         }
     }
 
-    // interpret the next instruction
+    // interpret the current instruction
     pub fn step(&mut self) -> Result<bool, String> {
         // clear ephemeral output
         self.output = None;
         self.waiting = false;
 
-        // fetch + decode
-        match self.try_fetch_decode() {
-            Ok(instruction) => {
-                log::trace!("Instruction {:#05X?} {:?} ", self.pc, instruction);
-                let prior_pc = self.pc;
+        let Some(instruction) = self.instruction else {
+            return Err(format!("Decode at {:#05X?} failed: {}", self.pc, self.error))
+        };
 
-                self.pc = self
-                    .memory
-                    .address_add(self.pc, instruction.size());
+        log::trace!("Instruction {:#05X?} {:?} ", self.pc, instruction);
+        let prior_pc = self.pc;
 
-                // execute instruction
-                let result = self.exec(instruction);
+        // advance pc
+        self.pc = self.memory.address_add(self.pc, instruction.size());
 
-                // revert if execution failed or if execution shouldnt continue or if the interpreter is waiting
-                if !result.as_ref().unwrap_or(&false) || self.waiting {
-                    self.pc = prior_pc;
-                }
+        // execute instruction
+        let result = self.exec(instruction);
 
-                result
-            }
-            Err(e) => Err(format!("Decode at {:#05X?} failed: {}", self.pc, e)),
+        // revert if execution failed or if execution shouldnt continue or if the interpreter is waiting
+        if !result.as_ref().unwrap_or(&false) || self.waiting {
+            self.pc = prior_pc;
+            self.instruction = Some(instruction);
+        } else {
+            self.fetch_decode();
         }
+
+        result
     }
 
-    pub fn try_fetch_decode(&self) -> Result<Instruction, String> {
+    fn fetch_decode(&mut self) {
         let mut bytes = [0; 4];
         self.memory.export(self.pc, &mut bytes);
-        InstructionParameters::try_decode_from_u32(u32::from_be_bytes(bytes), self.rom.config.kind)
+        match InstructionParameters::try_decode_from_u32(
+            u32::from_be_bytes(bytes),
+            self.rom.config.kind,
+        ) {
+            Ok(instruction) => self.instruction = Some(instruction),
+            Err(e) => {
+                self.instruction = None;
+                self.error = e;
+            }
+        }
     }
 
     fn exec(&mut self, inst: Instruction) -> Result<bool, String> {
@@ -813,9 +846,17 @@ impl Interpreter {
         }
 
         if skip_next_instruction {
+            // NOTE: fetch decode is kinda expensive so check specifically for F000
             self.pc = self.memory.address_add(
                 self.pc,
-                Instruction::size_or_default(&self.try_fetch_decode().ok()),
+                if self.rom.config.kind == RomKind::XOCHIP
+                    && self.memory[self.pc as usize] == 0xF0
+                    && self.memory[(self.pc + 2) as usize] == 0x00
+                {
+                    4
+                } else {
+                    2
+                },
             );
         }
 
@@ -834,16 +875,24 @@ impl Interpreter {
             self.registers[vy as usize] as u16,
             height,
             bytes_per_row,
-            self.rom.config.kind == RomKind::XOCHIP
+            self.rom.config.kind == RomKind::XOCHIP,
         ) as u8;
     }
 
     // (bytes per row, rows per plane, total bytes to read)
     fn get_sprite_draw_info(&self, n: u8) -> (usize, usize, usize) {
         if self.rom.config.kind >= RomKind::SCHIP && n == 0 {
-            (2, 16, 32 * self.display.selected_plane_bitflags.count_ones() as usize)
+            (
+                2,
+                16,
+                32 * self.display.selected_plane_bitflags.count_ones() as usize,
+            )
         } else {
-            (1, n as usize, n as usize * self.display.selected_plane_bitflags.count_ones() as usize)
+            (
+                1,
+                n as usize,
+                n as usize * self.display.selected_plane_bitflags.count_ones() as usize,
+            )
         }
     }
 }

@@ -67,8 +67,6 @@ impl History {
             vm.time_step = self.fragments[self.cursor].time_step;
         }
 
-        vm.drain_event_queue();
-
         let state = vm.to_history_fragment(); // get state of vm
 
         // if we have redo ahead of us but the cursor isnt consistent with our current state then we need to clear it
