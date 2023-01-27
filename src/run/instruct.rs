@@ -132,7 +132,8 @@ impl InstructionParameters {
             | Instruction::SetPitch(_)
             | Instruction::LoadRange(_, _)
             | Instruction::StoreRange(_, _) 
-            | Instruction::SetIndexToLong(_) => {
+            | Instruction::SetIndexToLong(_)
+            | Instruction::SetPlane(_) => {
                 if kind < RomKind::XOCHIP {
                     return Err(InstructionParameters::new(bits).compatibility_issue_msg(instruction, RomKind::XOCHIP, kind));
                 }
@@ -142,13 +143,6 @@ impl InstructionParameters {
                     return Err(InstructionParameters::new(bits).compatibility_issue_msg(instruction, RomKind::SCHIP, kind));
                 } else if vx > 0x7 && kind < RomKind::XOCHIP {
                     return Err(InstructionParameters::new(bits).compatibility_issue_msg(instruction, RomKind::XOCHIP, kind));
-                }
-            }
-            Instruction::SetPlane(n) => {
-                if kind < RomKind::XOCHIP {
-                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(instruction, RomKind::XOCHIP, kind));
-                } else if n > 0b11 {
-                    return Err(format!("Invalid plane number {}", n));
                 }
             }
             _ => (),

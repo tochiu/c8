@@ -1,5 +1,7 @@
 use super::rom::RomKind;
 
+use crate::set::preset::COLOR_PRESETS;
+
 use tui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -30,37 +32,26 @@ const HIRES_DISPLAY_HEIGHT: u16 = 64;
 
 const CLEAR_DISPLAY: DisplayBuffer = [0; HIRES_DISPLAY_HEIGHT as usize];
 
-const BACKGROUND_COLOR: Color = Color::Rgb(000, 000, 000);
-const FIRST_PLANE_COLOR: Color = Color::Rgb(255, 255, 255);
-const SECOND_PLANE_COLOR: Color = Color::Rgb(085, 085, 085);
-const PLANE_INTERSECTION_COLOR: Color = Color::Rgb(170, 170, 170);
-
 // Each u128 represents a row of the display with each bit representing whether that pixel should be on or not
 // The number of u128 represents the display height
 // NOTE: The left-most pixel on the row corresponds to the most significant bit
 pub type DisplayBuffer = [u128; HIRES_DISPLAY_HEIGHT as usize];
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum DisplayPlaneSelection {
-    NoPlane,
-    FirstPlane,
-    SecondPlane,
-    BothPlanes,
-}
-
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Display {
-    pub selected_plane: DisplayPlaneSelection,
+    pub selected_plane_bitflags: u8,
     pub mode: DisplayMode,
-    pub planes: [DisplayBuffer; 2],
+    pub planes: [DisplayBuffer; 4],
+    pub colors: [Color; 16],
 }
 
 impl Default for Display {
     fn default() -> Self {
         Self {
-            selected_plane: DisplayPlaneSelection::FirstPlane,
+            selected_plane_bitflags: 0b0001,
             mode: DisplayMode::LowResolution,
-            planes: [CLEAR_DISPLAY; 2],
+            planes: [CLEAR_DISPLAY; 4],
+            colors: COLOR_PRESETS[0].1,
         }
     }
 }
@@ -71,30 +62,19 @@ impl Display {
         self.clear();
     }
 
-    pub fn set_plane(&mut self, selected_plane: DisplayPlaneSelection) {
-        self.selected_plane = selected_plane;
-    }
-
-    pub fn selected_planes(&self) -> &[DisplayBuffer] {
-        match self.selected_plane {
-            DisplayPlaneSelection::NoPlane => &[],
-            DisplayPlaneSelection::FirstPlane => &self.planes[0..1],
-            DisplayPlaneSelection::SecondPlane => &self.planes[1..2],
-            DisplayPlaneSelection::BothPlanes => &self.planes,
-        }
-    }
-
-    pub fn selected_planes_mut(&mut self) -> &mut [DisplayBuffer] {
-        match self.selected_plane {
-            DisplayPlaneSelection::NoPlane => &mut [],
-            DisplayPlaneSelection::FirstPlane => &mut self.planes[0..1],
-            DisplayPlaneSelection::SecondPlane => &mut self.planes[1..2],
-            DisplayPlaneSelection::BothPlanes => &mut self.planes,
-        }
+    pub fn selected_planes_mut(&mut self) -> impl Iterator<Item = &mut DisplayBuffer> {
+        self.planes.iter_mut().enumerate().filter_map(|(i, plane)| {
+            if self.selected_plane_bitflags >> i & 1 == 1 {
+                Some(plane)
+            } else {
+                None
+            }
+        })
     }
 
     pub fn clear(&mut self) {
-        self.selected_planes_mut().fill(CLEAR_DISPLAY);
+        self.selected_planes_mut()
+            .for_each(|plane| *plane = CLEAR_DISPLAY);
     }
 
     pub fn scroll_up(&mut self, amt: usize) {
@@ -161,14 +141,13 @@ impl Display {
         let rendered_sprite_bytes = clipped_sprite_height * bytes_per_row;
 
         let mut flag = false;
-        for (i, plane) in self.selected_planes_mut().iter_mut().enumerate() {
+        for (i, plane) in self.selected_planes_mut().enumerate() {
             let sprite_start = sprite_bytes * i;
             let sprite = &memory[sprite_start..sprite_start + rendered_sprite_bytes];
             flag |= draw_plane(plane, sprite, pos_x, pos_y, bytes_per_row, mask);
 
             if wrap {
-
-                let mut workspace = [0; 64];
+                let mut workspace = [0; 128];
 
                 let width = 8 * (bytes_per_row as usize);
                 let clipped_sprite_width = width.min((display_width - pos_x) as usize);
@@ -296,19 +275,18 @@ impl<'a, 'b> DisplayWidget<'_, '_> {
 
     fn pixel_stream(
         plane: &DisplayBuffer,
-        width: u16,
-        height: u16,
+        width: usize,
+        height: usize,
     ) -> impl Iterator<Item = bool> + '_ {
         plane
             .iter()
-            .take(height as usize)
+            .take(height)
             .map(move |plane_row| (0..width).map(|shift| (*plane_row >> (127 - shift) & 1 == 1)))
             .flatten()
     }
 }
 
 impl<'a, 'b> Widget for DisplayWidget<'_, '_> {
-
     fn render(self, area: Rect, buf: &mut Buffer) {
         let (display_width, display_height) = self.display.mode.dimensions();
 
@@ -316,30 +294,30 @@ impl<'a, 'b> Widget for DisplayWidget<'_, '_> {
         // so for each pixel in the row of the terminal we can use half-block color and the background color to represent 2 pixels in the display
         // so for each row of the terminal we can fit 2 rows of the display
 
-        let rendered_display_width = area.width.min(display_width);
-        let rendered_display_height = 2 * area.height.min(display_height);
+        let rendered_display_width = area.width.min(display_width) as usize;
+        let rendered_display_height = 2 * area.height.min(display_height) as usize;
 
-        let pixel_stream0 = DisplayWidget::pixel_stream(
-            &self.display.planes[0],
-            rendered_display_width,
-            rendered_display_height,
-        );
-        let pixel_stream1 = DisplayWidget::pixel_stream(
-            &self.display.planes[1],
-            rendered_display_width,
-            rendered_display_height,
-        );
+        let mut pixel_streams = [0, 1, 2, 3].map(|i| {
+            (i, DisplayWidget::pixel_stream(
+                &self.display.planes[i],
+                rendered_display_width,
+                rendered_display_height,
+            ))
+        });
 
-        for (i, (pixel0_on, pixel1_on)) in pixel_stream0.zip(pixel_stream1).enumerate() {
-            let x = i % rendered_display_width as usize;
-            let y = i / rendered_display_width as usize;
+        for i in 0..rendered_display_width * rendered_display_height {
+            let color =
+                self.display.colors[pixel_streams.iter_mut().fold(0, |color_index, (plane_index, stream)| {
+                    color_index
+                        | (stream
+                            .next()
+                            .expect("Stream must be the size of the rendered area")
+                            as usize)
+                            << *plane_index
+                })];
 
-            let color = match (pixel0_on, pixel1_on) {
-                (false, false) => BACKGROUND_COLOR,
-                (true, false) => FIRST_PLANE_COLOR,
-                (false, true) => SECOND_PLANE_COLOR,
-                (true, true) => PLANE_INTERSECTION_COLOR,
-            };
+            let x = i % rendered_display_width;
+            let y = i / rendered_display_width;
 
             let cell = buf.get_mut(area.left() + x as u16, area.top() + y as u16 / 2);
 

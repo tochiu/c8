@@ -5,6 +5,7 @@ mod cli;
 mod dbg;
 mod render;
 mod run;
+mod set;
 
 use {
     asm::Disassembler,

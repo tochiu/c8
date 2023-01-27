@@ -1,6 +1,6 @@
 use super::{
     audio::{Audio, AUDIO_BUFFER_SIZE_BYTES},
-    disp::{Display, DisplayMode, DisplayPlaneSelection},
+    disp::{Display, DisplayMode, DisplayBuffer},
     input::Key,
     mem::*,
     rom::{Rom, RomKind}, instruct::{Instruction, InstructionParameters},
@@ -40,13 +40,13 @@ pub enum InterpreterHistoryFragmentExtra {
         prior_rng: Box<StdRng>,
     },
     WillSetPlane {
-        prior_selected_plane: DisplayPlaneSelection,
+        prior_selected_plane_bitflags: u8,
     },
     WillDrawEntireDisplay {
-        prior_display: Box<Display>,
+        prior_display_buffers: [Option<Box<DisplayBuffer>>; 4]
     },
     WillLoadFromMemory {
-        prior_index_access_flag_slice: [u8; 32],
+        prior_index_access_flags: Vec<u8>,
     },
     WillStoreInMemory {
         prior_index_memory: [u8; 16],
@@ -127,7 +127,7 @@ pub struct Interpreter {
     pub audio: Audio,
     pub input: InterpreterInput,
     pub output: Option<InterpreterOutput>,
-    pub workspace: [u8; 64],
+    pub workspace: [u8; 128],
 }
 
 impl From<Rom> for Interpreter {
@@ -151,7 +151,7 @@ impl From<Rom> for Interpreter {
             audio: Audio::from(rom.config.kind),
             input: Default::default(),
             output: None,
-            workspace: [0; 64],
+            workspace: [0; 128],
             rom,
         }
     }
@@ -205,15 +205,21 @@ impl Interpreter {
                 self.rng = prior_rng.as_ref().clone();
             }
 
-            InterpreterHistoryFragmentExtra::WillDrawEntireDisplay { prior_display } => {
-                self.display = prior_display.as_ref().clone();
+            InterpreterHistoryFragmentExtra::WillDrawEntireDisplay { prior_display_buffers } => {
+                for (plane, maybe_prior_plane) in self.display.planes.iter_mut().zip(prior_display_buffers.into_iter()) {
+                    let Some(prior_plane) = maybe_prior_plane.as_deref() else {
+                        continue
+                    };
+
+                    *plane = *prior_plane;
+                }
             }
 
             InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                prior_index_access_flag_slice,
+                prior_index_access_flags,
             } => {
                 self.memory_access_flags
-                    .import(prior_index_access_flag_slice, self.index);
+                    .import(&prior_index_access_flags, self.index);
             }
 
             InterpreterHistoryFragmentExtra::WillStoreInMemory {
@@ -248,8 +254,8 @@ impl Interpreter {
                 self.audio.pitch = *prior_pitch;
             }
 
-            InterpreterHistoryFragmentExtra::WillSetPlane { prior_selected_plane } => {
-                self.display.set_plane(*prior_selected_plane);
+            InterpreterHistoryFragmentExtra::WillSetPlane { prior_selected_plane_bitflags } => {
+                self.display.selected_plane_bitflags = *prior_selected_plane_bitflags;
             }
         }
     }
@@ -265,7 +271,7 @@ impl Interpreter {
 
             Instruction::SetPlane(_) => Some(Box::new(
                 InterpreterHistoryFragmentExtra::WillSetPlane {
-                    prior_selected_plane: self.display.selected_plane,
+                    prior_selected_plane_bitflags: self.display.selected_plane_bitflags,
                 },
             )),
 
@@ -277,18 +283,34 @@ impl Interpreter {
             | Instruction::LowResolution
             | Instruction::HighResolution => Some(Box::new(
                 InterpreterHistoryFragmentExtra::WillDrawEntireDisplay {
-                    prior_display: Box::new(self.display.clone()),
+                    prior_display_buffers: [0, 1, 2, 3].map(|i| if self.display.selected_plane_bitflags >> i == 1 { Some(Box::new(self.display.planes[i])) } else { None } )
                 },
             )),
 
-            Instruction::Load(_) 
-            | Instruction::LoadRange(_, _) 
-            | Instruction::Draw(_, _, _) => Some(Box::new({
-                let mut index_access_flag_slice = [0; 32];
+            Instruction::Load(vx) => Some(Box::new({
+                let mut prior_index_access_flags = vec![0; vx as usize + 1];
                 self.memory_access_flags
-                    .export(self.index, &mut index_access_flag_slice);
+                    .export(self.index, &mut prior_index_access_flags);
                 InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                    prior_index_access_flag_slice: index_access_flag_slice,
+                    prior_index_access_flags
+                }
+            })),
+
+            Instruction::LoadRange(vstart, vend) => Some(Box::new({
+                let mut prior_index_access_flags = vec![0; vstart.abs_diff(vend) as usize + 1];
+                self.memory_access_flags
+                    .export(self.index, &mut prior_index_access_flags);
+                InterpreterHistoryFragmentExtra::WillLoadFromMemory {
+                    prior_index_access_flags
+                }
+            })),
+            
+            Instruction::Draw(_, _, n) => Some(Box::new({
+                let mut prior_index_access_flags = vec![0; self.get_sprite_draw_info(n).2];
+                self.memory_access_flags
+                    .export(self.index, &mut prior_index_access_flags);
+                InterpreterHistoryFragmentExtra::WillLoadFromMemory {
+                    prior_index_access_flags
                 }
             })),
 
@@ -378,14 +400,9 @@ impl Interpreter {
                     .import(buf, executed_fragment.index);
             }
 
-            Instruction::Draw(_, _, height) => {
-                let sprite_bytes = if self.rom.config.kind == RomKind::SCHIP && height == 0 {
-                    32
-                } else {
-                    height as usize
-                };
-
-                let buf = &mut self.workspace[0..sprite_bytes];
+            Instruction::Draw(_, _, n) => {
+                let total_bytes = self.get_sprite_draw_info(n).2;
+                let buf = &mut self.workspace[..total_bytes];
                 self.memory_access_flags
                     .export(executed_fragment.index, buf);
                 buf.iter_mut()
@@ -418,22 +435,22 @@ impl Interpreter {
                     .import(buf, executed_fragment.index);
             }
 
-            Instruction::LoadAudio => {
-                let buf = &mut self.workspace[..16];
-                self.memory_access_flags
-                    .export(executed_fragment.index, buf);
-                buf.iter_mut()
-                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
-                self.memory_access_flags
-                    .import(&buf, executed_fragment.index);
-            }
-
             Instruction::StoreBinaryCodedDecimal(_) => {
                 let buf = &mut self.workspace[..3];
                 self.memory_access_flags
                     .export(executed_fragment.index, buf);
                 buf.iter_mut()
                     .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
+                self.memory_access_flags
+                    .import(&buf, executed_fragment.index);
+            }
+
+            Instruction::LoadAudio => {
+                let buf = &mut self.workspace[..16];
+                self.memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
                 self.memory_access_flags
                     .import(&buf, executed_fragment.index);
             }
@@ -736,14 +753,8 @@ impl Interpreter {
                 self.registers[vx as usize] = (self.rng.next_u32() & bound as u32) as u8;
             }
 
-            Instruction::SetPlane(n) => {
-                self.display.set_plane(match n {
-                    0b00 => DisplayPlaneSelection::NoPlane,
-                    0b01 => DisplayPlaneSelection::FirstPlane,
-                    0b10 => DisplayPlaneSelection::SecondPlane,
-                    0b11 => DisplayPlaneSelection::BothPlanes,
-                    _ => unreachable!("Plane selection must be 0b00, 0b01, 0b10, or 0b11"),
-                });
+            Instruction::SetPlane(flags) => {
+                self.display.selected_plane_bitflags = flags;
             }
 
             Instruction::Draw(vx, vy, height) => {
@@ -811,15 +822,11 @@ impl Interpreter {
         Ok(true)
     }
 
-    fn exec_display_instruction(&mut self, vx: u8, vy: u8, height: u8) {
-        let (bytes_per_row, height) = if self.rom.config.kind >= RomKind::SCHIP && height == 0 {
-            (2, 16)
-        } else {
-            (1, height as usize)
-        };
+    fn exec_display_instruction(&mut self, vx: u8, vy: u8, n: u8) {
+        let (bytes_per_row, height, total_bytes) = self.get_sprite_draw_info(n);
 
         self.memory
-            .export(self.index, &mut self.workspace[..(height * bytes_per_row * self.display.selected_planes().len())]);
+            .export(self.index, &mut self.workspace[..total_bytes]);
 
         self.registers[VFLAG] = self.display.draw(
             &self.workspace,
@@ -829,5 +836,14 @@ impl Interpreter {
             bytes_per_row,
             self.rom.config.kind == RomKind::XOCHIP
         ) as u8;
+    }
+
+    // (bytes per row, rows per plane, total bytes to read)
+    fn get_sprite_draw_info(&self, n: u8) -> (usize, usize, usize) {
+        if self.rom.config.kind >= RomKind::SCHIP && n == 0 {
+            (2, 16, 32 * self.display.selected_plane_bitflags.count_ones() as usize)
+        } else {
+            (1, n as usize, n as usize * self.display.selected_plane_bitflags.count_ones() as usize)
+        }
     }
 }
