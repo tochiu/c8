@@ -35,28 +35,28 @@ C8 is a terminal user interface tooklit for **CHIP-8**, **S-CHIP**, and **XO-CHI
 |----------------------------------------------------|-
 | Full Chip-8 + VIP, SuperChip, and XO-Chip Support  | ✔
 | Full Sound Support                                 | ✔
-| Full 4-bit Color Support                           |
+| Full 4-bit Color Support                           | ✔
 | `debug` Undo, Redo, and Step through Execution     | ✔
 | `debug` Virtual Machine State Introspection        | ✔*
 | `debug` Register and Address Watchpoints           | ✔
 | `debug` Instruction Breakpoints                    | ✔
 | `debug` Program Execution History                  | ✔
 | `debug` Keyboard State Modification                | ✔
-| `debug` Dump Executing Program Memory              | ✔
+| `debug` Dump Current Program Memory State          | ✔
 | Static Tracing Disassembler                        | ✔
-| Configurable Cycles per Frame                      | ✔
+| Configurable Execution Speed                       | ✔
 | Compatibility Profiles                             | ✔
-| Pre-defined and Custom Color Palettes              |
-| Individual Configurable Quirks                     |
-| Multiple Font choices                              | 
+| Pre-defined and Custom Color Palettes              | 🚧
+| Individual Configurable Quirks                     | 🚧
 ###### Features labeled `debug` are only available in debug mode
 
 
 
 ### Todo (Virtual Machine State Introspection)
 
-- [ ] Show Audio Buffer
+- [ ] Show Pitch and Audio Buffer
 - [ ] Show RPL User Flags
+- [ ] Show Planes Selected
 
 ### Todo (Other)
 
@@ -76,7 +76,7 @@ git clone https://github.com/tochiu/c8.git
 cd c8
 cargo install --path ./
 ```
-To be sure C8 is installed correctly, run the classic IBM Logo ROM from the repository directory
+To be sure C8 is installed, run the classic IBM Logo ROM from the repository directory
 ```
 c8 run roms/c8/ibm_logo.ch8
 ```
