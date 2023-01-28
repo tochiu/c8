@@ -1,6 +1,6 @@
 use crate::{
     asm::{write_inst_dasm, ADDRESS_COMMENT_TOKEN, INSTRUCTION_MAX_LENGTH},
-    run::{
+    ch8::{
         rom::RomKind,
         vm::{VMHistoryFragment, VM},
     },

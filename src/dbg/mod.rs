@@ -12,13 +12,13 @@ use {
 
 use crate::{
     asm::Disassembler,
-    run::{
+    ch8::{
         disp::{DisplayMode, DisplayWidget},
         input::KEY_ORDERING,
         instruct::Instruction,
         interp::Interpreter,
+        run::Runner,
         vm::VM,
-        Runner,
     },
 };
 

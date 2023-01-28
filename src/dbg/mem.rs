@@ -4,7 +4,7 @@ use crate::{
     asm::{
         Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS,
     },
-    run::{interp::Interpreter, mem::extract_access_flags},
+    ch8::{interp::Interpreter, mem::extract_access_flags},
 };
 
 use crossterm::event::{KeyCode, KeyEvent};

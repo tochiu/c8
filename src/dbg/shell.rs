@@ -1,4 +1,4 @@
-use crate::{asm::write_inst_dasm, run::interp::Interpreter};
+use crate::{asm::write_inst_dasm, ch8::interp::Interpreter};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use tui::{

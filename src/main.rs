@@ -4,14 +4,15 @@ mod asm;
 mod cli;
 mod dbg;
 mod render;
+mod ch8;
 mod run;
-mod set;
 
 use {
     asm::Disassembler,
     cli::{Cli, CliCommand},
     render::panic_cleanup_terminal,
-    run::{rom::Rom, spawn_run_threads},
+    ch8::rom::Rom,
+    run::spawn_run_threads
 };
 
 use anyhow::Result;
@@ -20,7 +21,7 @@ use crossterm::style::Stylize;
 
 use std::io::stdout;
 
-use crate::run::audio::spawn_audio_stream;
+use crate::ch8::audio::spawn_audio_stream;
 
 fn main() -> Result<()> {
     match Cli::parse().command {

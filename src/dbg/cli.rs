@@ -1,4 +1,4 @@
-use crate::run::input::Key;
+use crate::ch8::input::Key;
 
 use clap::{Parser, Subcommand, ValueEnum};
 

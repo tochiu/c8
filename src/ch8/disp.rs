@@ -1,6 +1,6 @@
 use super::rom::RomKind;
 
-use crate::set::preset::COLOR_PRESETS;
+use crate::run::preset::COLOR_PRESETS;
 
 use tui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
 

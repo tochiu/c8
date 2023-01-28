@@ -1,4 +1,4 @@
-use crate::run::rom::RomKind;
+use crate::ch8::rom::RomKind;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use log::{Level, LevelFilter};

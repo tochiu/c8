@@ -1,10 +1,10 @@
 use crate::{
     dbg::{Debugger, DebuggerWidget, DebuggerWidgetState},
-    run::{
+    ch8::{
         disp::{Display, DisplayWidget},
         rom::RomConfig,
         vm::VM,
-        C8Lock
+        run::C8Lock
     },
 };
 

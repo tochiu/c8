@@ -1,4 +1,4 @@
-use crate::run::{
+use crate::ch8::{
     instruct::{Instruction, InstructionParameters},
     interp::{Interpreter, PROGRAM_STARTING_ADDRESS},
     mem::{allocate_memory, MemoryRef},
