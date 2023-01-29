@@ -851,7 +851,7 @@ impl Interpreter {
                 self.pc,
                 if self.rom.config.kind == RomKind::XOCHIP
                     && self.memory[self.pc as usize] == 0xF0
-                    && self.memory[(self.pc + 2) as usize] == 0x00
+                    && self.memory[(self.pc + 1) as usize] == 0x00
                 {
                     4
                 } else {
