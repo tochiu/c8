@@ -1,4 +1,10 @@
-use super::{rom::{RomKind, Rom}, interp::PROGRAM_STARTING_ADDRESS, instruct::InstructionParameters};
+use super::{
+    instruct::InstructionParameters,
+    interp::PROGRAM_STARTING_ADDRESS,
+    rom::{Rom, RomKind},
+};
+
+use std::slice::Windows;
 
 pub const MEM_ACCESS_DRAW_FLAG: u8 = 0b1;
 pub const MEM_ACCESS_READ_FLAG: u8 = 0b10;
@@ -10,7 +16,7 @@ pub fn extract_access_flags(flag: u8) -> (bool, bool, bool, bool) {
         flag & MEM_ACCESS_DRAW_FLAG == MEM_ACCESS_DRAW_FLAG,
         flag & MEM_ACCESS_READ_FLAG == MEM_ACCESS_READ_FLAG,
         flag & MEM_ACCESS_WRITE_FLAG == MEM_ACCESS_WRITE_FLAG,
-        flag & MEM_ACCESS_EXEC_FLAG == MEM_ACCESS_EXEC_FLAG
+        flag & MEM_ACCESS_EXEC_FLAG == MEM_ACCESS_EXEC_FLAG,
     )
 }
 
@@ -55,35 +61,40 @@ pub const XOCHIP_PROGRAM_MEMORY_SIZE: usize = 65536;
 
 pub trait MemoryRef {
     fn address_add(&self, lhs: u16, rhs: u16) -> u16
-        where Self: AsRef<[u8]>
+    where
+        Self: AsRef<[u8]>,
     {
         lhs.overflowing_add(rhs).0 & (self.as_ref().len() - 1) as u16
     }
 
     fn address_sub(&self, lhs: u16, rhs: u16) -> u16
-        where Self: AsRef<[u8]>
+    where
+        Self: AsRef<[u8]>,
     {
         lhs.overflowing_sub(rhs).0 & (self.as_ref().len() - 1) as u16
     }
 
     fn export(&self, address: u16, dst: &mut [u8])
-        where Self: AsRef<[u8]>
+    where
+        Self: AsRef<[u8]>,
     {
         let memory = self.as_ref();
-        let address = address as usize % memory.len();
+        let export_start = address as usize % memory.len();
+        let export_end = export_start + dst.len();
 
-        let pivot = dst.len().min(address.abs_diff(memory.len()));
-        let (dst0, dst1) = dst.split_at_mut(pivot);
-
-        let src0 = &memory[address..address + dst0.len()];
-        let src1 = &memory[..dst1.len()];
-
-        dst0.copy_from_slice(src0);
-        dst1.copy_from_slice(src1);
+        if export_end > memory.len() {
+            let export_overflow = export_end - memory.len();
+            let (left_dst, right_dst) = dst.split_at_mut(memory.len() - export_start);
+            left_dst.copy_from_slice(&memory[export_start..]);
+            right_dst.copy_from_slice(&memory[..export_overflow]);
+        } else {
+            dst.copy_from_slice(&memory[export_start..export_end]);
+        }
     }
 
     fn instruction_parameters(&self) -> MemoryInstructionParametersIterator
-        where Self: AsRef<[u8]>
+    where
+        Self: AsRef<[u8]>,
     {
         MemoryInstructionParametersIterator::new(self.as_ref())
     }
@@ -91,16 +102,21 @@ pub trait MemoryRef {
 
 pub trait MemoryMut {
     fn import(&mut self, src: &[u8], address: u16)
-        where Self: AsMut<[u8]>
+    where
+        Self: AsMut<[u8]>,
     {
         let memory = self.as_mut();
-        let address = address as usize % memory.len();
+        let import_start = address as usize % memory.len();
+        let import_end = import_start + src.len();
 
-        let pivot = src.len().min(address.abs_diff(memory.len()));
-        let (src0, src1) = src.split_at(pivot);
-
-        memory[address..address + src0.len()].copy_from_slice(src0);
-        memory[..src1.len()].copy_from_slice(src1);
+        if import_end > memory.len() {
+            let import_overflow = import_end - memory.len();
+            let (left_src, right_src) = src.split_at(memory.len() - import_start);
+            memory[import_start..].copy_from_slice(left_src);
+            memory[..import_overflow].copy_from_slice(right_src);
+        } else {
+            memory[import_start..import_end].copy_from_slice(src);
+        }
     }
 }
 
@@ -108,7 +124,7 @@ impl<T> MemoryRef for T where T: AsRef<[u8]> + ?Sized {}
 impl<T> MemoryMut for T where T: AsMut<[u8]> + ?Sized {}
 
 pub struct MemoryInstructionParametersIterator<'a> {
-    window: std::slice::Windows<'a, u8>,
+    window: Windows<'a, u8>,
     edge: MemoryInstructionBytesIterator<'a>,
 }
 
@@ -146,10 +162,10 @@ impl<'a> MemoryInstructionBytesIterator<'a> {
             index,
             buffer: [
                 0,
-                memory[(index + 0) % memory.len()], 
-                memory[(index + 1) % memory.len()], 
+                memory[(index + 0) % memory.len()],
+                memory[(index + 1) % memory.len()],
                 memory[(index + 2) % memory.len()],
-            ]
+            ],
         }
     }
 }
@@ -172,17 +188,20 @@ impl<'a> Iterator for MemoryInstructionBytesIterator<'a> {
 }
 
 pub fn allocate_memory(rom: &Rom) -> Vec<u8> {
-    let mut memory = vec![0; if rom.config.kind == RomKind::XOCHIP {
-        XOCHIP_PROGRAM_MEMORY_SIZE
-    } else {
-        DEFAULT_PROGRAM_MEMORY_SIZE
-    }];
-    
+    let mut memory = vec![
+        0;
+        if rom.config.kind == RomKind::XOCHIP {
+            XOCHIP_PROGRAM_MEMORY_SIZE
+        } else {
+            DEFAULT_PROGRAM_MEMORY_SIZE
+        }
+    ];
+
     memory.import(&rom.data, PROGRAM_STARTING_ADDRESS);
     memory.import(&FONT, FONT_STARTING_ADDRESS);
     if rom.config.kind >= RomKind::SCHIP {
         memory.import(&BIG_FONT, BIG_FONT_STARTING_ADDRESS);
     }
-    
+
     memory
 }

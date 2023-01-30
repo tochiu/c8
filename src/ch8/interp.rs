@@ -192,8 +192,6 @@ impl Interpreter {
         );
         self.memory_access_flags[self.pc as usize] = prior_state.pc_access_flags;
 
-        log::trace!("Undoing instruction: {:?}", instruction);
-
         match instruction {
             Instruction::CallSubroutine(_) => {
                 self.stack.pop();
@@ -493,7 +491,6 @@ impl Interpreter {
             return Err(format!("Decode at {:#05X?} failed: {}", self.pc, self.error))
         };
 
-        log::trace!("Instruction {:#05X?} {:?} ", self.pc, instruction);
         let prior_pc = self.pc;
 
         // advance pc
@@ -514,10 +511,13 @@ impl Interpreter {
     }
 
     fn fetch_decode(&mut self) {
-        let mut bytes = [0; 4];
-        self.memory.export(self.pc, &mut bytes);
         match InstructionParameters::try_decode_from_u32(
-            u32::from_be_bytes(bytes),
+            u32::from_be_bytes([
+                self.memory[(self.pc as usize + 0) % self.memory.len()],
+                self.memory[(self.pc as usize + 1) % self.memory.len()],
+                self.memory[(self.pc as usize + 2) % self.memory.len()],
+                self.memory[(self.pc as usize + 3) % self.memory.len()]
+            ]),
             self.rom.config.kind,
         ) {
             Ok(instruction) => self.instruction = Some(instruction),
@@ -851,7 +851,7 @@ impl Interpreter {
                 self.pc,
                 if self.rom.config.kind == RomKind::XOCHIP
                     && self.memory[self.pc as usize] == 0xF0
-                    && self.memory[(self.pc + 1) as usize] == 0x00
+                    && self.memory[(self.pc as usize + 1) % self.memory.len()] == 0x00
                 {
                     4
                 } else {
