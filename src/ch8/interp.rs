@@ -129,13 +129,15 @@ pub struct Interpreter {
     pub input: InterpreterInput,
     pub output: Option<InterpreterOutput>,
     pub instruction: Option<Instruction>,
-    pub workspace: [u8; 128],
+    workspace: [u8; 128],
+    prefetch: Vec<Option<Instruction>>,
     error: String,
 }
 
 impl From<Rom> for Interpreter {
     fn from(rom: Rom) -> Self {
         let memory = allocate_memory(&rom);
+        let prefetch = memory.instruction_parameters().map(|params| params.try_decode(rom.config.kind).ok()).collect();
         let mut interp = Interpreter {
             memory_access_flags: if rom.config.debugging {
                 vec![0; memory.len()]
@@ -157,6 +159,7 @@ impl From<Rom> for Interpreter {
             instruction: None,
             workspace: [0; 128],
             error: String::new(),
+            prefetch,
             rom,
         };
 
@@ -511,6 +514,11 @@ impl Interpreter {
     }
 
     fn fetch_decode(&mut self) {
+        self.instruction = self.prefetch[self.pc as usize];
+        if self.instruction.is_some() {
+            return;
+        }
+
         match InstructionParameters::try_decode_from_u32(
             u32::from_be_bytes([
                 self.memory[(self.pc as usize + 0) % self.memory.len()],
@@ -520,7 +528,10 @@ impl Interpreter {
             ]),
             self.rom.config.kind,
         ) {
-            Ok(instruction) => self.instruction = Some(instruction),
+            Ok(instruction) => {
+                self.prefetch[self.pc as usize] = Some(instruction);
+                self.instruction = Some(instruction);
+            },
             Err(e) => {
                 self.instruction = None;
                 self.error = e;
@@ -729,14 +740,6 @@ impl Interpreter {
                 }
             }
 
-            Instruction::Store(vx) => {
-                self.memory
-                    .import(&self.registers[..=vx as usize], self.index);
-                if let RomKind::COSMACVIP | RomKind::XOCHIP = self.rom.config.kind {
-                    self.index = self.memory.address_add(self.index, vx as u16 + 1);
-                }
-            }
-
             Instruction::LoadRange(mut vstart, mut vend) => {
                 let reverse = vstart > vend;
                 if reverse {
@@ -746,6 +749,19 @@ impl Interpreter {
                 self.memory.export(self.index, buf);
                 if reverse {
                     buf.reverse();
+                }
+            }
+
+            Instruction::Store(vx) => {
+                self.memory
+                    .import(&self.registers[..=vx as usize], self.index);
+                
+                let (prefetch_range0, prefetch_range1) = self.memory.affected_instruction_range(self.index, vx as u16 + 1);
+                self.prefetch[prefetch_range0].fill(None);
+                self.prefetch[prefetch_range1].fill(None);
+
+                if let RomKind::COSMACVIP | RomKind::XOCHIP = self.rom.config.kind {
+                    self.index = self.memory.address_add(self.index, vx as u16 + 1);
                 }
             }
 
@@ -762,6 +778,10 @@ impl Interpreter {
                 if reverse {
                     buf.reverse();
                 }
+
+                let (prefetch_range0, prefetch_range1) = self.memory.affected_instruction_range(self.index, buf.len() as u16);
+                self.prefetch[prefetch_range0].fill(None);
+                self.prefetch[prefetch_range1].fill(None);
             }
 
             Instruction::LoadFlags(vx) => {
@@ -780,6 +800,10 @@ impl Interpreter {
                     .enumerate()
                     .for_each(|(i, val)| *val = decimal / 10u8.pow(i as u32) % 10);
                 self.memory.import(&self.workspace[..3], self.index);
+
+                let (prefetch_range0, prefetch_range1) = self.memory.affected_instruction_range(self.index, 3);
+                self.prefetch[prefetch_range0].fill(None);
+                self.prefetch[prefetch_range1].fill(None);
             }
 
             Instruction::GenerateRandom(vx, bound) => {

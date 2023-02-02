@@ -1,10 +1,10 @@
 use super::{
-    instruct::InstructionParameters,
+    instruct::{InstructionParameters, Instruction},
     interp::PROGRAM_STARTING_ADDRESS,
     rom::{Rom, RomKind},
 };
 
-use std::slice::Windows;
+use std::{slice::Windows, ops::Range};
 
 pub const MEM_ACCESS_DRAW_FLAG: u8 = 0b1;
 pub const MEM_ACCESS_READ_FLAG: u8 = 0b10;
@@ -72,6 +72,24 @@ pub trait MemoryRef {
         Self: AsRef<[u8]>,
     {
         lhs.overflowing_sub(rhs).0 & (self.as_ref().len() - 1) as u16
+    }
+
+    fn affected_instruction_range(&self, address: u16, size: u16) -> (Range<usize>, Range<usize>)
+    where
+        Self: AsRef<[u8]>,
+    {
+        let memory = self.as_ref();
+        let range_start = self.address_sub(address as u16, Instruction::MAX_INSTRUCTION_SIZE - 1) as usize;
+        let range_end = range_start + size as usize + Instruction::MAX_INSTRUCTION_SIZE as usize - 1;
+
+        if range_end > memory.len() {
+            let range_overflow = range_end - memory.len();
+            let left_range = range_start..memory.len();
+            let right_range = 0..range_overflow;
+            (left_range, right_range)
+        } else {
+            (range_start..range_end, 0..0)
+        }
     }
 
     fn export(&self, address: u16, dst: &mut [u8])
