@@ -238,9 +238,14 @@ impl VM {
 
     fn step_interpreter(&mut self) -> Result<bool, String> {
         // update timers and clamp between the bounds of a byte because that is the data type
-        self.sound_timer = (self.sound_timer - self.time_step * SOUND_TIMER_TICKS_PER_SECOND).max(0.0);
-        self.delay_timer = (self.delay_timer - self.time_step * DELAY_TIMER_TICKS_PER_SECOND).max(0.0);
-
+        if self.sound_timer > 0.0 {
+            self.sound_timer = (self.sound_timer - self.time_step * SOUND_TIMER_TICKS_PER_SECOND).max(0.0);
+        }
+        
+        if self.delay_timer > 0.0 {
+            self.delay_timer = (self.delay_timer - self.time_step * DELAY_TIMER_TICKS_PER_SECOND).max(0.0);
+        }
+        
         if self.vertical_sync_enabled {
             self.vertical_blank_time += self.time_step;
             self.interpreter.input.vertical_blank = if self.vertical_blank_time >= (1.0 / VERTICAL_BLANKS_PER_SECOND) {
