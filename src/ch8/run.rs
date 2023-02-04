@@ -2,10 +2,10 @@ use super::{
     audio::AudioController,
     rom::Rom,
     stats::C8Stats,
-    vm::{VMEvent, VM, VM_FRAME_RATE},
+    vm::{VMEvent, VM, VM_FRAME_RATE, VM_FRAME_DURATION},
 };
 
-use crate::{dbg::Debugger, render::TARGET_FRAME_DURATION};
+use crate::dbg::Debugger;
 
 use anyhow::Result;
 
@@ -67,7 +67,7 @@ impl Runner {
         mut initial_target_execution_frequency: u32,
         audio_controller: AudioController,
     ) -> Self {
-        let target_frame_duration_seconds: f64 = TARGET_FRAME_DURATION.as_secs_f64();
+        let target_frame_duration_seconds: f64 = VM_FRAME_DURATION.as_secs_f64();
 
         // TODO: change from execution frequency to cycles per second
         initial_target_execution_frequency -= initial_target_execution_frequency % VM_FRAME_RATE;
@@ -165,7 +165,7 @@ impl Runner {
                             drop(_guard);
 
                             frame_start = frame_start
-                                .checked_add(TARGET_FRAME_DURATION)
+                                .checked_add(VM_FRAME_DURATION)
                                 .expect("Could not calculate next frame start");
                             let sleep_start = Instant::now();
                             let sleep_duration = frame_start.saturating_duration_since(sleep_start);

@@ -10,6 +10,7 @@ use super::{
 use std::{sync::mpsc::Receiver, time::Duration};
 
 pub const VM_FRAME_RATE: u32 = 60;
+pub const VM_FRAME_DURATION: Duration = Duration::from_nanos(1_000_000_000 / VM_FRAME_RATE as u64); // 60 FPS
 
 #[derive(Debug)]
 pub enum VMEvent {

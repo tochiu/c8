@@ -3,7 +3,7 @@ use crate::{
     ch8::{
         disp::{Display, DisplayWidget},
         rom::RomConfig,
-        vm::{VM, VM_FRAME_RATE},
+        vm::{VM, VM_FRAME_RATE, VM_FRAME_DURATION},
         run::C8Lock
     },
 };
@@ -27,12 +27,10 @@ use std::{
     ops::DerefMut,
     sync::mpsc::{channel, Sender, TryRecvError},
     thread::{self, JoinHandle},
-    time::{Duration, Instant}, cell::Cell,
+    time::Instant, cell::Cell,
 };
 
 type Terminal = tui::Terminal<CrosstermBackend<io::Stdout>>;
-
-pub const TARGET_FRAME_DURATION: Duration = Duration::from_nanos(1_000_000_000 / VM_FRAME_RATE as u64); // 60 FPS
 
 fn cleanup_terminal(terminal: &mut Terminal) -> Result<()> {
     // clean up the terminal so its usable after program exit
@@ -92,7 +90,7 @@ pub fn spawn_render_thread(c8: C8Lock, config: RomConfig) -> (Sender<()>, JoinHa
                 .expect("Failed render step");
             should_redraw = false;
 
-            frame_start = frame_start.checked_add(TARGET_FRAME_DURATION).expect("Could not calculate next frame start");
+            frame_start = frame_start.checked_add(VM_FRAME_DURATION).expect("Could not calculate next frame start");
             thread::sleep(frame_start.saturating_duration_since(Instant::now()));
         }
     });
