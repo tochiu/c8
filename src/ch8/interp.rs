@@ -140,7 +140,15 @@ impl From<Rom> for Interpreter {
     fn from(rom: Rom) -> Self {
         let memory = allocate_memory(&rom);
         let memory_last_address = (memory.len() - 1) as u16;
-        let prefetch = memory.instruction_parameters().map(|params| params.try_decode(rom.config.kind).ok().map(|inst| (inst, inst.size()))).collect();
+        let prefetch = memory
+            .instruction_parameters()
+            .map(|params| {
+                params
+                    .try_decode(rom.config.kind)
+                    .ok()
+                    .map(|inst| (inst, inst.size()))
+            })
+            .collect();
         let mut interp = Interpreter {
             memory_access_flags: if rom.config.debugging {
                 vec![0; memory.len()]
@@ -539,14 +547,14 @@ impl Interpreter {
                 self.memory[(self.pc as usize + 0) % self.memory.len()],
                 self.memory[(self.pc as usize + 1) % self.memory.len()],
                 self.memory[(self.pc as usize + 2) % self.memory.len()],
-                self.memory[(self.pc as usize + 3) % self.memory.len()]
+                self.memory[(self.pc as usize + 3) % self.memory.len()],
             ]),
             self.rom.config.kind,
         ) {
             Ok(instruction) => {
                 self.instruction = Some((instruction, instruction.size()));
                 self.prefetch[self.pc as usize] = self.instruction;
-            },
+            }
             Err(e) => {
                 self.instruction = None;
                 self.error = e;
@@ -561,8 +569,8 @@ impl Interpreter {
         match inst {
             Instruction::Exit => {
                 self.valid = true;
-                return false
-            },
+                return false;
+            }
 
             Instruction::Jump(address) => self.pc = address & self.memory_last_address,
 
@@ -573,7 +581,8 @@ impl Interpreter {
                     self.registers[0] as u16
                 };
 
-                self.pc = address.overflowing_add(offset).0 & self.memory_last_address; //self.memory.address_add(address, offset);
+                self.pc = address.overflowing_add(offset).0 & self.memory_last_address;
+                //self.memory.address_add(address, offset);
             }
 
             Instruction::CallSubroutine(address) => {
@@ -587,8 +596,8 @@ impl Interpreter {
                     self.error = "Could not return from subroutine because stack is empty".to_string();
                     return false
                 };
-                
-                self.pc = pc; 
+
+                self.pc = pc;
             }
 
             Instruction::SkipIfEqualsConstant(vx, value) => {
@@ -722,10 +731,8 @@ impl Interpreter {
                 let c = self.registers[vx as usize];
                 if c > 0xF {
                     self.valid = false;
-                    self.error = format!(
-                        "Failed to set index: hex char \"{:X}\" does not exist",
-                        c
-                    );
+                    self.error =
+                        format!("Failed to set index: hex char \"{:X}\" does not exist", c);
                     return false;
                 }
 
@@ -747,14 +754,19 @@ impl Interpreter {
             }
 
             Instruction::AddToIndex(vx) => {
-                self.index = self.index.overflowing_add(self.registers[vx as usize] as u16).0 & self.memory_last_address;
+                self.index = self
+                    .index
+                    .overflowing_add(self.registers[vx as usize] as u16)
+                    .0
+                    & self.memory_last_address;
             }
 
             Instruction::Load(vx) => {
                 self.memory
                     .export(self.index, &mut self.registers[..=vx as usize]);
                 if let RomKind::COSMACVIP | RomKind::XOCHIP = self.rom.config.kind {
-                    self.index = self.index.overflowing_add(vx as u16 + 1).0 & self.memory_last_address;
+                    self.index =
+                        self.index.overflowing_add(vx as u16 + 1).0 & self.memory_last_address;
                 }
             }
 
@@ -773,13 +785,16 @@ impl Interpreter {
             Instruction::Store(vx) => {
                 self.memory
                     .import(&self.registers[..=vx as usize], self.index);
-                
-                let (prefetch_range0, prefetch_range1) = self.memory.affected_instruction_range(self.index, vx as u16 + 1);
+
+                let (prefetch_range0, prefetch_range1) = self
+                    .memory
+                    .affected_instruction_range(self.index, vx as u16 + 1);
                 self.prefetch[prefetch_range0].fill(None);
                 self.prefetch[prefetch_range1].fill(None);
 
                 if let RomKind::COSMACVIP | RomKind::XOCHIP = self.rom.config.kind {
-                    self.index = self.index.overflowing_add(vx as u16 + 1).0 & self.memory_last_address;
+                    self.index =
+                        self.index.overflowing_add(vx as u16 + 1).0 & self.memory_last_address;
                 }
             }
 
@@ -797,7 +812,9 @@ impl Interpreter {
                     buf.reverse();
                 }
 
-                let (prefetch_range0, prefetch_range1) = self.memory.affected_instruction_range(self.index, buf.len() as u16);
+                let (prefetch_range0, prefetch_range1) = self
+                    .memory
+                    .affected_instruction_range(self.index, buf.len() as u16);
                 self.prefetch[prefetch_range0].fill(None);
                 self.prefetch[prefetch_range1].fill(None);
             }
@@ -819,7 +836,8 @@ impl Interpreter {
                     .for_each(|(i, val)| *val = decimal / 10u8.pow(i as u32) % 10);
                 self.memory.import(&self.workspace[..3], self.index);
 
-                let (prefetch_range0, prefetch_range1) = self.memory.affected_instruction_range(self.index, 3);
+                let (prefetch_range0, prefetch_range1) =
+                    self.memory.affected_instruction_range(self.index, 3);
                 self.prefetch[prefetch_range0].fill(None);
                 self.prefetch[prefetch_range1].fill(None);
             }
@@ -890,16 +908,20 @@ impl Interpreter {
 
         if skip_next_instruction {
             // NOTE: fetch decode is kinda expensive so check specifically for F000
-            self.pc = self.pc.overflowing_add(
-                if self.rom.config.kind == RomKind::XOCHIP
-                    && self.memory[self.pc as usize] == 0xF0
-                    && self.memory[(self.pc as usize + 1) % self.memory.len()] == 0x00
-                {
-                    4
-                } else {
-                    2
-                },
-            ).0 & self.memory_last_address;
+            self.pc = self
+                .pc
+                .overflowing_add(
+                    if self.rom.config.kind == RomKind::XOCHIP
+                        && self.memory[self.pc as usize] == 0xF0
+                        && self.memory[(self.pc as usize + 1) % self.memory.len()] == 0x00
+                    {
+                        4
+                    } else {
+                        2
+                    },
+                )
+                .0
+                & self.memory_last_address;
         }
 
         true
