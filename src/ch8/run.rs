@@ -2,7 +2,7 @@ use super::{
     audio::AudioController,
     rom::Rom,
     stats::C8Stats,
-    vm::{VMEvent, VM},
+    vm::{VMEvent, VM, VM_FRAME_RATE},
 };
 
 use crate::{dbg::Debugger, render::TARGET_FRAME_DURATION};
@@ -64,10 +64,14 @@ impl Runner {
 
     pub fn spawn(
         rom: Rom,
-        initial_target_execution_frequency: u32,
+        mut initial_target_execution_frequency: u32,
         audio_controller: AudioController,
     ) -> Self {
         let target_frame_duration_seconds: f64 = TARGET_FRAME_DURATION.as_secs_f64();
+
+        // TODO: change from execution frequency to cycles per second
+        initial_target_execution_frequency -= initial_target_execution_frequency % VM_FRAME_RATE;
+        initial_target_execution_frequency = initial_target_execution_frequency.max(VM_FRAME_RATE);
 
         let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
         let (thread_continue_sender, thread_continue_receiver) = channel::<bool>();
@@ -75,8 +79,11 @@ impl Runner {
 
         let rom_config = rom.config.clone();
 
+        let mut cycles_per_frame = initial_target_execution_frequency / VM_FRAME_RATE;
+        let mut stats = C8Stats::new(rom_config.name);
+
         let c8 = Arc::new(Mutex::new({
-            let vm = VM::new(rom, vm_event_receiver, audio_controller);
+            let vm = VM::new(rom, vm_event_receiver, audio_controller, cycles_per_frame);
             let dbg = if rom_config.debugging {
                 Some(Debugger::new(&vm, initial_target_execution_frequency))
             } else {
@@ -85,13 +92,6 @@ impl Runner {
 
             (vm, dbg)
         }));
-
-        let mut cycles_per_frame = (target_frame_duration_seconds
-            * initial_target_execution_frequency as f64)
-            .round()
-            .max(1.0) as u32;
-
-        let mut stats = C8Stats::new(rom_config.name);
 
         let thread_handle = {
             let c8 = Arc::clone(&c8);
@@ -137,17 +137,13 @@ impl Runner {
                         }
 
                         vm.update_audio();
-
-                        let time_per_cycle =
-                            target_frame_duration_seconds / cycles_per_frame as f64;
-
-                        vm.time_step = time_per_cycle;
+                        vm.set_cycles_per_frame(cycles_per_frame);
 
                         let now = Instant::now();
                         if let Some(dbg) = maybe_dbg {
                             step_can_continue = dbg.step(vm, cycles_per_frame as usize);
                         } else {
-                            step_can_continue = vm.flush_and_stepn(cycles_per_frame)?
+                            step_can_continue = vm.flush_external_input_and_stepn(cycles_per_frame)?
                         }
 
                         let elapsed = now.elapsed();
@@ -189,7 +185,7 @@ impl Runner {
                             }
 
                             freq_instructions_executed += cycles_per_frame as u64;
-                            total_simulated_time += time_per_cycle * cycles_per_frame as f64;
+                            total_simulated_time += 1.0 / VM_FRAME_RATE as f64;
                             burst_elapsed = burst_start.elapsed();
                             continue;
                         }

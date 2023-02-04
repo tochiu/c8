@@ -115,6 +115,7 @@ impl InterpreterHistoryFragment {
 
 pub struct Interpreter {
     pub memory: Vec<u8>,
+    pub memory_last_address: u16,
     pub memory_access_flags: Vec<u8>,
     pub pc: u16,
     pub index: u16,
@@ -128,22 +129,25 @@ pub struct Interpreter {
     pub audio: Audio,
     pub input: InterpreterInput,
     pub output: Option<InterpreterOutput>,
-    pub instruction: Option<Instruction>,
+    instruction: Option<(Instruction, u16)>,
     workspace: [u8; 128],
-    prefetch: Vec<Option<Instruction>>,
+    prefetch: Vec<Option<(Instruction, u16)>>,
     error: String,
+    valid: bool,
 }
 
 impl From<Rom> for Interpreter {
     fn from(rom: Rom) -> Self {
         let memory = allocate_memory(&rom);
-        let prefetch = memory.instruction_parameters().map(|params| params.try_decode(rom.config.kind).ok()).collect();
+        let memory_last_address = (memory.len() - 1) as u16;
+        let prefetch = memory.instruction_parameters().map(|params| params.try_decode(rom.config.kind).ok().map(|inst| (inst, inst.size()))).collect();
         let mut interp = Interpreter {
             memory_access_flags: if rom.config.debugging {
                 vec![0; memory.len()]
             } else {
                 vec![]
             },
+            memory_last_address,
             memory,
             pc: PROGRAM_STARTING_ADDRESS,
             index: 0,
@@ -159,6 +163,7 @@ impl From<Rom> for Interpreter {
             instruction: None,
             workspace: [0; 128],
             error: String::new(),
+            valid: true,
             prefetch,
             rom,
         };
@@ -169,6 +174,10 @@ impl From<Rom> for Interpreter {
 }
 
 impl Interpreter {
+    pub fn instruction(&self) -> Option<Instruction> {
+        self.instruction.map(|(inst, _)| inst)
+    }
+
     // TODO: this needs to be removed since all chip8 specifications wait for the key up in the Get Key (FX0A) instruction
     pub fn pick_key<'a, 'b, T: TryInto<Key>>(
         &'a self,
@@ -186,7 +195,7 @@ impl Interpreter {
         self.pc = prior_state.pc;
         self.index = prior_state.index;
         self.registers = prior_state.registers;
-        self.instruction = Some(*instruction);
+        self.instruction = Some((*instruction, instruction.size()));
 
         log::debug!(
             "Restoring memory access flags: {:?} -> {:?}",
@@ -280,7 +289,7 @@ impl Interpreter {
     }
 
     pub fn to_history_fragment(&self) -> InterpreterHistoryFragment {
-        let instruction = self.instruction;
+        let instruction = self.instruction();
         let extra = instruction.and_then(|instruction| match instruction {
             Instruction::GenerateRandom(_, _) => Some(Box::new(
                 InterpreterHistoryFragmentExtra::WillGenerateRandom {
@@ -485,32 +494,38 @@ impl Interpreter {
     }
 
     // interpret the current instruction
-    pub fn step(&mut self) -> Result<bool, String> {
-        // clear ephemeral output
-        self.output = None;
-        self.waiting = false;
-
-        let Some(instruction) = self.instruction else {
-            return Err(format!("Decode at {:#05X?} failed: {}", self.pc, self.error))
+    #[inline(always)]
+    pub fn step(&mut self) -> bool {
+        let Some((instruction, instruction_size)) = self.instruction else {
+            self.valid = false;
+            self.error = format!("Decode at {:#05X?} failed: {}", self.pc, self.error);
+            return false;
         };
 
         let prior_pc = self.pc;
 
         // advance pc
-        self.pc = self.memory.address_add(self.pc, instruction.size());
+        self.pc = self.pc.overflowing_add(instruction_size).0 & self.memory_last_address;
 
         // execute instruction
-        let result = self.exec(instruction);
 
         // revert if execution failed or if execution shouldnt continue or if the interpreter is waiting
-        if !result.as_ref().unwrap_or(&false) || self.waiting {
+        if !self.exec(instruction) || self.waiting {
             self.pc = prior_pc;
-            self.instruction = Some(instruction);
+            self.instruction = Some((instruction, instruction_size));
+            false
         } else {
             self.fetch_decode();
+            true
         }
+    }
 
-        result
+    pub fn stop_result(&self) -> Result<bool, String> {
+        if self.valid {
+            Ok(false)
+        } else {
+            Err(self.error.clone())
+        }
     }
 
     fn fetch_decode(&mut self) {
@@ -529,8 +544,8 @@ impl Interpreter {
             self.rom.config.kind,
         ) {
             Ok(instruction) => {
-                self.prefetch[self.pc as usize] = Some(instruction);
-                self.instruction = Some(instruction);
+                self.instruction = Some((instruction, instruction.size()));
+                self.prefetch[self.pc as usize] = self.instruction;
             },
             Err(e) => {
                 self.instruction = None;
@@ -539,13 +554,17 @@ impl Interpreter {
         }
     }
 
-    fn exec(&mut self, inst: Instruction) -> Result<bool, String> {
+    #[inline(always)]
+    fn exec(&mut self, inst: Instruction) -> bool {
         let mut skip_next_instruction = false;
 
         match inst {
-            Instruction::Exit => return Ok(false),
+            Instruction::Exit => {
+                self.valid = true;
+                return false
+            },
 
-            Instruction::Jump(address) => self.pc = self.memory.address_add(address, 0),
+            Instruction::Jump(address) => self.pc = address & self.memory_last_address,
 
             Instruction::JumpWithOffset(address, vx) => {
                 let offset = if self.rom.config.kind == RomKind::SCHIP {
@@ -554,19 +573,22 @@ impl Interpreter {
                     self.registers[0] as u16
                 };
 
-                self.pc = self.memory.address_add(address, offset);
+                self.pc = address.overflowing_add(offset).0 & self.memory_last_address; //self.memory.address_add(address, offset);
             }
 
             Instruction::CallSubroutine(address) => {
                 self.stack.push(self.pc);
-                self.pc = self.memory.address_add(address, 0);
+                self.pc = address & self.memory_last_address;
             }
 
             Instruction::SubroutineReturn => {
-                self.pc = self
-                    .stack
-                    .pop()
-                    .expect("Could not return from subroutine because stack is empty")
+                let Some(pc) = self.stack.pop() else {
+                    self.valid = false;
+                    self.error = "Could not return from subroutine because stack is empty".to_string();
+                    return false
+                };
+                
+                self.pc = pc; 
             }
 
             Instruction::SkipIfEqualsConstant(vx, value) => {
@@ -608,10 +630,9 @@ impl Interpreter {
             }
 
             Instruction::WaitForKey(vx) => {
-                if let Some(key_code) =
-                    self.pick_key(&self.input.just_pressed_key, &self.input.just_released_key)
-                {
-                    self.registers[vx as usize] = *key_code;
+                if let Some(key_code) = self.input.just_released_key {
+                    self.registers[vx as usize] = key_code;
+                    self.waiting = false;
                 } else {
                     self.waiting = true;
                 }
@@ -693,50 +714,47 @@ impl Interpreter {
                 ))
             }
 
-            Instruction::SetIndex(address) => self.index = address,
+            Instruction::SetIndex(address) => self.index = address & self.memory_last_address,
 
-            Instruction::SetIndexToLong(address) => self.index = address,
+            Instruction::SetIndexToLong(address) => self.index = address & self.memory_last_address,
 
             Instruction::SetIndexToHexChar(vx) => {
                 let c = self.registers[vx as usize];
                 if c > 0xF {
-                    return Err(format!(
+                    self.valid = false;
+                    self.error = format!(
                         "Failed to set index: hex char \"{:X}\" does not exist",
                         c
-                    ));
+                    );
+                    return false;
                 }
 
-                self.index = self
-                    .memory
-                    .address_add(FONT_STARTING_ADDRESS, FONT_CHAR_DATA_SIZE as u16 * c as u16);
+                self.index = FONT_STARTING_ADDRESS + FONT_CHAR_DATA_SIZE as u16 * c as u16;
             }
 
             Instruction::SetIndexToBigHexChar(vx) => {
                 let c = self.registers[vx as usize];
                 if c > 0x9 {
-                    return Err(format!(
+                    self.valid = false;
+                    self.error = format!(
                         "Failed to set index: big hex char \"{:X}\" does not exist",
                         c
-                    ));
+                    );
+                    return false;
                 }
 
-                self.index = self.memory.address_add(
-                    BIG_FONT_STARTING_ADDRESS,
-                    BIG_FONT_CHAR_DATA_SIZE as u16 * c as u16,
-                );
+                self.index = BIG_FONT_STARTING_ADDRESS + BIG_FONT_CHAR_DATA_SIZE as u16 * c as u16;
             }
 
             Instruction::AddToIndex(vx) => {
-                self.index = self
-                    .memory
-                    .address_add(self.index, self.registers[vx as usize] as u16);
+                self.index = self.index.overflowing_add(self.registers[vx as usize] as u16).0 & self.memory_last_address;
             }
 
             Instruction::Load(vx) => {
                 self.memory
                     .export(self.index, &mut self.registers[..=vx as usize]);
                 if let RomKind::COSMACVIP | RomKind::XOCHIP = self.rom.config.kind {
-                    self.index = self.memory.address_add(self.index, vx as u16 + 1);
+                    self.index = self.index.overflowing_add(vx as u16 + 1).0 & self.memory_last_address;
                 }
             }
 
@@ -761,7 +779,7 @@ impl Interpreter {
                 self.prefetch[prefetch_range1].fill(None);
 
                 if let RomKind::COSMACVIP | RomKind::XOCHIP = self.rom.config.kind {
-                    self.index = self.memory.address_add(self.index, vx as u16 + 1);
+                    self.index = self.index.overflowing_add(vx as u16 + 1).0 & self.memory_last_address;
                 }
             }
 
@@ -818,6 +836,7 @@ impl Interpreter {
                 if self.rom.config.kind == RomKind::COSMACVIP && !self.input.vertical_blank {
                     self.waiting = true;
                 } else {
+                    self.waiting = false;
                     self.exec_display_instruction(vx, vy, height);
                     self.output = Some(InterpreterOutput::Display);
                 }
@@ -871,8 +890,7 @@ impl Interpreter {
 
         if skip_next_instruction {
             // NOTE: fetch decode is kinda expensive so check specifically for F000
-            self.pc = self.memory.address_add(
-                self.pc,
+            self.pc = self.pc.overflowing_add(
                 if self.rom.config.kind == RomKind::XOCHIP
                     && self.memory[self.pc as usize] == 0xF0
                     && self.memory[(self.pc as usize + 1) % self.memory.len()] == 0x00
@@ -881,10 +899,10 @@ impl Interpreter {
                 } else {
                     2
                 },
-            );
+            ).0 & self.memory_last_address;
         }
 
-        Ok(true)
+        true
     }
 
     fn exec_display_instruction(&mut self, vx: u8, vy: u8, n: u8) {

@@ -18,7 +18,7 @@ use crate::{
         instruct::Instruction,
         interp::Interpreter,
         run::Runner,
-        vm::VM,
+        vm::{VM, VM_FRAME_RATE},
     },
 };
 
@@ -71,7 +71,7 @@ impl From<&Interpreter> for WatchState {
             index: interp.index,
             pc: interp.pc,
             addresses: Default::default(),
-            instruction: interp.instruction,
+            instruction: interp.instruction(),
         }
     }
 }
@@ -240,10 +240,10 @@ impl Debugger {
         self.active = false;
     }
 
-    fn stepn(&mut self, vm: &mut VM, amt: usize, time_step: f64) -> usize {
+    fn stepn(&mut self, vm: &mut VM, amt: usize, cycles_per_frame: u32) -> usize {
         let mut amt_stepped = 0;
 
-        vm.time_step = time_step;
+        vm.set_cycles_per_frame(cycles_per_frame);
         vm.clear_event_queue();
         self.history.clear_redo_history();
         for step in 0..amt {
@@ -348,12 +348,12 @@ impl Debugger {
             return false;
         }
 
-        vm.flush();
+        vm.flush_external_input();
 
         let mut should_continue = self.step_once(vm);
 
         vm.clear_ephemeral_state();
-        vm.flush();
+        vm.flush_external_input();
 
         if should_continue {
             for _ in 0..amt - 1 {
@@ -557,7 +557,7 @@ impl Debugger {
                 let amt_stepped = self.stepn(
                     vm,
                     amount,
-                    1.0 / self.runner_target_execution_frequency as f64,
+                    self.runner_target_execution_frequency / VM_FRAME_RATE,
                 );
 
                 if amt_stepped > 1 {
@@ -567,11 +567,14 @@ impl Debugger {
                 }
             }
 
-            DebugCliCommand::Hertz { hertz } => {
+            DebugCliCommand::Hertz { mut hertz } => {
                 if let Err(e) = runner.set_execution_frequency(hertz) {
                     self.shell.error(e);
                     return;
                 }
+
+                hertz -= hertz % VM_FRAME_RATE;
+                hertz = hertz.max(VM_FRAME_RATE);
 
                 self.runner_target_execution_frequency = hertz;
                 self.shell
@@ -1216,12 +1219,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         let execution_frequency = if self.dbg.history.redo_amount() == 0 {
             self.dbg.runner_target_execution_frequency
         } else {
-            let time_step = self.vm.time_step;
-            if time_step == 0.0 {
-                0
-            } else {
-                (1.0 / time_step).clamp(0.0, u32::MAX as f64).round() as u32
-            }
+            self.vm.cycles_per_frame() * VM_FRAME_RATE
         };
 
         let display_widget = DisplayWidget {
@@ -1399,20 +1397,20 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
                     ))
                 })
                 .collect::<Vec<_>>(),
-        )
-        .block(
-            Block::default()
-                .title(" Registers ")
-                .borders(layout_borders.registers),
-        )
-        .render(layout_areas.registers, buf);
+            )
+            .block(
+                Block::default()
+                    .title(" Registers ")
+                    .borders(layout_borders.registers),
+            )
+            .render(layout_areas.registers, buf);
 
         // Timers
         Paragraph::new(vec![
-            Spans::from(format!(" vsync {:0>3.0}%", self.vm.vsync() * 100.0)),
-            Spans::from(format!(" sound {:0>6.2}", self.vm.sound_timer())),
-            Spans::from(format!(" delay {:0>6.2}", self.vm.delay_timer())),
-            Spans::from(format!("   |-> {:0>3}", interp.input.delay_timer)),
+            Spans::from(format!(" vsync {:0>3.0}%", self.vm.precise_vsync_progress() * 100.0)),
+            Spans::from(format!(" sound {:0>6.2}", self.vm.precise_sound_timer())),
+            Spans::from(format!(" delay {:0>6.2}", self.vm.precise_delay_timer())),
+            Spans::from(format!("   |-> {:0>3}", self.vm.delay_timer())),
         ])
         .block(
             Block::default()

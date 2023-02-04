@@ -1,5 +1,5 @@
 use super::{
-    audio::{AudioEvent, AudioController},
+    audio::{AudioController, AudioEvent},
     disp::Display,
     input::{Key, Keyboard},
     instruct::Instruction,
@@ -7,15 +7,9 @@ use super::{
     rom::{Rom, RomKind},
 };
 
-use std::{
-    sync::mpsc::Receiver,
-    time::Duration,
-};
+use std::{sync::mpsc::Receiver, time::Duration};
 
-const DELAY_TIMER_TICKS_PER_SECOND: f64 = 60.0;
-const SOUND_TIMER_TICKS_PER_SECOND: f64 = 60.0;
-
-const VERTICAL_BLANKS_PER_SECOND: f64 = 60.0;
+pub const VM_FRAME_RATE: u32 = 60;
 
 #[derive(Debug)]
 pub enum VMEvent {
@@ -27,13 +21,16 @@ pub enum VMEvent {
     VolumeChange(bool),
 }
 
+#[derive(Default)]
+struct VMSprint {
+    cycles: u32,
+    set_sound_timer_cycle: u32,
+    set_delay_timer_cycle: u32,
+}
+
 pub struct VM {
     // Time elapsed since last time step was called
-    pub time_step: f64,
-
-    // Vertical blank is time elapsed since draw instruction was last allowed to execute (COSMAC VIP only)
-    vertical_blank_time: f64,
-    vertical_sync_enabled: bool,
+    cycles_per_frame: u32,
 
     interpreter: Interpreter,
 
@@ -46,24 +43,34 @@ pub struct VM {
     keyboard: Keyboard,
     audio: AudioController,
 
-    // these precise external timers will be mapped
-    // to a byte range when executing interpreter instructions
-    sound_timer: f64,
-    delay_timer: f64,
+    vsync_timer: u8,
+    vsync_timer_cycle_offset: u32,
+    vsync_enabled: bool,
+
+    sound_timer: u8,
+    sound_timer_cycle_offset: u32,
+
+    delay_timer: u8,
+    delay_timer_cycle_offset: u32,
 }
 
 impl VM {
-    pub fn new(rom: Rom, recv: Receiver<VMEvent>, mut audio: AudioController) -> Self {
+    pub fn new(
+        rom: Rom,
+        recv: Receiver<VMEvent>,
+        mut audio: AudioController,
+        cycles_per_frame: u32,
+    ) -> Self {
+        let vsync_enabled = rom.config.kind == RomKind::COSMACVIP;
         let interpreter = Interpreter::from(rom);
 
         audio.apply_event(AudioEvent::SetBuffer(interpreter.audio.buffer));
         audio.apply_event(AudioEvent::SetPitch(interpreter.audio.pitch));
 
         VM {
-            time_step: 0.0,
+            cycles_per_frame,
 
-            vertical_blank_time: 0.0,
-            vertical_sync_enabled: interpreter.rom.config.kind == RomKind::COSMACVIP,
+            interpreter,
 
             event: recv,
             event_queue: Vec::new(),
@@ -72,23 +79,52 @@ impl VM {
             keyboard: Keyboard::default(),
             audio,
 
-            interpreter,
+            vsync_timer: 0,
+            vsync_timer_cycle_offset: 0,
+            vsync_enabled,
 
-            // these precise external timers will be mapped
-            // to a byte range when executing interpreter instructions
-            sound_timer: 0.0,
-            delay_timer: 0.0,
+            sound_timer: 0,
+            sound_timer_cycle_offset: 0,
+
+            delay_timer: 0,
+            delay_timer_cycle_offset: 0,
         }
     }
 
-    pub fn undo(&mut self, state: &VMHistoryFragment) {
-        self.time_step = state.time_step;
-        self.vertical_blank_time = state.vertical_blank_time;
-        self.keyboard = state.keyboard;
-        self.delay_timer = state.delay_timer;
-        self.sound_timer = state.sound_timer;
+    pub fn set_cycles_per_frame(&mut self, cycles_per_frame: u32) {
+        self.sound_timer_cycle_offset = (self.sound_timer_cycle_offset as f64
+            / self.cycles_per_frame as f64
+            * cycles_per_frame as f64)
+            .round() as u32;
+        self.delay_timer_cycle_offset = (self.delay_timer_cycle_offset as f64
+            / self.cycles_per_frame as f64
+            * cycles_per_frame as f64)
+            .round() as u32;
+        self.vsync_timer_cycle_offset = (self.vsync_timer_cycle_offset as f64
+            / self.cycles_per_frame as f64
+            * cycles_per_frame as f64)
+            .round() as u32;
+        self.cycles_per_frame = cycles_per_frame;
+    }
 
-        self.audio.apply_event(AudioEvent::SetTimer(Duration::from_secs_f64(self.sound_timer / SOUND_TIMER_TICKS_PER_SECOND)));
+    pub fn cycles_per_frame(&self) -> u32 {
+        self.cycles_per_frame
+    }
+
+    pub fn undo(&mut self, state: &VMHistoryFragment) {
+        self.cycles_per_frame = state.cycles_per_frame;
+        self.keyboard = state.keyboard;
+        self.vsync_timer = state.vsync_timer;
+        self.vsync_timer_cycle_offset = state.vsync_timer_cycle_offset;
+        self.sound_timer = state.sound_timer;
+        self.sound_timer_cycle_offset = state.sound_timer_cycle_offset;
+        self.delay_timer = state.delay_timer;
+        self.delay_timer_cycle_offset = state.delay_timer_cycle_offset;
+
+        self.audio
+            .apply_event(AudioEvent::SetTimer(Duration::from_secs_f32(
+                self.precise_sound_timer() / VM_FRAME_RATE as f32,
+            )));
 
         if let Some(Instruction::Draw(_, _, _)) = state.interpreter.instruction {
             self.display = true;
@@ -100,13 +136,11 @@ impl VM {
             }
 
             Some(&InterpreterHistoryFragmentExtra::WillLoadAudio { prior_buffer, .. }) => {
-                self.audio
-                    .apply_event(AudioEvent::SetBuffer(prior_buffer));
+                self.audio.apply_event(AudioEvent::SetBuffer(prior_buffer));
             }
 
             Some(&InterpreterHistoryFragmentExtra::WillSetPitch { prior_pitch }) => {
-                self.audio
-                    .apply_event(AudioEvent::SetPitch(prior_pitch));
+                self.audio.apply_event(AudioEvent::SetPitch(prior_pitch));
             }
 
             _ => (),
@@ -143,16 +177,28 @@ impl VM {
         self.audio.apply_event(AudioEvent::Resume)
     }
 
-    pub fn sound_timer(&self) -> f64 {
-        self.sound_timer
-    }
-
-    pub fn delay_timer(&self) -> f64 {
+    pub fn delay_timer(&self) -> u8 {
         self.delay_timer
     }
 
-    pub fn truncated_delay_timer(&self) -> u8 {
-        self.delay_timer.ceil() as u8
+    pub fn precise_sound_timer(&self) -> f32 {
+        (self.sound_timer as f32
+            - self.sound_timer_cycle_offset as f32 / self.cycles_per_frame as f32)
+            .max(0.0)
+    }
+
+    pub fn precise_delay_timer(&self) -> f32 {
+        (self.delay_timer as f32
+            - self.delay_timer_cycle_offset as f32 / self.cycles_per_frame as f32)
+            .max(0.0)
+    }
+
+    pub fn precise_vsync_progress(&self) -> f32 {
+        if self.vsync_timer == 0 {
+            1.0
+        } else {
+            self.vsync_timer_cycle_offset as f32 / self.cycles_per_frame as f32
+        }
     }
 
     pub fn queue_events(&mut self) {
@@ -161,10 +207,6 @@ impl VM {
 
     pub fn clear_events(&mut self) {
         self.event.try_iter().last();
-    }
-
-    pub fn vsync(&self) -> f64 {
-        self.vertical_blank_time * VERTICAL_BLANKS_PER_SECOND
     }
 
     pub fn clear_event_queue(&mut self) {
@@ -184,9 +226,11 @@ impl VM {
                 VMEvent::FocusingKeyDown(key) => self.keyboard.handle_focusing_key_down(key),
                 VMEvent::VolumeChange(increasing) => {
                     if increasing {
-                        self.audio.set_volume((self.audio.volume() + 0.05).clamp(0.0, 1.0))
+                        self.audio
+                            .set_volume((self.audio.volume() + 0.05).clamp(0.0, 1.0))
                     } else {
-                        self.audio.set_volume((self.audio.volume() - 0.05).clamp(0.0, 1.0))
+                        self.audio
+                            .set_volume((self.audio.volume() - 0.05).clamp(0.0, 1.0))
                     }
                 }
             }
@@ -202,22 +246,21 @@ impl VM {
         }
     }
 
-    pub fn flush(&mut self) {
-        self.drain_event_queue();
-        self.keyboard.flush(&mut self.interpreter.input);
-    }
-
     pub fn clear_ephemeral_state(&mut self) {
         self.keyboard.clear_ephemeral_state();
     }
 
-    pub fn flush_and_stepn(&mut self, amt: u32) -> Result<bool, String> {
-        self.flush();
+    pub fn flush_external_input(&mut self) {
+        self.drain_event_queue();
+        self.keyboard.flush(&mut self.interpreter.input);
+    }
 
-        let should_continue = self.step_interpreter()?;
+    pub fn flush_external_input_and_stepn(&mut self, amt: u32) -> Result<bool, String> {
+        self.flush_external_input();
+
+        let should_continue = self.stepn(1)?;
 
         self.clear_ephemeral_state();
-        self.flush();
 
         if !should_continue {
             return Ok(false);
@@ -226,77 +269,74 @@ impl VM {
         self.stepn(amt - 1)
     }
 
-    pub fn stepn(&mut self, amt: u32) -> Result<bool, String> {
-        for _ in 0..amt {
-            if !self.step_interpreter()? {
-                return Ok(false);
+    pub fn stepn(&mut self, mut amt: u32) -> Result<bool, String> {
+        self.flush_timers(VMSprint::default());
+        while amt > 0 {
+            let sprint_amt = amt.min(self.min_cycles_before_timer_tick());
+            let mut sprint = VMSprint {
+                cycles: sprint_amt,
+                ..Default::default()
+            };
+
+            for cycle in 1..=sprint_amt {
+                if !self.interpreter.step() {
+                    return self.interpreter.stop_result();
+                }
+
+                if let Some(output) = self.interpreter.output.take() {
+                    match output {
+                        InterpreterOutput::Display => self.display = true,
+                        InterpreterOutput::SetDelayTimer(ticks) => {
+                            sprint.set_delay_timer_cycle = cycle;
+                            self.interpreter.input.delay_timer = ticks;
+                            self.delay_timer = ticks;
+                            self.delay_timer_cycle_offset = 0;
+                        }
+                        InterpreterOutput::SetSoundTimer(ticks) => {
+                            sprint.set_sound_timer_cycle = cycle;
+                            self.sound_timer = ticks;
+                            self.sound_timer_cycle_offset = 0;
+                            self.audio
+                                .apply_event(AudioEvent::SetTimer(Duration::from_secs_f32(
+                                    ticks as f32 / VM_FRAME_RATE as f32,
+                                )));
+                        }
+                        InterpreterOutput::UpdateAudioBuffer => {
+                            self.audio
+                                .apply_event(AudioEvent::SetBuffer(self.interpreter.audio.buffer));
+                        }
+                        InterpreterOutput::UpdateAudioPitch => {
+                            self.audio
+                                .apply_event(AudioEvent::SetPitch(self.interpreter.audio.pitch));
+                        }
+                    }
+                }
             }
+
+            // we can pull this outside interpreter step loop because
+            // we never step the interpreter past a point where the timers are due to be ticked
+            if self.vsync_enabled && self.vsync_timer == 0 {
+                self.vsync_timer = 1;
+            }
+
+            amt -= sprint_amt;
+            self.flush_timers(sprint);
         }
 
         Ok(true)
     }
 
-    fn step_interpreter(&mut self) -> Result<bool, String> {
-        // update timers and clamp between the bounds of a byte because that is the data type
-        if self.sound_timer > 0.0 {
-            self.sound_timer = (self.sound_timer - self.time_step * SOUND_TIMER_TICKS_PER_SECOND).max(0.0);
-        }
-        
-        if self.delay_timer > 0.0 {
-            self.delay_timer = (self.delay_timer - self.time_step * DELAY_TIMER_TICKS_PER_SECOND).max(0.0);
-        }
-        
-        if self.vertical_sync_enabled {
-            self.vertical_blank_time += self.time_step;
-            self.interpreter.input.vertical_blank = if self.vertical_blank_time >= (1.0 / VERTICAL_BLANKS_PER_SECOND) {
-                self.vertical_blank_time = self
-                    .vertical_blank_time
-                    .rem_euclid(1.0 / VERTICAL_BLANKS_PER_SECOND);
-                true
-            } else {
-                false
-            };
-        }
-
-        // update interpreter input
-        self.interpreter.input.delay_timer = self.truncated_delay_timer();
-
-        // interpret next instruction
-        let result = self.interpreter.step();
-
-        if let Some(output) = self.interpreter.output {
-            match output {
-                InterpreterOutput::Display => self.display = true,
-                InterpreterOutput::SetDelayTimer(ticks) => self.delay_timer = ticks as f64,
-                InterpreterOutput::SetSoundTimer(ticks) => {
-                    self.sound_timer = ticks as f64;
-                    self.audio
-                        .apply_event(AudioEvent::SetTimer(Duration::from_secs_f64(
-                            ticks as f64 / SOUND_TIMER_TICKS_PER_SECOND,
-                        )));
-                }
-                InterpreterOutput::UpdateAudioBuffer => {
-                    self.audio
-                        .apply_event(AudioEvent::SetBuffer(self.interpreter.audio.buffer));
-                }
-                InterpreterOutput::UpdateAudioPitch => {
-                    self.audio
-                        .apply_event(AudioEvent::SetPitch(self.interpreter.audio.pitch));
-                }
-            }
-        }
-
-        result
-    }
-
     pub fn to_history_fragment(&self) -> VMHistoryFragment {
         VMHistoryFragment {
-            time_step: self.time_step,
-            vertical_blank_time: self.vertical_blank_time,
+            cycles_per_frame: self.cycles_per_frame,
             keyboard: self.keyboard,
-            sound_timer: self.sound_timer,
-            delay_timer: self.delay_timer,
             interpreter: self.interpreter.to_history_fragment(),
+            vsync_timer: self.vsync_timer,
+            vsync_timer_cycle_offset: self.vsync_timer_cycle_offset,
+            sound_timer: self.sound_timer,
+            sound_timer_cycle_offset: self.sound_timer_cycle_offset,
+            delay_timer: self.delay_timer,
+            delay_timer_cycle_offset: self.delay_timer_cycle_offset,
         }
     }
 
@@ -304,40 +344,116 @@ impl VM {
         self.interpreter
             .update_memory_access_flags(executed_fragment);
     }
+
+    fn flush_timers(&mut self, sprint: VMSprint) {
+        update_timer(
+            sprint.cycles - sprint.set_sound_timer_cycle,
+            self.cycles_per_frame,
+            &mut self.sound_timer,
+            &mut self.sound_timer_cycle_offset,
+        );
+        update_timer(
+            sprint.cycles - sprint.set_delay_timer_cycle,
+            self.cycles_per_frame,
+            &mut self.delay_timer,
+            &mut self.delay_timer_cycle_offset,
+        );
+        update_timer(
+            sprint.cycles,
+            self.cycles_per_frame,
+            &mut self.vsync_timer,
+            &mut self.vsync_timer_cycle_offset,
+        );
+
+        self.interpreter.input.delay_timer = self.delay_timer;
+
+        if self.vsync_enabled {
+            self.interpreter.input.vertical_blank = self.vsync_timer == 0 && sprint.cycles == 0;
+        }
+    }
+
+    fn min_cycles_before_timer_tick(&self) -> u32 {
+        if self.vsync_enabled && self.vsync_timer == 0 {
+            return 1;
+        }
+
+        [
+            (self.sound_timer, self.sound_timer_cycle_offset),
+            (self.delay_timer, self.delay_timer_cycle_offset),
+            (self.vsync_timer, self.vsync_timer_cycle_offset),
+        ]
+        .iter()
+        .map(|(timer, offset)| {
+            if *timer > 0 {
+                self.cycles_per_frame - offset
+            } else {
+                u32::MAX
+            }
+        })
+        .min()
+        .expect("There should be at least one timer")
+    }
+}
+
+fn update_timer(cycles: u32, cycles_per_frame: u32, timer: &mut u8, timer_cycle_offset: &mut u32) {
+    if *timer == 0 {
+        return;
+    }
+
+    *timer_cycle_offset += cycles;
+
+    if *timer_cycle_offset < cycles_per_frame {
+        return;
+    }
+
+    let timer_ticks = *timer_cycle_offset / cycles_per_frame;
+    *timer = timer.saturating_sub(timer_ticks.min(u8::MAX as u32) as u8);
+
+    if *timer == 0 {
+        *timer_cycle_offset = 0;
+    } else {
+        *timer_cycle_offset %= cycles_per_frame;
+    }
 }
 
 #[derive(PartialEq)]
 pub struct VMHistoryFragment {
-    pub time_step: f64,
-    pub vertical_blank_time: f64,
+    pub cycles_per_frame: u32,
     pub keyboard: Keyboard,
-    pub sound_timer: f64,
-    pub delay_timer: f64,
     pub interpreter: InterpreterHistoryFragment,
+    pub vsync_timer: u8,
+    pub vsync_timer_cycle_offset: u32,
+    pub sound_timer: u8,
+    pub sound_timer_cycle_offset: u32,
+    pub delay_timer: u8,
+    pub delay_timer_cycle_offset: u32,
 }
 
 impl VMHistoryFragment {
     pub fn restore(&self, vm: &mut VM) {
-        vm.time_step = self.time_step;
-        vm.vertical_blank_time = self.vertical_blank_time;
+        vm.cycles_per_frame = self.cycles_per_frame;
         vm.keyboard = self.keyboard;
+        vm.vsync_timer = self.vsync_timer;
+        vm.vsync_timer_cycle_offset = self.vsync_timer_cycle_offset;
         vm.sound_timer = self.sound_timer;
+        vm.sound_timer_cycle_offset = self.sound_timer_cycle_offset;
         vm.delay_timer = self.delay_timer;
+        vm.delay_timer_cycle_offset = self.delay_timer_cycle_offset;
     }
 
     pub fn log_diff(&self, other: &Self) {
-        if self.time_step != other.time_step {
+        if self.cycles_per_frame != other.cycles_per_frame {
             log::debug!(
-                "Time step difference {:?} -> {:?}",
-                self.time_step,
-                other.time_step
+                "Cycles per frame difference {:?} -> {:?}",
+                self.cycles_per_frame,
+                other.cycles_per_frame
             );
         }
-        if self.vertical_blank_time != other.vertical_blank_time {
+        if self.vsync_timer != other.vsync_timer {
             log::debug!(
-                "Vertical blank time difference {:?} -> {:?}",
-                self.vertical_blank_time,
-                other.vertical_blank_time
+                "Vsync time difference {:?} -> {:?}",
+                self.vsync_timer,
+                other.vsync_timer
             );
         }
         if self.keyboard != other.keyboard {

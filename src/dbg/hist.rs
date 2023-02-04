@@ -64,7 +64,7 @@ impl History {
     pub(super) fn step(&mut self, vm: &mut VM) -> Result<bool, String> {
         // time step is not state that is completely deterministic so must set it if possible
         if self.cursor < self.fragments.len() {
-            vm.time_step = self.fragments[self.cursor].time_step;
+            vm.set_cycles_per_frame(self.fragments[self.cursor].cycles_per_frame);
         }
 
         let state = vm.to_history_fragment(); // get state of vm

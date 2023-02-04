@@ -144,7 +144,7 @@ impl Shell {
         let mut buf = format!("{:#05X?}: ", interp.pc);
         let mut inst_asm = String::new();
         let mut inst_comment = String::new();
-        if let Some(inst) = interp.instruction {
+        if let Some(inst) = interp.instruction() {
             write_inst_dasm(
                 &inst,
                 interp.rom.config.kind,

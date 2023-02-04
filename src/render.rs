@@ -3,7 +3,7 @@ use crate::{
     ch8::{
         disp::{Display, DisplayWidget},
         rom::RomConfig,
-        vm::VM,
+        vm::{VM, VM_FRAME_RATE},
         run::C8Lock
     },
 };
@@ -32,7 +32,7 @@ use std::{
 
 type Terminal = tui::Terminal<CrosstermBackend<io::Stdout>>;
 
-pub const TARGET_FRAME_DURATION: Duration = Duration::from_nanos(16_666_667); // 60 FPS
+pub const TARGET_FRAME_DURATION: Duration = Duration::from_nanos(1_000_000_000 / VM_FRAME_RATE as u64); // 60 FPS
 
 fn cleanup_terminal(terminal: &mut Terminal) -> Result<()> {
     // clean up the terminal so its usable after program exit
@@ -134,7 +134,7 @@ impl Renderer {
             } else {
                 let display =
                     maybe_display.unwrap_or_else(|| vm.interpreter().display.clone());
-                let hz = (1.0/vm.time_step).clamp(0.0, u32::MAX as f64).round() as u32;
+                let hz = vm.cycles_per_frame() * VM_FRAME_RATE;
                 let volume = vm.audio().volume();
                 let is_dbg_enabled = maybe_dbg.is_some();
                 drop(_guard);
