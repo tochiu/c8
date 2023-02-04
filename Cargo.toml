@@ -6,16 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rand = "0.8"
-log = "0.4"
-tui = "0.19"
-tui-logger = "0.8"
-ansi-to-tui = "2.0"
-crossterm = "0.25"
-device_query = "1.1"
-spin_sleep = "1.1"
-simple_logger = "4.0"
-anyhow = "1.0"
-clap = { version = "4.0", features = ["derive"] }
-shell-words = "1.1"
+rand = "0.8.5"
+log = "0.4.17"
+tui = "0.19.0"
+tui-logger = "0.8.1"
+ansi-to-tui = "2.0.0"
+crossterm = "0.25.0"
+device_query = "1.1.2"
+spin_sleep = "1.1.1"
+simple_logger = "4.0.0"
+anyhow = "1.0.68"
+clap = { version = "4.1.4", features = ["derive"] }
+shell-words = "1.1.0"
 rodio = { git = "https://github.com/RustAudio/rodio", rev = "refs/pull/442/head" }
