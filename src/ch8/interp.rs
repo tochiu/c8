@@ -518,12 +518,17 @@ impl Interpreter {
         // execute instruction
 
         // revert if execution failed or if execution shouldnt continue or if the interpreter is waiting
-        if !self.exec(instruction) || self.waiting {
+        if !self.exec(instruction) {
             self.pc = prior_pc;
             self.instruction = Some((instruction, instruction_size));
             false
         } else {
-            self.fetch_decode();
+            if self.waiting {
+                self.pc = prior_pc;
+                self.instruction = Some((instruction, instruction_size));
+            } else {
+                self.fetch_decode();
+            }
             true
         }
     }
