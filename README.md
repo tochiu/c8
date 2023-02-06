@@ -22,10 +22,10 @@
 
 ## About
 
-C8 is a terminal user interface tooklit for **CHIP-8**, **S-CHIP**, and **XO-CHIP** games. This application is meant to be a simple way to run and debug roms from the terminal. At its core you can 
+C8 is a terminal user interface tooklit made to run and debug **CHIP-8**, **S-CHIP**, and **XO-CHIP** games. At its core you can 
 * run a rom with `c8 run [ROM_PATH]`
     * add `--debug` to enable debug mode
-    * add `--kind` followed by `vip`, `schip`, or `xochip` to force other CHIP-8 variants
+    * add `--kind` followed by `vip`, `chip8`, `schip`, or `xochip` to force other CHIP-8 variants if auto-select fails
     * add `--hz` followed by your target instructions per second if needed
 * disassemble a rom into a file with `c8 dasm [ROM_PATH] > [OUTPUT_FILE_PATH]`
 * check a rom for potential issues* with `c8 check [ROM_PATH]`
