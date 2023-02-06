@@ -41,6 +41,12 @@ impl From<RomKind> for Audio {
     }
 }
 
+impl Audio {
+    pub fn sample_rate(&self) -> f32 {
+        chip8_pitch_to_sample_rate(self.pitch)
+    }
+}
+
 #[derive(Clone)]
 pub struct AudioSource {
     buffer: [Arc<AtomicU64>; 2],
@@ -113,8 +119,8 @@ impl Iterator for AudioSource {
         let sampling_rate = f32::from_bits(self.sample_rate_bits.load(Ordering::Acquire));
 
         let Ok(playback_offset_bits) = self.playback_offset_bits.fetch_update(
-            Ordering::SeqCst, 
-            Ordering::SeqCst, 
+            Ordering::SeqCst,
+            Ordering::SeqCst,
             |playback_offset_bits| {
                 let next_offset = (f32::from_bits(playback_offset_bits) + sampling_rate / RODIO_SAMPLING_RATE as f32) % 128.0;
                 Some(next_offset.to_bits())
@@ -154,7 +160,7 @@ pub struct AudioController {
     volume: f32,
     buffer: [u8; AUDIO_BUFFER_SIZE_BYTES],
     remaining_duration: Duration,
-    remaining_duration_instant: Instant
+    remaining_duration_instant: Instant,
 }
 
 impl AudioController {
@@ -173,7 +179,7 @@ impl AudioController {
             volume: DEFAULT_VOLUME,
             buffer: [0; AUDIO_BUFFER_SIZE_BYTES],
             remaining_duration: Duration::ZERO,
-            remaining_duration_instant: Instant::now()
+            remaining_duration_instant: Instant::now(),
         };
 
         controller
@@ -182,7 +188,9 @@ impl AudioController {
     pub fn update(&mut self) {
         let now = Instant::now();
         if !self.paused {
-            self.remaining_duration = self.remaining_duration.saturating_sub(now.duration_since(self.remaining_duration_instant));
+            self.remaining_duration = self
+                .remaining_duration
+                .saturating_sub(now.duration_since(self.remaining_duration_instant));
         }
         self.remaining_duration_instant = now;
         if self.remaining_duration.is_zero() {
@@ -222,9 +230,8 @@ impl AudioController {
                 self.source.set_buffer(&buffer);
             }
             AudioEvent::SetPitch(pitch) => {
-                self.source.set_sample_rate(
-                    BASE_SAMPLE_RATE as f32 * 2.0_f32.powf((pitch as f32 - 64.0) / 48.0),
-                );
+                self.source
+                    .set_sample_rate(chip8_pitch_to_sample_rate(pitch));
             }
             AudioEvent::Pause => 'guard: {
                 if self.paused {
@@ -244,14 +251,16 @@ impl AudioController {
     }
 }
 
+fn chip8_pitch_to_sample_rate(pitch: u8) -> f32 {
+    BASE_SAMPLE_RATE as f32 * 2.0_f32.powf((pitch as f32 - 64.0) / 48.0)
+}
+
 pub fn spawn_audio_stream() -> (OutputStream, AudioController) {
     // Get a output stream handle to the default physical sound device
     let (stream, stream_handle) =
         OutputStream::try_default().expect("Failed to get default audio output stream");
-    let controller = AudioController::new(
-        Sink::try_new(&stream_handle)
-            .expect("Failed to create audio sink")
-    );
+    let controller =
+        AudioController::new(Sink::try_new(&stream_handle).expect("Failed to create audio sink"));
 
     (stream, controller)
 }

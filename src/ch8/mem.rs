@@ -1,10 +1,10 @@
 use super::{
-    instruct::{InstructionParameters, Instruction},
+    instruct::{Instruction, InstructionParameters},
     interp::PROGRAM_STARTING_ADDRESS,
     rom::{Rom, RomKind},
 };
 
-use std::{slice::Windows, ops::Range};
+use std::{ops::Range, slice::Windows};
 
 pub const MEM_ACCESS_DRAW_FLAG: u8 = 0b1;
 pub const MEM_ACCESS_READ_FLAG: u8 = 0b10;
@@ -79,8 +79,10 @@ pub trait MemoryRef {
         Self: AsRef<[u8]>,
     {
         let memory = self.as_ref();
-        let range_start = self.address_sub(address as u16, Instruction::MAX_INSTRUCTION_SIZE - 1) as usize;
-        let range_end = range_start + size as usize + Instruction::MAX_INSTRUCTION_SIZE as usize - 1;
+        let range_start =
+            self.address_sub(address as u16, Instruction::MAX_INSTRUCTION_SIZE - 1) as usize;
+        let range_end =
+            range_start + size as usize + Instruction::MAX_INSTRUCTION_SIZE as usize - 1;
 
         if range_end > memory.len() {
             let range_overflow = range_end - memory.len();

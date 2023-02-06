@@ -37,7 +37,7 @@ C8 is a terminal user interface tooklit for **CHIP-8**, **S-CHIP**, and **XO-CHI
 | Full Sound Support                                 | ✔
 | Full 4-bit Color Support                           | ✔
 | `debug` Undo, Redo, and Step through Execution     | ✔
-| `debug` Virtual Machine State Introspection        | ✔*
+| `debug` Virtual Machine State Introspection        | ✔
 | `debug` Register and Address Watchpoints           | ✔
 | `debug` Instruction Breakpoints                    | ✔
 | `debug` Program Execution History                  | ✔
@@ -50,20 +50,10 @@ C8 is a terminal user interface tooklit for **CHIP-8**, **S-CHIP**, and **XO-CHI
 | Individual Configurable Quirks                     | 🚧
 ###### Features labeled `debug` are only available in debug mode
 
-
-
-### Todo (Virtual Machine State Introspection)
-
-- [ ] Show Pitch and Audio Buffer
-- [ ] Show RPL User Flags
-- [ ] Show Planes Selected
-
-### Todo (Other)
-
-- [x] Volume Adjuster
+### Todo
 - [ ] Reload Rom (Preserve RPL Flags)
-
-
+- [ ] Pre-defined and Custom Color Palettes
+- [ ] Individual Configurable Quirks
 
 ## Installation
 

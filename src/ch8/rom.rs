@@ -55,10 +55,9 @@ impl Rom {
         logging: bool,
         debugging: bool,
     ) -> io::Result<Rom> {
-
         let data = read(path.as_ref())?;
-        let kind = kind.unwrap_or_else(|| {
-            match path.as_ref().extension().and_then(OsStr::to_str) {
+        let kind =
+            kind.unwrap_or_else(|| match path.as_ref().extension().and_then(OsStr::to_str) {
                 Some("sc8") => RomKind::SCHIP,
                 Some("xo8") => RomKind::XOCHIP,
                 _ => {
@@ -68,8 +67,7 @@ impl Rom {
                         RomKind::CHIP8
                     }
                 }
-            }
-        });
+            });
 
         let rom = Rom {
             config: RomConfig {
@@ -87,7 +85,7 @@ impl Rom {
         };
 
         let max_rom_size = rom.config.kind.max_size();
-        
+
         if rom.data.len() < 2 {
             Err(io::Error::new(
                 io::ErrorKind::InvalidData,

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration, fmt::Display};
+use std::{collections::BTreeMap, fmt::Display, time::Duration};
 
 use crossterm::style::Stylize;
 
@@ -18,24 +18,22 @@ impl C8Stats {
             frequency_stats: BTreeMap::new(),
             up_time: Duration::ZERO,
             simulated_time: 0.0,
-            rom_name
+            rom_name,
         }
     }
 
-    pub fn update_frequency_stats(
-        &mut self,
-        freq: u32,
-        duration: Duration,
-        instructions: u64,
-    ) {
+    pub fn update_frequency_stats(&mut self, freq: u32, duration: Duration, instructions: u64) {
         if instructions == 0 {
             return;
         }
-    
-        let (total_duration, count) = self.frequency_stats.entry(freq).or_insert((Duration::ZERO, 0));
+
+        let (total_duration, count) = self
+            .frequency_stats
+            .entry(freq)
+            .or_insert((Duration::ZERO, 0));
         *total_duration = total_duration.saturating_add(duration);
         *count += instructions;
-    } 
+    }
 }
 
 impl Display for C8Stats {

@@ -1,18 +1,18 @@
 extern crate log;
 
 mod asm;
+mod ch8;
 mod cli;
 mod dbg;
 mod render;
-mod ch8;
 mod run;
 
 use {
     asm::Disassembler,
+    ch8::rom::Rom,
     cli::{Cli, CliCommand},
     render::panic_cleanup_terminal,
-    ch8::rom::Rom,
-    run::spawn_run_threads
+    run::spawn_run_threads,
 };
 
 use anyhow::Result;
@@ -30,8 +30,12 @@ fn main() -> Result<()> {
                 simple_logger::init_with_level(level.to_level())?;
             }
 
-            let mut disasm =
-                Disassembler::from(Rom::read(path, kind.map(cli::KindOption::to_kind), log.is_some(), false)?);
+            let mut disasm = Disassembler::from(Rom::read(
+                path,
+                kind.map(cli::KindOption::to_kind),
+                log.is_some(),
+                false,
+            )?);
             disasm.run();
             disasm.write_issue_traces(&mut stdout())?;
         }
@@ -40,8 +44,12 @@ fn main() -> Result<()> {
                 simple_logger::init_with_level(level.to_level())?;
             }
 
-            let mut disasm =
-                Disassembler::from(Rom::read(path, kind.map(cli::KindOption::to_kind), log.is_some(), false)?);
+            let mut disasm = Disassembler::from(Rom::read(
+                path,
+                kind.map(cli::KindOption::to_kind),
+                log.is_some(),
+                false,
+            )?);
             disasm.run();
             print!("{}", disasm);
         }
@@ -52,7 +60,12 @@ fn main() -> Result<()> {
             log,
             kind,
         } => {
-            let rom = Rom::read(path, kind.map(cli::KindOption::to_kind), log.is_some(), debug)?;
+            let rom = Rom::read(
+                path,
+                kind.map(cli::KindOption::to_kind),
+                log.is_some(),
+                debug,
+            )?;
             let kind = rom.config.kind;
 
             if let Some(level) = log {

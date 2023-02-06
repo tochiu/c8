@@ -47,7 +47,7 @@ impl InstructionParameters {
     }
 
     pub fn significant_bytes(&self, bytes: u16) -> u32 {
-        self.bits >> (32 - 8*bytes)
+        self.bits >> (32 - 8 * bytes)
     }
 
     pub fn default_significant_bytes(&self) -> u32 {
@@ -55,11 +55,11 @@ impl InstructionParameters {
     }
 
     pub fn try_decode_from_u32(bits: u32, kind: RomKind) -> Result<Instruction, String> {
-        let op   = ((bits & 0xF0000000) >> 4 * 7) as u8;
-        let x    = ((bits & 0x0F000000) >> 4 * 6) as u8;
-        let y    = ((bits & 0x00F00000) >> 4 * 5) as u8;
-        let n    = ((bits & 0x000F0000) >> 4 * 4) as u8;
-        let nn   = ((bits & 0x00FF0000) >> 4 * 4) as u8;
+        let op = ((bits & 0xF0000000) >> 4 * 7) as u8;
+        let x  = ((bits & 0x0F000000) >> 4 * 6) as u8;
+        let y  = ((bits & 0x00F00000) >> 4 * 5) as u8;
+        let n  = ((bits & 0x000F0000) >> 4 * 4) as u8;
+        let nn = ((bits & 0x00FF0000) >> 4 * 4) as u8;
 
         let instruction = match (op, x, y, n) {
             (0x0, 0x0, 0xE, 0x0) => Instruction::ClearScreen,
@@ -72,7 +72,9 @@ impl InstructionParameters {
             (0x0, 0x0, 0xF, 0xE) => Instruction::LowResolution,
             (0x0, 0x0, 0xF, 0xF) => Instruction::HighResolution,
             (0x1, __x, __y, __n) => Instruction::Jump(((bits & 0x0FFF0000) >> 4 * 4) as u16),
-            (0x2, __x, __y, __n) => Instruction::CallSubroutine(((bits & 0x0FFF0000) >> 4 * 4) as u16),
+            (0x2, __x, __y, __n) => {
+                Instruction::CallSubroutine(((bits & 0x0FFF0000) >> 4 * 4) as u16)
+            }
             (0x3, __x, __y, __n) => Instruction::SkipIfEqualsConstant(x, nn),
             (0x4, __x, __y, __n) => Instruction::SkipIfNotEqualsConstant(x, nn),
             (0x5, __x, __y, 0x0) => Instruction::SkipIfEquals(x, y),
@@ -91,12 +93,16 @@ impl InstructionParameters {
             (0x8, __x, __y, 0xE) => Instruction::Shift(x, y, false),
             (0x9, __x, __y, 0x0) => Instruction::SkipIfNotEquals(x, y),
             (0xA, __x, __y, __n) => Instruction::SetIndex(((bits & 0x0FFF0000) >> 4 * 4) as u16),
-            (0xB, __x, __y, __n) => Instruction::JumpWithOffset(((bits & 0x0FFF0000) >> 4 * 4) as u16, x),
+            (0xB, __x, __y, __n) => {
+                Instruction::JumpWithOffset(((bits & 0x0FFF0000) >> 4 * 4) as u16, x)
+            }
             (0xC, __x, __y, __n) => Instruction::GenerateRandom(x, nn),
             (0xD, __x, __y, __n) => Instruction::Draw(x, y, n),
             (0xE, __x, 0x9, 0xE) => Instruction::SkipIfKeyDown(x),
             (0xE, __x, 0xA, 0x1) => Instruction::SkipIfKeyNotDown(x),
-            (0xF, 0x0, 0x0, 0x0) => Instruction::SetIndexToLong(((bits & 0x0000FFFF) >> 4 * 0) as u16),
+            (0xF, 0x0, 0x0, 0x0) => {
+                Instruction::SetIndexToLong(((bits & 0x0000FFFF) >> 4 * 0) as u16)
+            }
             (0xF, __x, 0x0, 0x1) => Instruction::SetPlane(x),
             (0xF, 0x0, 0x0, 0x2) => Instruction::LoadAudio,
             (0xF, __x, 0x0, 0x7) => Instruction::GetDelayTimer(x),
@@ -112,7 +118,12 @@ impl InstructionParameters {
             (0xF, __x, 0x6, 0x5) => Instruction::Load(x),
             (0xF, __x, 0x7, 0x5) => Instruction::StoreFlags(x),
             (0xF, __x, 0x8, 0x5) => Instruction::LoadFlags(x),
-            _ => return Err(format!("Unable to decode instruction {}", InstructionParameters::new(bits))),
+            _ => {
+                return Err(format!(
+                    "Unable to decode instruction {}",
+                    InstructionParameters::new(bits)
+                ))
+            }
         };
 
         match instruction {
@@ -124,25 +135,41 @@ impl InstructionParameters {
             | Instruction::ScrollLeft
             | Instruction::SetIndexToBigHexChar(_) => {
                 if kind < RomKind::SCHIP {
-                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(instruction, RomKind::SCHIP, kind));
+                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(
+                        instruction,
+                        RomKind::SCHIP,
+                        kind,
+                    ));
                 }
             }
-            Instruction::ScrollUp(_) 
+            Instruction::ScrollUp(_)
             | Instruction::LoadAudio
             | Instruction::SetPitch(_)
             | Instruction::LoadRange(_, _)
-            | Instruction::StoreRange(_, _) 
+            | Instruction::StoreRange(_, _)
             | Instruction::SetIndexToLong(_)
             | Instruction::SetPlane(_) => {
                 if kind < RomKind::XOCHIP {
-                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(instruction, RomKind::XOCHIP, kind));
+                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(
+                        instruction,
+                        RomKind::XOCHIP,
+                        kind,
+                    ));
                 }
             }
             Instruction::LoadFlags(vx) | Instruction::StoreFlags(vx) => {
                 if kind < RomKind::SCHIP {
-                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(instruction, RomKind::SCHIP, kind));
+                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(
+                        instruction,
+                        RomKind::SCHIP,
+                        kind,
+                    ));
                 } else if vx > 0x7 && kind < RomKind::XOCHIP {
-                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(instruction, RomKind::XOCHIP, kind));
+                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(
+                        instruction,
+                        RomKind::XOCHIP,
+                        kind,
+                    ));
                 }
             }
             _ => (),
@@ -166,7 +193,11 @@ impl InstructionParameters {
         write_inst_dasm(&instruction, expected_kind, &mut message, &mut comment).ok();
         format!(
             "{:04X} a.k.a. \"{}\" ({}) is at least a {} instruction but ROM is {}",
-            self.significant_bytes(instruction.size()), message, comment, expected_kind, actual_kind
+            self.significant_bytes(instruction.size()),
+            message,
+            comment,
+            expected_kind,
+            actual_kind
         )
     }
 }

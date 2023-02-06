@@ -100,11 +100,14 @@ impl History {
         self.cursor = (self.cursor + 1).min(self.fragments.len());
 
         // restore state of vm that is independent of the vm step (input state)
-        if self.redo_amount() > 0 { // in past
+        if self.redo_amount() > 0 {
+            // in past
             self.fragments[self.cursor].restore(&mut *vm);
-        } else { // in present
+        } else {
+            // in present
             if let Some(present_fragment) = self.present_fragment.take() {
-                if redo_amount > 0 { // made it to present instead of losing redo history
+                if redo_amount > 0 {
+                    // made it to present instead of losing redo history
                     present_fragment.restore(&mut *vm);
                 }
             }

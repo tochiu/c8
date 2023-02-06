@@ -189,8 +189,7 @@ impl Disassembler {
             log::debug!(
                 "Updating instruction at {:#05X} ({:04X})",
                 addr,
-                instruction_params
-                    .significant_bytes(Instruction::size_or_default(&instruction))
+                instruction_params.significant_bytes(Instruction::size_or_default(&instruction))
             );
 
             let old_tag = self.tags[addr as usize];
@@ -372,9 +371,8 @@ impl Disassembler {
                 let false_path_is_valid = self.eval(false_path);
 
                 path.enter_trace(Some(instruction), None);
-                let true_path_is_valid = self.eval(
-                    path.fork_offset(instruction.size() + false_path_instruction_size),
-                );
+                let true_path_is_valid =
+                    self.eval(path.fork_offset(instruction.size() + false_path_instruction_size));
                 path.leave_trace();
 
                 false_path_is_valid || true_path_is_valid
@@ -521,11 +519,15 @@ impl Disassembler {
         Ok(())
     }
 
-    pub fn is_address_overlapping_instruction_tag(&self, address: u16, tag: InstructionTag) -> bool {
+    pub fn is_address_overlapping_instruction_tag(
+        &self,
+        address: u16,
+        tag: InstructionTag,
+    ) -> bool {
         for address_diff in 1..Instruction::MAX_INSTRUCTION_SIZE {
             let prior_address = self.memory.address_sub(address, address_diff) as usize;
-            if self.tags[prior_address] >= tag 
-                && Instruction::size_or_default(&self.instructions[prior_address]) > address_diff 
+            if self.tags[prior_address] >= tag
+                && Instruction::size_or_default(&self.instructions[prior_address]) > address_diff
             {
                 return true;
             }
@@ -549,12 +551,10 @@ impl Display for Disassembler {
                 )
             })
             .filter(|(addr, _, tag)| {
-                
-                *tag >= InstructionTag::Proven 
+                *tag >= InstructionTag::Proven
                     || !self.is_address_overlapping_instruction_tag(*addr, InstructionTag::Proven)
             })
         {
-
             self.write_addr_dasm(addr)?;
 
             let address_formatter = self.address_formatter.take();
@@ -587,7 +587,13 @@ impl Display for Disassembler {
             f.write_str(&address_formatter.tag)?;
             f.write_char(' ')?;
             f.write_str(&address_formatter.opcode)?;
-            write!(f, "{}", " ".repeat(2*Instruction::MAX_INSTRUCTION_SIZE as usize - address_formatter.opcode.len()))?;
+            write!(
+                f,
+                "{}",
+                " ".repeat(
+                    2 * Instruction::MAX_INSTRUCTION_SIZE as usize - address_formatter.opcode.len()
+                )
+            )?;
 
             if show_bin_comment {
                 write!(f, " 2X GRAPHIC ")?;

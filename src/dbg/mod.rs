@@ -17,6 +17,7 @@ use crate::{
         input::KEY_ORDERING,
         instruct::Instruction,
         interp::Interpreter,
+        rom::RomKind,
         run::Runner,
         vm::{VM, VM_FRAME_RATE},
     },
@@ -930,6 +931,9 @@ pub struct DebuggerWidgetAreas {
     pub timers: Rect,
     pub stack: Rect,
     pub memory: Rect,
+    pub audio: Rect,
+    pub flags: Rect,
+    pub planes: Rect,
     pub display: Rect,
     pub logger: Rect,
     pub command_line: Rect,
@@ -944,6 +948,9 @@ pub struct DebuggerWidgetBorders {
     pub timers: Borders,
     pub stack: Borders,
     pub memory: Borders,
+    pub audio: Borders,
+    pub flags: Borders,
+    pub planes: Borders,
     pub display: Borders,
     pub logger: Borders,
     pub command_line: Borders,
@@ -960,6 +967,9 @@ impl Default for DebuggerWidgetBorders {
             timers: Borders::NONE,
             stack: Borders::NONE,
             memory: Borders::NONE,
+            audio: Borders::NONE,
+            flags: Borders::NONE,
+            planes: Borders::NONE,
             display: Borders::NONE,
             logger: Borders::NONE,
             command_line: Borders::NONE,
@@ -973,6 +983,10 @@ impl<'a> DebuggerWidget<'a> {
     const POINTERS_STATE_HEIGHT: u16 = 3;
     const REGISTERS_STATE_HEIGHT: u16 = 17;
     const TIMERS_STATE_HEIGHT: u16 = 5;
+    const AUDIO_STATE_HEIGHT: u16 = 8;
+    const SCHIP_FLAG_STATE_HEIGHT: u16 = 9;
+    const XOCHIP_FLAG_STATE_HEIGHT: u16 = 17;
+    const PLANES_STATE_HEIGHT: u16 = 4;
 
     pub fn cursor_position(
         &self,
@@ -1043,12 +1057,12 @@ impl<'a> DebuggerWidget<'a> {
         let non_column_with_display_width =
             terminal_area.width.saturating_sub(display_window_width);
         let left_of_column_with_display_width =
-            if display_mode == DisplayMode::HighResolution && !self.logging {
-                non_column_with_display_width
-            } else {
+            if display_mode == DisplayMode::LowResolution {
                 (non_column_with_display_width / 2)
                     .max(Self::GENERAL_STATE_COLUMN_WIDTH)
                     .min(non_column_with_display_width)
+            } else {
+                non_column_with_display_width
             };
 
         let [left_of_column_with_display, column_with_display, right_of_column_with_display] =
@@ -1076,7 +1090,7 @@ impl<'a> DebuggerWidget<'a> {
                 ])
                 .split(column_with_display)[..] else { unreachable!() };
         let display_area_borders = if self.dbg.vm_visible {
-            if display_mode == DisplayMode::HighResolution && !self.logging {
+            if display_mode == DisplayMode::HighResolution {
                 Borders::ALL.difference(Borders::BOTTOM)
             } else {
                 Borders::ALL
@@ -1087,7 +1101,36 @@ impl<'a> DebuggerWidget<'a> {
             Borders::NONE
         };
 
-        let [right_of_display, bottom_right_of_display] = Layout::default()
+        let rom_kind = self.vm.interpreter().rom.config.kind;
+        let is_rom_at_least_schip = rom_kind >= RomKind::SCHIP;
+        let is_rom_at_least_xochip = rom_kind >= RomKind::XOCHIP;
+
+        let second_general_area_width = if is_rom_at_least_schip {
+            Self::GENERAL_STATE_COLUMN_WIDTH
+        } else {
+            0
+        };
+
+        let (second_general_left_area_width, second_general_right_area_width) = if display_mode == DisplayMode::HighResolution {
+            (second_general_area_width, 0)
+        } else {
+            (0, second_general_area_width)
+        };
+
+        let [second_general_right_area, right_most_column] =
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Length(second_general_right_area_width),
+                    Constraint::Length(
+                        right_of_column_with_display
+                            .width
+                            .saturating_sub(second_general_right_area_width),
+                    ),
+                ])
+                .split(right_of_column_with_display)[..] else { unreachable!() };
+
+        let [top_right_most_column, bottom_right_most_column] = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(display_window_height),
@@ -1097,7 +1140,7 @@ impl<'a> DebuggerWidget<'a> {
                         .saturating_sub(display_window_height),
                 ),
             ])
-            .split(right_of_column_with_display)[..] else { unreachable!() };
+            .split(right_most_column)[..] else { unreachable!() };
 
         let memory_window_width = DisplayMode::LowResolution.window_dimensions().0;
         let [memory_area, right_of_memory_area_in_display_column] =
@@ -1112,17 +1155,28 @@ impl<'a> DebuggerWidget<'a> {
                 .split(below_display_area)[..] else { unreachable!() };
         let memory_area_borders = Borders::ALL.difference(Borders::RIGHT);
 
-        let [output_area, between_output_column_and_display_column] = Layout::default()
+        let [left_most_area, second_general_left_area, chip8_general_area] = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Length(
                     left_of_column_with_display
                         .width
-                        .saturating_sub(Self::GENERAL_STATE_COLUMN_WIDTH),
+                        .saturating_sub(Self::GENERAL_STATE_COLUMN_WIDTH + second_general_left_area_width),
                 ),
+                Constraint::Length(second_general_left_area_width),
                 Constraint::Length(Self::GENERAL_STATE_COLUMN_WIDTH),
             ])
             .split(left_of_column_with_display)[..] else { unreachable!() };
+        
+        let [top_left_most_area, bottom_left_most_area] = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(50),
+                Constraint::Percentage(50)
+            ])
+            .split(left_most_area)[..] else { unreachable!() };
+        
+        let output_area = if self.logging && display_mode == DisplayMode::HighResolution { bottom_left_most_area } else { left_most_area };
         let output_area_borders = Borders::TOP;
 
         let [keyboard_area, pointers_area, registers_area, timers_area, stack_area] =
@@ -1135,35 +1189,60 @@ impl<'a> DebuggerWidget<'a> {
                     Constraint::Length(Self::TIMERS_STATE_HEIGHT),
                     Constraint::Length(1 + self.vm.interpreter().stack.len().max(1) as u16),
                 ])
-                .split(between_output_column_and_display_column)[..] else { unreachable!() };
+                .split(chip8_general_area)[..] else { unreachable!() };
         let keyboard_area_borders = Borders::TOP.union(Borders::LEFT);
         let pointers_area_borders = Borders::TOP.union(Borders::LEFT);
         let registers_area_borders = Borders::TOP.union(Borders::LEFT);
         let timers_area_borders = Borders::TOP.union(Borders::LEFT);
         let stack_area_borders = Borders::ALL.difference(Borders::RIGHT);
 
+        let second_general_area = if second_general_left_area_width > 0 {
+            second_general_left_area
+        } else {
+            second_general_right_area
+        };
+
+        let [planes_area, audio_area, flags_area] = 
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(
+                    if is_rom_at_least_xochip {
+                        [
+                            Constraint::Length(Self::PLANES_STATE_HEIGHT),
+                            Constraint::Length(Self::AUDIO_STATE_HEIGHT),
+                            Constraint::Length(Self::XOCHIP_FLAG_STATE_HEIGHT)
+                        ]
+                    } else {
+                        [
+                            Constraint::Length(0),
+                            Constraint::Length(0),
+                            Constraint::Length(Self::SCHIP_FLAG_STATE_HEIGHT)
+                        ]
+                    }
+                )
+                .split(second_general_area)[..] else { unreachable!() };
+        let planes_area_borders = Borders::TOP.union(Borders::LEFT);
+        let audio_area_borders = Borders::TOP.union(Borders::LEFT);
+        let flags_area_borders = Borders::ALL.difference(Borders::RIGHT);
+
         let history_area = match display_mode {
             DisplayMode::LowResolution => {
                 if self.logging {
-                    bottom_right_of_display
+                    bottom_right_most_column
                 } else {
-                    right_of_column_with_display
+                    right_most_column
                 }
             }
             DisplayMode::HighResolution => right_of_memory_area_in_display_column,
         };
-        let history_area_borders = if display_mode == DisplayMode::HighResolution && self.logging {
-            Borders::ALL.difference(Borders::RIGHT)
-        } else {
-            Borders::ALL
-        };
+        let history_area_borders = Borders::ALL;
 
         let (logger_area, logger_area_borders) = if self.logging {
             match display_mode {
                 DisplayMode::LowResolution => {
-                    (right_of_display, Borders::ALL.difference(Borders::BOTTOM))
+                    (top_right_most_column, Borders::ALL.difference(Borders::BOTTOM))
                 }
-                DisplayMode::HighResolution => (right_of_column_with_display, Borders::ALL),
+                DisplayMode::HighResolution => (top_left_most_area, Borders::TOP),
             }
         } else {
             (Rect::default(), Borders::NONE)
@@ -1179,6 +1258,9 @@ impl<'a> DebuggerWidget<'a> {
                 timers: timers_area,
                 stack: stack_area,
                 memory: memory_area,
+                planes: planes_area,
+                audio: audio_area,
+                flags: flags_area,
                 display: display_area,
                 logger: logger_area,
                 command_line: command_line_area,
@@ -1192,6 +1274,9 @@ impl<'a> DebuggerWidget<'a> {
                 timers: timers_area_borders,
                 stack: stack_area_borders,
                 memory: memory_area_borders,
+                planes: planes_area_borders,
+                audio: audio_area_borders,
+                flags: flags_area_borders,
                 display: display_area_borders,
                 logger: logger_area_borders,
                 command_line: command_line_borders,
@@ -1397,17 +1482,20 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
                     ))
                 })
                 .collect::<Vec<_>>(),
-            )
-            .block(
-                Block::default()
-                    .title(" Registers ")
-                    .borders(layout_borders.registers),
-            )
-            .render(layout_areas.registers, buf);
+        )
+        .block(
+            Block::default()
+                .title(" Registers ")
+                .borders(layout_borders.registers),
+        )
+        .render(layout_areas.registers, buf);
 
         // Timers
         Paragraph::new(vec![
-            Spans::from(format!(" vsync {:0>3.0}%", self.vm.precise_vsync_progress() * 100.0)),
+            Spans::from(format!(
+                " vsync {:0>3.0}%",
+                self.vm.precise_vsync_progress() * 100.0
+            )),
             Spans::from(format!(" sound {:0>6.2}", self.vm.precise_sound_timer())),
             Spans::from(format!(" delay {:0>6.2}", self.vm.precise_delay_timer())),
             Spans::from(format!("   |-> {:0>3}", self.vm.delay_timer())),
@@ -1425,7 +1513,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
                 .stack
                 .iter()
                 .enumerate()
-                .map(|(i, addr)| Spans::from(format!("#{:0>2} {:#05X}", i, addr)))
+                .map(|(i, addr)| Spans::from(format!(" #{:0>2} {:#05X}", i, addr)))
                 .collect::<Vec<_>>(),
         )
         .block(
@@ -1434,6 +1522,81 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
                 .borders(layout_borders.stack),
         )
         .render(layout_areas.stack, buf);
+
+        // Planes
+        Paragraph::new(vec![
+            Spans::from(""),
+            Spans::from((0..4).fold(
+                vec![Span::raw(" ")],
+                |mut vec, plane| {
+                    vec.push(Span::styled(
+                        format!(" {} ", plane + 1),
+                        if self.vm.interpreter().display.selected_plane_bitflags >> plane & 1 == 1 {
+                            Style::default().fg(Color::Black).bg(Color::White)
+                        } else {
+                            Style::default()
+                        },
+                    ));
+                    if plane == 3 {
+                        vec.push(Span::raw(" "))
+                    }
+
+                    vec
+                },
+            ))
+        ])
+        .block(
+            Block::default()
+                .title(" Planes ")
+                .borders(layout_borders.planes),
+        )
+        .render(layout_areas.planes, buf);
+
+        // Audio
+        Paragraph::new(
+            [
+                Spans::from(format!(" pitch {:0>3}", self.vm.interpreter().audio.pitch)),
+                Spans::from(format!("   |-> {}Hz", self.vm.interpreter().audio.sample_rate().round() as u32)),
+                Spans::from(format!(" audio")),
+            ]
+            .into_iter()
+            .chain(
+                self.vm
+                    .interpreter()
+                    .audio
+                    .buffer
+                    .chunks_exact(4)
+                    .map(|bytes| {
+                        Spans::from(format!(
+                            " {:02x} {:02x}  {:02x} {:02x} ",
+                            bytes[0], bytes[1], bytes[2], bytes[3]
+                        ))
+                    }),
+            )
+            .collect::<Vec<_>>(),
+        )
+        .block(
+            Block::default()
+                .title(" Audio ")
+                .borders(layout_borders.audio),
+        )
+        .render(layout_areas.audio, buf);
+
+        // RPL Flags
+        Paragraph::new(
+            interp
+                .flags[..if self.vm.interpreter().rom.config.kind == RomKind::XOCHIP { 16 } else { 8 }]
+                .iter()
+                .enumerate()
+                .map(|(i, val)| Spans::from(Span::raw(format!("-s{:x} {:0>3} ({:#04X})", i, val, val))))
+                .collect::<Vec<_>>(),
+        )
+        .block(
+            Block::default()
+                .title(" Save Flags ")
+                .borders(layout_borders.flags),
+        )
+        .render(layout_areas.flags, buf);
 
         // Bottom (Command line or messages)
         if self.can_draw_shell(area) {

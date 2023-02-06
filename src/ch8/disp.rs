@@ -298,23 +298,28 @@ impl<'a, 'b> Widget for DisplayWidget<'_, '_> {
         let rendered_display_height = 2 * area.height.min(display_height) as usize;
 
         let mut pixel_streams = [0, 1, 2, 3].map(|i| {
-            (i, DisplayWidget::pixel_stream(
-                &self.display.planes[i],
-                rendered_display_width,
-                rendered_display_height,
-            ))
+            (
+                i,
+                DisplayWidget::pixel_stream(
+                    &self.display.planes[i],
+                    rendered_display_width,
+                    rendered_display_height,
+                ),
+            )
         });
 
         for i in 0..rendered_display_width * rendered_display_height {
-            let color =
-                self.display.colors[pixel_streams.iter_mut().fold(0, |color_index, (plane_index, stream)| {
+            let color = self.display.colors[pixel_streams.iter_mut().fold(
+                0,
+                |color_index, (plane_index, stream)| {
                     color_index
                         | (stream
                             .next()
                             .expect("Stream must be the size of the rendered area")
                             as usize)
                             << *plane_index
-                })];
+                },
+            )];
 
             let x = i % rendered_display_width;
             let y = i / rendered_display_width;

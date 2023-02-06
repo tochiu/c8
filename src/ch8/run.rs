@@ -2,7 +2,7 @@ use super::{
     audio::AudioController,
     rom::Rom,
     stats::C8Stats,
-    vm::{VMEvent, VM, VM_FRAME_RATE, VM_FRAME_DURATION},
+    vm::{VMEvent, VM, VM_FRAME_DURATION, VM_FRAME_RATE},
 };
 
 use crate::dbg::Debugger;
@@ -143,7 +143,8 @@ impl Runner {
                         if let Some(dbg) = maybe_dbg {
                             step_can_continue = dbg.step(vm, cycles_per_frame as usize);
                         } else {
-                            step_can_continue = vm.flush_external_input_and_stepn(cycles_per_frame)?
+                            step_can_continue =
+                                vm.flush_external_input_and_stepn(cycles_per_frame)?
                         }
 
                         let elapsed = now.elapsed();

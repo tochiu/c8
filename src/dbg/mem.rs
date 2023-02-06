@@ -1,9 +1,7 @@
 use super::Watchpoint;
 
 use crate::{
-    asm::{
-        Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS,
-    },
+    asm::{Disassembler, InstructionTag, ADDRESS_COMMENT_TOKEN, INSTRUCTION_COLUMNS},
     ch8::{interp::Interpreter, mem::extract_access_flags},
 };
 
@@ -136,7 +134,10 @@ impl<'a> MemoryWidget<'_> {
             || addr == 0
             || addr == self.interpreter.pc
             || addr == self.interpreter.index;
-        overrides_is_drawable || !self.disassembler.is_address_overlapping_instruction_tag(addr, InstructionTag::Proven)
+        overrides_is_drawable
+            || !self
+                .disassembler
+                .is_address_overlapping_instruction_tag(addr, InstructionTag::Proven)
     }
 
     fn find_nearest_drawable_addr(&self, mut addr: u16, is_forwards: bool) -> Option<u16> {
@@ -183,12 +184,7 @@ impl<'a> MemoryWidget<'_> {
         Ok(())
     }
 
-    fn addr_span(
-        &self,
-        addr: u16,
-        addr_line_width: u16,
-        addr_is_selected: bool,
-    ) -> Spans {
+    fn addr_span(&self, addr: u16, addr_line_width: u16, addr_is_selected: bool) -> Spans {
         let tag = self.disassembler.tags[addr as usize];
         let flags = self.interpreter.memory_access_flags[addr as usize];
 
@@ -201,7 +197,7 @@ impl<'a> MemoryWidget<'_> {
         self.disassembler.write_addr_dasm(addr).ok();
 
         let (draw, read, write, exec) = extract_access_flags(flags);
-        
+
         let force_asm = addr == self.interpreter.pc;
 
         let address_formatter = self.disassembler.address_formatter.take();
@@ -210,12 +206,17 @@ impl<'a> MemoryWidget<'_> {
             && (self.memory.verbose || tag >= InstructionTag::Valid || force_asm);
         let show_addr_bin = self.memory.verbose
             || tag < InstructionTag::Proven && (tag < InstructionTag::Parsable || !force_asm);
-        let show_addr_asm_desc = address_formatter.asm_desc.len() > 0 && (!show_addr_bin || self.memory.verbose);
+        let show_addr_asm_desc =
+            address_formatter.asm_desc.len() > 0 && (!show_addr_bin || self.memory.verbose);
         let show_comments = show_addr_bin || show_addr_asm_desc;
 
-        let content_len = 7 
+        let content_len = 7
             + address_formatter.header.len()
-            + if show_addr_asm { address_formatter.asm.len() + 1 } else { 0 };
+            + if show_addr_asm {
+                address_formatter.asm.len() + 1
+            } else {
+                0
+            };
         let content_len_padded = if show_comments {
             content_len.max(INSTRUCTION_COLUMNS + 1)
         } else {
@@ -224,12 +225,15 @@ impl<'a> MemoryWidget<'_> {
 
         // TODO: factor in the opcode length
         let comment_len = if show_comments {
-            2 + if show_addr_bin { address_formatter.bin.len() } else { 0 }
-                + if show_addr_asm_desc {
-                    address_formatter.asm_desc.len()
-                } else {
-                    0
-                }
+            2 + if show_addr_bin {
+                address_formatter.bin.len()
+            } else {
+                0
+            } + if show_addr_asm_desc {
+                address_formatter.asm_desc.len()
+            } else {
+                0
+            }
         } else {
             0
         };

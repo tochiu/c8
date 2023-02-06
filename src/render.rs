@@ -1,11 +1,11 @@
 use crate::{
-    dbg::{Debugger, DebuggerWidget, DebuggerWidgetState},
     ch8::{
         disp::{Display, DisplayWidget},
         rom::RomConfig,
-        vm::{VM, VM_FRAME_RATE, VM_FRAME_DURATION},
-        run::C8Lock
+        run::C8Lock,
+        vm::{VM, VM_FRAME_DURATION, VM_FRAME_RATE},
     },
+    dbg::{Debugger, DebuggerWidget, DebuggerWidgetState},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -16,18 +16,20 @@ use crossterm::{
 use tui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style, Modifier},
+    style::{Color, Modifier, Style},
+    text::Span,
     widgets::{Block, Borders, Gauge, Paragraph},
-    Frame, text::Span,
+    Frame,
 };
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
 
 use std::{
+    cell::Cell,
     io::{self, stdout},
     ops::DerefMut,
     sync::mpsc::{channel, Sender, TryRecvError},
     thread::{self, JoinHandle},
-    time::Instant, cell::Cell,
+    time::Instant,
 };
 
 type Terminal = tui::Terminal<CrosstermBackend<io::Stdout>>;
@@ -90,7 +92,9 @@ pub fn spawn_render_thread(c8: C8Lock, config: RomConfig) -> (Sender<()>, JoinHa
                 .expect("Failed render step");
             should_redraw = false;
 
-            frame_start = frame_start.checked_add(VM_FRAME_DURATION).expect("Could not calculate next frame start");
+            frame_start = frame_start
+                .checked_add(VM_FRAME_DURATION)
+                .expect("Could not calculate next frame start");
             thread::sleep(frame_start.saturating_duration_since(Instant::now()));
         }
     });
@@ -130,8 +134,7 @@ impl Renderer {
                     self.render_debugger(f, dbg, vm);
                 })?;
             } else {
-                let display =
-                    maybe_display.unwrap_or_else(|| vm.interpreter().display.clone());
+                let display = maybe_display.unwrap_or_else(|| vm.interpreter().display.clone());
                 let hz = vm.cycles_per_frame() * VM_FRAME_RATE;
                 let volume = vm.audio().volume();
                 let is_dbg_enabled = maybe_dbg.is_some();
@@ -175,7 +178,7 @@ impl Renderer {
         display: &Display,
         execution_frequency: u32,
         volume: f32,
-        is_dbg_enabled: bool
+        is_dbg_enabled: bool,
     ) {
         let area = f.size();
         let display_widget = DisplayWidget {
@@ -221,8 +224,7 @@ impl Renderer {
                     logger_row
                 },
             );
-        } 
-        else {
+        } else {
             // let b = Block::default()
             //     .title(" Color Picker ")
             //     .borders(Borders::ALL);
@@ -250,7 +252,7 @@ impl Renderer {
 
             // f.render_widget(
             //     crate::set::color::ColorPickerWidget,
-            //     area    
+            //     area
             // );
 
             // f.render_widget(b, ba);
@@ -267,26 +269,31 @@ impl Renderer {
         f.render_widget(
             Gauge::default()
                 .block(Block::default().borders(Borders::LEFT.union(Borders::RIGHT)))
-                .gauge_style(Style::default().fg(Color::White).bg(Color::Gray).add_modifier(Modifier::BOLD))
-                .label(Span::styled("(DOWN - ) Volume (UP   = )", Style::default().fg(Color::Black)))
-                .percent((volume * 100.0).round().clamp(0.0, 100.0) as u16), 
-            volume_area
+                .gauge_style(
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::Gray)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .label(Span::styled(
+                    "(DOWN - ) Volume (UP   = )",
+                    Style::default().fg(Color::Black),
+                ))
+                .percent((volume * 100.0).round().clamp(0.0, 100.0) as u16),
+            volume_area,
         );
 
         let bottom_area_style = Style::default().bg(Color::White).fg(Color::Black);
-        
+
         f.render_widget(Block::default().style(bottom_area_style), bottom_area);
         f.render_widget(
-            Paragraph
-                ::new(
-                    if is_dbg_enabled {
-                        " Esc to drop into the debugger, Ctrl+C to exit" 
-                    } else { 
-                        " Ctrl+C to exit" 
-                    }
-                )
-                .style(bottom_area_style), 
-            bottom_area
+            Paragraph::new(if is_dbg_enabled {
+                " Esc to drop into the debugger, Ctrl+C to exit"
+            } else {
+                " Ctrl+C to exit"
+            })
+            .style(bottom_area_style),
+            bottom_area,
         );
     }
 }
