@@ -43,6 +43,10 @@ pub enum InterpreterHistoryFragmentExtra {
     WillSetPlane {
         prior_selected_plane_bitflags: u8,
     },
+    WillChangeDisplayMode {
+        prior_display_mode: DisplayMode,
+        prior_display_buffers: Box<[DisplayBuffer; 4]>,
+    },
     WillDrawEntireDisplay {
         prior_display_buffers: [Option<Box<DisplayBuffer>>; 4],
     },
@@ -204,6 +208,7 @@ impl Interpreter {
         self.index = prior_state.index;
         self.registers = prior_state.registers;
         self.instruction = Some((*instruction, instruction.size()));
+        self.waiting = false;
 
         log::debug!(
             "Restoring memory access flags: {:?} -> {:?}",
@@ -293,6 +298,14 @@ impl Interpreter {
             } => {
                 self.display.selected_plane_bitflags = *prior_selected_plane_bitflags;
             }
+
+            InterpreterHistoryFragmentExtra::WillChangeDisplayMode { 
+                prior_display_mode, 
+                prior_display_buffers
+            } => {
+                self.display.mode = *prior_display_mode;
+                self.display.planes = **prior_display_buffers;
+            }
         }
     }
 
@@ -311,13 +324,19 @@ impl Interpreter {
                 }))
             }
 
+            Instruction::LowResolution
+            | Instruction::HighResolution => {
+                Some(Box::new(InterpreterHistoryFragmentExtra::WillChangeDisplayMode {
+                    prior_display_mode: self.display.mode,
+                    prior_display_buffers: Box::new(self.display.planes),
+                }))
+            }
+
             Instruction::ClearScreen
             | Instruction::ScrollUp(_)
             | Instruction::ScrollDown(_)
             | Instruction::ScrollLeft
-            | Instruction::ScrollRight
-            | Instruction::LowResolution
-            | Instruction::HighResolution => Some(Box::new(
+            | Instruction::ScrollRight => Some(Box::new(
                 InterpreterHistoryFragmentExtra::WillDrawEntireDisplay {
                     prior_display_buffers: [0, 1, 2, 3].map(|i| {
                         if self.display.selected_plane_bitflags >> i == 1 {
