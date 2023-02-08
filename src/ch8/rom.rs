@@ -3,6 +3,8 @@ use super::{
     mem::{DEFAULT_PROGRAM_MEMORY_SIZE, XOCHIP_PROGRAM_MEMORY_SIZE},
 };
 
+use crate::asm::Disassembler;
+
 use std::{ffi::OsStr, fmt::Display, fs::read, io, path::Path};
 
 #[derive(Clone)]
@@ -27,6 +29,15 @@ impl RomKind {
             XOCHIP_PROGRAM_MEMORY_SIZE - PROGRAM_STARTING_ADDRESS as usize
         } else {
             DEFAULT_PROGRAM_MEMORY_SIZE - PROGRAM_STARTING_ADDRESS as usize
+        }
+    }
+
+    pub fn default_cycles_per_frame(self) -> u32 {
+        match self {
+            Self::COSMACVIP => 10,
+            Self::CHIP8 => 10,
+            Self::SCHIP => 30,
+            Self::XOCHIP => 1000,
         }
     }
 }
@@ -64,7 +75,26 @@ impl Rom {
                     if data.len() > DEFAULT_PROGRAM_MEMORY_SIZE {
                         RomKind::XOCHIP
                     } else {
-                        RomKind::CHIP8
+                        let mut dasm = Disassembler::from(Rom {
+                            config: RomConfig {
+                                name: String::new(),
+                                kind: RomKind::CHIP8,
+                                logging,
+                                debugging,
+                            },
+                            data: data.clone(),
+                        });
+
+                        dasm.run();
+
+                        let suggested_rom_kind = dasm.suggested_rom_kind();
+                        while suggested_rom_kind != dasm.rom.config.kind {
+                            dasm.rom.config.kind = suggested_rom_kind;
+                            dasm.reset();
+                            dasm.run();
+                        }
+
+                        suggested_rom_kind
                     }
                 }
             });
@@ -81,7 +111,7 @@ impl Rom {
                 logging,
                 debugging,
             },
-            data: read(path)?,
+            data,
         };
 
         let max_rom_size = rom.config.kind.max_size();

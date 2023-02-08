@@ -1,8 +1,14 @@
-use super::rom::RomKind;
+use super::{rom::RomKind, vm::VM_FRAME_RATE};
 
 use crate::run::preset::COLOR_PRESETS;
 
-use tui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
+use tui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Style, Modifier},
+    text::{Span, Spans},
+    widgets::Widget,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DisplayMode {
@@ -266,11 +272,24 @@ pub struct DisplayWidget<'a, 'b> {
 }
 
 impl<'a, 'b> DisplayWidget<'_, '_> {
-    pub fn title(&self) -> String {
-        format!(
-            " {} Virtual Machine ({}) {}Hz ",
-            self.rom_kind, self.rom_name, self.execution_frequency
-        )
+    pub fn build_title(&self) -> Spans<'static> {
+        Spans::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                format!(" {} ", self.rom_kind),
+                Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(" ")),
+            Span::styled(
+                format!("{}", self.rom_name),
+                Style::default().add_modifier(Modifier::ITALIC),
+            ),
+            Span::raw(format!(
+                " — {}Cpf ({}Hz) ",
+                self.execution_frequency / VM_FRAME_RATE,
+                self.execution_frequency,
+            )),
+        ])
     }
 
     fn pixel_stream(

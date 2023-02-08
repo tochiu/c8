@@ -4,8 +4,6 @@ use clap::{Parser, Subcommand, ValueEnum};
 use log::{Level, LevelFilter};
 use std::path::PathBuf;
 
-const DEFAULT_EXECUTION_FREQUENCY: u32 = 1800;
-
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 /// C8: CHIP-8 toolkit complete with a virtual machine, debugger, and disassembler.
@@ -105,6 +103,7 @@ pub enum CliCommand {
     },
 
     /// Loads a CHIP-8 ROM and runs it
+    #[clap(group = clap::ArgGroup::new("cycles").multiple(false))]
     Run {
         /// Path of the ROM to load
         #[arg(value_name = "ROM")]
@@ -114,9 +113,13 @@ pub enum CliCommand {
         #[arg(short, long)]
         debug: bool,
 
-        /// Sets the instructions executed per second
-        #[arg(long, default_value_t = DEFAULT_EXECUTION_FREQUENCY)]
-        hz: u32,
+        /// Sets the cycles per frame
+        #[arg(long, group = "cycles")]
+        cpf: Option<u32>,
+
+        /// Sets the cycles per second
+        #[arg(long, group = "cycles")]
+        hz: Option<u32>,
 
         /// Enable logging
         #[arg(short, long, value_enum, value_name = "LEVEL")]

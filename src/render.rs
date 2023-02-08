@@ -259,7 +259,7 @@ impl Renderer {
         }
 
         let display_block = Block::default()
-            .title(display_widget.title())
+            .title(display_widget.build_title())
             .borders(Borders::ALL);
         let display_area = display_row.intersection(display_column);
         f.render_widget(display_widget, display_block.inner(display_area));

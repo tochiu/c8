@@ -2,6 +2,75 @@ use crate::asm::write_inst_dasm;
 
 use super::rom::RomKind;
 
+pub fn decode_op(bits: u32) -> u8 {
+    ((bits & 0xF0000000) >> 4 * 7) as u8
+}
+
+pub fn decode_x(bits: u32) -> u8 {
+    ((bits & 0x0F000000) >> 4 * 6) as u8
+}
+
+pub fn decode_y(bits: u32) -> u8 {
+    ((bits & 0x00F00000) >> 4 * 5) as u8
+}
+
+pub fn decode_n(bits: u32) -> u8 {
+    ((bits & 0x000F0000) >> 4 * 4) as u8
+}
+
+pub fn decode_nn(bits: u32) -> u8 {
+    ((bits & 0x00FF0000) >> 4 * 4) as u8
+}
+
+pub fn decode_nnn(bits: u32) -> u16 {
+    ((bits & 0x0FFF0000) >> 4 * 4) as u16
+}
+
+pub fn decode_nnnn(bits: u32) -> u16 {
+    ((bits & 0x0000FFFF) >> 4 * 0) as u16
+}
+
+pub enum InstructionDecodeError {
+    UnknownInstruction {
+        parameters: InstructionParameters,
+    },
+    IncompatibleRomKind {
+        parameters: InstructionParameters,
+        instruction: Instruction,
+        expected_rom_kind: RomKind,
+        actual_rom_kind: RomKind,
+    },
+}
+
+impl std::fmt::Display for InstructionDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            InstructionDecodeError::UnknownInstruction { parameters } => {
+                write!(f, "Unknown instruction: {}", parameters)
+            }
+            InstructionDecodeError::IncompatibleRomKind {
+                parameters,
+                instruction,
+                expected_rom_kind,
+                actual_rom_kind,
+            } => {
+                let mut message = String::new();
+                let mut comment = String::new();
+                write_inst_dasm(&instruction, *expected_rom_kind, &mut message, &mut comment).ok();
+                write!(
+                    f,
+                    "{:04X} a.k.a. \"{}\" ({}) is at least a {} instruction but ROM is {}",
+                    parameters.significant_bytes(instruction.size()),
+                    message,
+                    comment,
+                    expected_rom_kind,
+                    actual_rom_kind
+                )
+            }
+        }
+    }
+}
+
 // Takes 16 bits (instruction size) and decomposes it into its parts
 #[derive(Clone, Copy, Debug)]
 pub struct InstructionParameters {
@@ -36,13 +105,13 @@ impl InstructionParameters {
     pub fn new(bits: u32) -> Self {
         InstructionParameters {
             bits,
-            op  : ((bits & 0xF0000000) >> 4 * 7) as u8,
-            x   : ((bits & 0x0F000000) >> 4 * 6) as u8,
-            y   : ((bits & 0x00F00000) >> 4 * 5) as u8,
-            n   : ((bits & 0x000F0000) >> 4 * 4) as u8,
-            nn  : ((bits & 0x00FF0000) >> 4 * 4) as u8,
-            nnn : ((bits & 0x0FFF0000) >> 4 * 4) as u16,
-            nnnn: ((bits & 0x0000FFFF) >> 4 * 0) as u16,
+            op: decode_op(bits),
+            x: decode_x(bits),
+            y: decode_y(bits),
+            n: decode_n(bits),
+            nn: decode_nn(bits),
+            nnn: decode_nnn(bits),
+            nnnn: decode_nnnn(bits),
         }
     }
 
@@ -54,151 +123,8 @@ impl InstructionParameters {
         self.significant_bytes(2)
     }
 
-    pub fn try_decode_from_u32(bits: u32, kind: RomKind) -> Result<Instruction, String> {
-        let op = ((bits & 0xF0000000) >> 4 * 7) as u8;
-        let x  = ((bits & 0x0F000000) >> 4 * 6) as u8;
-        let y  = ((bits & 0x00F00000) >> 4 * 5) as u8;
-        let n  = ((bits & 0x000F0000) >> 4 * 4) as u8;
-        let nn = ((bits & 0x00FF0000) >> 4 * 4) as u8;
-
-        let instruction = match (op, x, y, n) {
-            (0x0, 0x0, 0xE, 0x0) => Instruction::ClearScreen,
-            (0x0, 0x0, 0xE, 0xE) => Instruction::SubroutineReturn,
-            (0x0, 0x0, 0xC, __n) => Instruction::ScrollDown(n),
-            (0x0, 0x0, 0xD, __n) => Instruction::ScrollUp(n),
-            (0x0, 0x0, 0xF, 0xB) => Instruction::ScrollRight,
-            (0x0, 0x0, 0xF, 0xC) => Instruction::ScrollLeft,
-            (0x0, 0x0, 0xF, 0xD) => Instruction::Exit,
-            (0x0, 0x0, 0xF, 0xE) => Instruction::LowResolution,
-            (0x0, 0x0, 0xF, 0xF) => Instruction::HighResolution,
-            (0x1, __x, __y, __n) => Instruction::Jump(((bits & 0x0FFF0000) >> 4 * 4) as u16),
-            (0x2, __x, __y, __n) => {
-                Instruction::CallSubroutine(((bits & 0x0FFF0000) >> 4 * 4) as u16)
-            }
-            (0x3, __x, __y, __n) => Instruction::SkipIfEqualsConstant(x, nn),
-            (0x4, __x, __y, __n) => Instruction::SkipIfNotEqualsConstant(x, nn),
-            (0x5, __x, __y, 0x0) => Instruction::SkipIfEquals(x, y),
-            (0x5, __x, __y, 0x2) => Instruction::StoreRange(x, y),
-            (0x5, __x, __y, 0x3) => Instruction::LoadRange(x, y),
-            (0x6, __x, __y, __n) => Instruction::SetConstant(x, nn),
-            (0x7, __x, __y, __n) => Instruction::AddConstant(x, nn),
-            (0x8, __x, __y, 0x0) => Instruction::Set(x, y),
-            (0x8, __x, __y, 0x1) => Instruction::Or(x, y),
-            (0x8, __x, __y, 0x2) => Instruction::And(x, y),
-            (0x8, __x, __y, 0x3) => Instruction::Xor(x, y),
-            (0x8, __x, __y, 0x4) => Instruction::Add(x, y),
-            (0x8, __x, __y, 0x5) => Instruction::Sub(x, y, true),
-            (0x8, __x, __y, 0x6) => Instruction::Shift(x, y, true),
-            (0x8, __x, __y, 0x7) => Instruction::Sub(x, y, false),
-            (0x8, __x, __y, 0xE) => Instruction::Shift(x, y, false),
-            (0x9, __x, __y, 0x0) => Instruction::SkipIfNotEquals(x, y),
-            (0xA, __x, __y, __n) => Instruction::SetIndex(((bits & 0x0FFF0000) >> 4 * 4) as u16),
-            (0xB, __x, __y, __n) => {
-                Instruction::JumpWithOffset(((bits & 0x0FFF0000) >> 4 * 4) as u16, x)
-            }
-            (0xC, __x, __y, __n) => Instruction::GenerateRandom(x, nn),
-            (0xD, __x, __y, __n) => Instruction::Draw(x, y, n),
-            (0xE, __x, 0x9, 0xE) => Instruction::SkipIfKeyDown(x),
-            (0xE, __x, 0xA, 0x1) => Instruction::SkipIfKeyNotDown(x),
-            (0xF, 0x0, 0x0, 0x0) => {
-                Instruction::SetIndexToLong(((bits & 0x0000FFFF) >> 4 * 0) as u16)
-            }
-            (0xF, __x, 0x0, 0x1) => Instruction::SetPlane(x),
-            (0xF, 0x0, 0x0, 0x2) => Instruction::LoadAudio,
-            (0xF, __x, 0x0, 0x7) => Instruction::GetDelayTimer(x),
-            (0xF, __x, 0x0, 0xA) => Instruction::WaitForKey(x),
-            (0xF, __x, 0x1, 0x5) => Instruction::SetDelayTimer(x),
-            (0xF, __x, 0x1, 0x8) => Instruction::SetSoundTimer(x),
-            (0xF, __x, 0x1, 0xE) => Instruction::AddToIndex(x),
-            (0xF, __x, 0x2, 0x9) => Instruction::SetIndexToHexChar(x),
-            (0xF, __x, 0x3, 0x0) => Instruction::SetIndexToBigHexChar(x),
-            (0xF, __x, 0x3, 0x3) => Instruction::StoreBinaryCodedDecimal(x),
-            (0xF, __x, 0x3, 0xA) => Instruction::SetPitch(x),
-            (0xF, __x, 0x5, 0x5) => Instruction::Store(x),
-            (0xF, __x, 0x6, 0x5) => Instruction::Load(x),
-            (0xF, __x, 0x7, 0x5) => Instruction::StoreFlags(x),
-            (0xF, __x, 0x8, 0x5) => Instruction::LoadFlags(x),
-            _ => {
-                return Err(format!(
-                    "Unable to decode instruction {}",
-                    InstructionParameters::new(bits)
-                ))
-            }
-        };
-
-        match instruction {
-            Instruction::Exit
-            | Instruction::LowResolution
-            | Instruction::HighResolution
-            | Instruction::ScrollDown(_)
-            | Instruction::ScrollRight
-            | Instruction::ScrollLeft
-            | Instruction::SetIndexToBigHexChar(_) => {
-                if kind < RomKind::SCHIP {
-                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(
-                        instruction,
-                        RomKind::SCHIP,
-                        kind,
-                    ));
-                }
-            }
-            Instruction::ScrollUp(_)
-            | Instruction::LoadAudio
-            | Instruction::SetPitch(_)
-            | Instruction::LoadRange(_, _)
-            | Instruction::StoreRange(_, _)
-            | Instruction::SetIndexToLong(_)
-            | Instruction::SetPlane(_) => {
-                if kind < RomKind::XOCHIP {
-                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(
-                        instruction,
-                        RomKind::XOCHIP,
-                        kind,
-                    ));
-                }
-            }
-            Instruction::LoadFlags(vx) | Instruction::StoreFlags(vx) => {
-                if kind < RomKind::SCHIP {
-                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(
-                        instruction,
-                        RomKind::SCHIP,
-                        kind,
-                    ));
-                } else if vx > 0x7 && kind < RomKind::XOCHIP {
-                    return Err(InstructionParameters::new(bits).compatibility_issue_msg(
-                        instruction,
-                        RomKind::XOCHIP,
-                        kind,
-                    ));
-                }
-            }
-            _ => (),
-        };
-
-        Ok(instruction)
-    }
-
-    pub fn try_decode(&self, kind: RomKind) -> Result<Instruction, String> {
-        InstructionParameters::try_decode_from_u32(self.bits, kind)
-    }
-
-    fn compatibility_issue_msg(
-        &self,
-        instruction: Instruction,
-        expected_kind: RomKind,
-        actual_kind: RomKind,
-    ) -> String {
-        let mut message = String::new();
-        let mut comment = String::new();
-        write_inst_dasm(&instruction, expected_kind, &mut message, &mut comment).ok();
-        format!(
-            "{:04X} a.k.a. \"{}\" ({}) is at least a {} instruction but ROM is {}",
-            self.significant_bytes(instruction.size()),
-            message,
-            comment,
-            expected_kind,
-            actual_kind
-        )
+    pub fn try_decode(&self, kind: RomKind) -> Result<Instruction, InstructionDecodeError> {
+        Instruction::try_from_u32(self.bits, kind)
     }
 }
 
@@ -276,5 +202,128 @@ impl Instruction {
 
     pub fn size_or_default(instruction: &Option<Instruction>) -> u16 {
         instruction.as_ref().map_or(2, Instruction::size)
+    }
+
+    pub fn try_from_u32(
+        bits: u32,
+        kind: RomKind,
+    ) -> Result<Instruction, InstructionDecodeError> {
+        let op = decode_op(bits);
+        let x = decode_x(bits);
+        let y = decode_y(bits);
+        let n = decode_n(bits);
+
+        let instruction = match (op, x, y, n) {
+            (0x0, 0x0, 0xE, 0x0) => Instruction::ClearScreen,
+            (0x0, 0x0, 0xE, 0xE) => Instruction::SubroutineReturn,
+            (0x0, 0x0, 0xC, __n) => Instruction::ScrollDown(n),
+            (0x0, 0x0, 0xD, __n) => Instruction::ScrollUp(n),
+            (0x0, 0x0, 0xF, 0xB) => Instruction::ScrollRight,
+            (0x0, 0x0, 0xF, 0xC) => Instruction::ScrollLeft,
+            (0x0, 0x0, 0xF, 0xD) => Instruction::Exit,
+            (0x0, 0x0, 0xF, 0xE) => Instruction::LowResolution,
+            (0x0, 0x0, 0xF, 0xF) => Instruction::HighResolution,
+            (0x1, __x, __y, __n) => Instruction::Jump(decode_nnn(bits)),
+            (0x2, __x, __y, __n) => Instruction::CallSubroutine(decode_nnn(bits)),
+            (0x3, __x, __y, __n) => Instruction::SkipIfEqualsConstant(x, decode_nn(bits)),
+            (0x4, __x, __y, __n) => Instruction::SkipIfNotEqualsConstant(x, decode_nn(bits)),
+            (0x5, __x, __y, 0x0) => Instruction::SkipIfEquals(x, y),
+            (0x5, __x, __y, 0x2) => Instruction::StoreRange(x, y),
+            (0x5, __x, __y, 0x3) => Instruction::LoadRange(x, y),
+            (0x6, __x, __y, __n) => Instruction::SetConstant(x, decode_nn(bits)),
+            (0x7, __x, __y, __n) => Instruction::AddConstant(x, decode_nn(bits)),
+            (0x8, __x, __y, 0x0) => Instruction::Set(x, y),
+            (0x8, __x, __y, 0x1) => Instruction::Or(x, y),
+            (0x8, __x, __y, 0x2) => Instruction::And(x, y),
+            (0x8, __x, __y, 0x3) => Instruction::Xor(x, y),
+            (0x8, __x, __y, 0x4) => Instruction::Add(x, y),
+            (0x8, __x, __y, 0x5) => Instruction::Sub(x, y, true),
+            (0x8, __x, __y, 0x6) => Instruction::Shift(x, y, true),
+            (0x8, __x, __y, 0x7) => Instruction::Sub(x, y, false),
+            (0x8, __x, __y, 0xE) => Instruction::Shift(x, y, false),
+            (0x9, __x, __y, 0x0) => Instruction::SkipIfNotEquals(x, y),
+            (0xA, __x, __y, __n) => Instruction::SetIndex(decode_nnn(bits)),
+            (0xB, __x, __y, __n) => Instruction::JumpWithOffset(decode_nnn(bits), x),
+            (0xC, __x, __y, __n) => Instruction::GenerateRandom(x, decode_nn(bits)),
+            (0xD, __x, __y, __n) => Instruction::Draw(x, y, n),
+            (0xE, __x, 0x9, 0xE) => Instruction::SkipIfKeyDown(x),
+            (0xE, __x, 0xA, 0x1) => Instruction::SkipIfKeyNotDown(x),
+            (0xF, 0x0, 0x0, 0x0) => Instruction::SetIndexToLong(decode_nnnn(bits)),
+            (0xF, __x, 0x0, 0x1) => Instruction::SetPlane(x),
+            (0xF, 0x0, 0x0, 0x2) => Instruction::LoadAudio,
+            (0xF, __x, 0x0, 0x7) => Instruction::GetDelayTimer(x),
+            (0xF, __x, 0x0, 0xA) => Instruction::WaitForKey(x),
+            (0xF, __x, 0x1, 0x5) => Instruction::SetDelayTimer(x),
+            (0xF, __x, 0x1, 0x8) => Instruction::SetSoundTimer(x),
+            (0xF, __x, 0x1, 0xE) => Instruction::AddToIndex(x),
+            (0xF, __x, 0x2, 0x9) => Instruction::SetIndexToHexChar(x),
+            (0xF, __x, 0x3, 0x0) => Instruction::SetIndexToBigHexChar(x),
+            (0xF, __x, 0x3, 0x3) => Instruction::StoreBinaryCodedDecimal(x),
+            (0xF, __x, 0x3, 0xA) => Instruction::SetPitch(x),
+            (0xF, __x, 0x5, 0x5) => Instruction::Store(x),
+            (0xF, __x, 0x6, 0x5) => Instruction::Load(x),
+            (0xF, __x, 0x7, 0x5) => Instruction::StoreFlags(x),
+            (0xF, __x, 0x8, 0x5) => Instruction::LoadFlags(x),
+            _ => {
+                return Err(InstructionDecodeError::UnknownInstruction {
+                    parameters: InstructionParameters::new(bits),
+                })
+            }
+        };
+
+        match instruction {
+            Instruction::Exit
+            | Instruction::LowResolution
+            | Instruction::HighResolution
+            | Instruction::ScrollDown(_)
+            | Instruction::ScrollRight
+            | Instruction::ScrollLeft
+            | Instruction::SetIndexToBigHexChar(_) => {
+                if kind < RomKind::SCHIP {
+                    return Err(InstructionDecodeError::IncompatibleRomKind {
+                        instruction,
+                        parameters: InstructionParameters::new(bits),
+                        expected_rom_kind: RomKind::SCHIP,
+                        actual_rom_kind: kind,
+                    });
+                }
+            }
+            Instruction::ScrollUp(_)
+            | Instruction::LoadAudio
+            | Instruction::SetPitch(_)
+            | Instruction::LoadRange(_, _)
+            | Instruction::StoreRange(_, _)
+            | Instruction::SetIndexToLong(_)
+            | Instruction::SetPlane(_) => {
+                if kind < RomKind::XOCHIP {
+                    return Err(InstructionDecodeError::IncompatibleRomKind {
+                        instruction,
+                        parameters: InstructionParameters::new(bits),
+                        expected_rom_kind: RomKind::XOCHIP,
+                        actual_rom_kind: kind,
+                    });
+                }
+            }
+            Instruction::LoadFlags(vx) | Instruction::StoreFlags(vx) => {
+                if kind < RomKind::SCHIP {
+                    return Err(InstructionDecodeError::IncompatibleRomKind {
+                        instruction,
+                        parameters: InstructionParameters::new(bits),
+                        expected_rom_kind: RomKind::SCHIP,
+                        actual_rom_kind: kind,
+                    });
+                } else if vx > 0x7 && kind < RomKind::XOCHIP {
+                    return Err(InstructionDecodeError::IncompatibleRomKind {
+                        instruction,
+                        parameters: InstructionParameters::new(bits),
+                        expected_rom_kind: RomKind::XOCHIP,
+                        actual_rom_kind: kind,
+                    });
+                }
+            }
+            _ => (),
+        };
+
+        Ok(instruction)
     }
 }

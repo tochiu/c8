@@ -2,7 +2,7 @@ use super::{
     audio::{Audio, AUDIO_BUFFER_SIZE_BYTES},
     disp::{Display, DisplayBuffer, DisplayMode},
     input::Key,
-    instruct::{Instruction, InstructionParameters},
+    instruct::Instruction,
     mem::*,
     rom::{Rom, RomKind},
 };
@@ -299,9 +299,9 @@ impl Interpreter {
                 self.display.selected_plane_bitflags = *prior_selected_plane_bitflags;
             }
 
-            InterpreterHistoryFragmentExtra::WillChangeDisplayMode { 
-                prior_display_mode, 
-                prior_display_buffers
+            InterpreterHistoryFragmentExtra::WillChangeDisplayMode {
+                prior_display_mode,
+                prior_display_buffers,
             } => {
                 self.display.mode = *prior_display_mode;
                 self.display.planes = **prior_display_buffers;
@@ -324,13 +324,12 @@ impl Interpreter {
                 }))
             }
 
-            Instruction::LowResolution
-            | Instruction::HighResolution => {
-                Some(Box::new(InterpreterHistoryFragmentExtra::WillChangeDisplayMode {
+            Instruction::LowResolution | Instruction::HighResolution => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillChangeDisplayMode {
                     prior_display_mode: self.display.mode,
                     prior_display_buffers: Box::new(self.display.planes),
-                }))
-            }
+                },
+            )),
 
             Instruction::ClearScreen
             | Instruction::ScrollUp(_)
@@ -566,7 +565,7 @@ impl Interpreter {
             return;
         }
 
-        match InstructionParameters::try_decode_from_u32(
+        match Instruction::try_from_u32(
             u32::from_be_bytes([
                 self.memory[(self.pc as usize + 0) % self.memory.len()],
                 self.memory[(self.pc as usize + 1) % self.memory.len()],
@@ -581,7 +580,7 @@ impl Interpreter {
             }
             Err(e) => {
                 self.instruction = None;
-                self.error = e;
+                self.error = e.to_string();
             }
         }
     }

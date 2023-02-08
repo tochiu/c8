@@ -21,7 +21,10 @@ use crossterm::style::Stylize;
 
 use std::io::stdout;
 
-use crate::ch8::audio::spawn_audio_stream;
+use crate::ch8::{
+    audio::spawn_audio_stream,
+    vm::VM_FRAME_RATE,
+};
 
 fn main() -> Result<()> {
     match Cli::parse().command {
@@ -57,6 +60,7 @@ fn main() -> Result<()> {
             path,
             debug,
             hz,
+            cpf,
             log,
             kind,
         } => {
@@ -95,7 +99,13 @@ fn main() -> Result<()> {
             let (_audio_stream, audio_controller) = spawn_audio_stream();
 
             // spawn run threads
-            let (run_main_thread, run_render_thread) = spawn_run_threads(rom, hz, audio_controller);
+            let (run_main_thread, run_render_thread) = spawn_run_threads(
+                rom,
+                cpf.or(hz.map(|hz| hz / VM_FRAME_RATE))
+                    .unwrap_or(kind.default_cycles_per_frame())
+                    * VM_FRAME_RATE,
+                audio_controller,
+            );
 
             // wait for threads
             run_render_thread

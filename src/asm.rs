@@ -1,5 +1,5 @@
 use crate::ch8::{
-    instruct::{Instruction, InstructionParameters},
+    instruct::{Instruction, InstructionDecodeError, InstructionParameters},
     interp::{Interpreter, PROGRAM_STARTING_ADDRESS},
     mem::{allocate_memory, MemoryRef},
     rom::{Rom, RomKind},
@@ -71,14 +71,14 @@ impl<'a> DisassemblyPath<'_> {
         self
     }
 
-    fn save_trace<S: Into<String>>(&self, disasm: &mut Disassembler, message: S) {
+    fn save_trace(&self, disasm: &mut Disassembler, error: TraceError) {
         if self.tag < InstructionTag::Proven {
             return;
         }
 
         disasm.traces.push(Trace {
+            error,
             tag: self.tag,
-            message: message.into(),
             entries: self.trace.clone(),
         });
     }
@@ -112,7 +112,7 @@ pub struct Disassembler {
 }
 pub struct Trace {
     tag: InstructionTag,
-    message: String,
+    error: TraceError,
     entries: Vec<TraceEntry>,
 }
 
@@ -123,39 +123,71 @@ struct TraceEntry {
     payload: Option<u8>,
 }
 
+pub enum TraceError {
+    Execute(String),
+    Decode(InstructionDecodeError),
+}
+
 impl From<Rom> for Disassembler {
     fn from(rom: Rom) -> Self {
         let memory = allocate_memory(&rom);
-
-        let instruction_params = memory.instruction_parameters().collect::<Vec<_>>();
-        let instructions = instruction_params
-            .iter()
-            .map(|params| params.try_decode(rom.config.kind).ok())
-            .collect::<Vec<_>>();
-        let tags = instructions
-            .iter()
-            .map(|maybe_inst| {
-                if maybe_inst.is_some() {
-                    InstructionTag::Parsable
-                } else {
-                    InstructionTag::Not
-                }
-            })
-            .collect::<Vec<_>>();
-
-        Disassembler {
-            instruction_params,
-            instructions,
-            rom,
-            memory,
-            tags,
+        let mut disassembler = Disassembler {
+            instruction_params: Vec::with_capacity(memory.len()),
+            instructions: Vec::with_capacity(memory.len()),
+            tags: Vec::with_capacity(memory.len()),
             traces: Vec::new(),
             address_formatter: Default::default(),
-        }
+            rom,
+            memory,
+        };
+
+        disassembler.reset();
+        disassembler
     }
 }
 
 impl Disassembler {
+    pub fn reset(&mut self) {
+        self.instruction_params.clear();
+        self.instructions.clear();
+        self.tags.clear();
+        self.traces.clear();
+
+        self.instruction_params
+            .extend(self.memory.instruction_parameters());
+        self.instructions.extend(
+            self.instruction_params
+                .iter()
+                .map(|params| params.try_decode(self.rom.config.kind).ok()),
+        );
+        self.tags.extend(self.instructions.iter().map(|maybe_inst| {
+            if maybe_inst.is_some() {
+                InstructionTag::Parsable
+            } else {
+                InstructionTag::Not
+            }
+        }));
+    }
+
+    pub fn suggested_rom_kind(&self) -> RomKind {
+        self.traces
+            .iter()
+            .filter_map(|trace| {
+                if let TraceError::Decode(InstructionDecodeError::IncompatibleRomKind {
+                    expected_rom_kind,
+                    ..
+                }) = trace.error
+                {
+                    Some(expected_rom_kind)
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(self.rom.config.kind)
+            .max(self.rom.config.kind)
+    }
+
     pub fn rerun(&mut self) {
         self.tags
             .iter_mut()
@@ -245,7 +277,7 @@ impl Disassembler {
             // Early exit if we are not able to decode the instruction
 
             path.enter_trace(None, None);
-            path.save_trace(self, format!("Unable to decode instruction \"{:04X}\"", self.instruction_params[path.addr as usize].default_significant_bytes()));
+            path.save_trace(self, TraceError::Decode(self.instruction_params[path.addr as usize].try_decode(self.rom.config.kind).expect_err("Instruction was None but corresponding paramters could be decoded")));
             path.leave_trace();
 
             log::trace!("path {:#05X?} is not parsable, backtracking!", path.addr);
@@ -311,7 +343,12 @@ impl Disassembler {
 
                 if !valid_jump_exists {
                     path.enter_trace(Some(instruction), None);
-                    path.save_trace(self, "Unable to evaluate at least one jump path as valid");
+                    path.save_trace(
+                        self,
+                        TraceError::Execute(
+                            "Unable to evaluate at least one jump path as valid".into(),
+                        ),
+                    );
                     path.leave_trace();
 
                     if path.tag == InstructionTag::Proven {
@@ -345,7 +382,10 @@ impl Disassembler {
                     true
                 } else {
                     path.enter_trace(Some(instruction), None);
-                    path.save_trace(self, "Cannot return with empty call stack");
+                    path.save_trace(
+                        self,
+                        TraceError::Execute("Cannot return with empty call stack".into()),
+                    );
                     path.leave_trace();
                     if path.tag == InstructionTag::Proven {
                         log::error!("Attempted return at {:#05X} when stack is empty", path.addr);
@@ -461,13 +501,22 @@ impl Disassembler {
 
             let mut asm = String::new();
             let mut asm_desc = String::new();
+
             // TODO: fix this
-            writeln!(
-                f,
-                "{} {}",
-                if is_error { "ERROR:" } else { "WARNING:" },
-                &trace.message
-            )?;
+            if is_error {
+                write!(f, "ERROR: ")?;
+            } else {
+                write!(f, "WARNING: ")?;
+            }
+            match trace.error {
+                TraceError::Execute(ref execute_err) => {
+                    writeln!(f, "{}", execute_err)?;
+                }
+                TraceError::Decode(ref decode_err) => {
+                    writeln!(f, "{}", decode_err)?;
+                }
+            }
+
             for entry in trace.entries.iter().rev() {
                 write!(f, "  at {:#05X}", entry.addr)?;
                 if let Some(inst) = entry.instruction.as_ref() {

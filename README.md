@@ -54,7 +54,7 @@ C8 is a terminal user interface tooklit made to run and debug **CHIP-8**, **S-CH
 - [ ] Reload Rom (Preserve RPL Flags)
 - [ ] Pre-defined and Custom Color Palettes
 - [ ] Individual Configurable Quirks
-- [ ] Better ROM Auto-Select
+- [x] Better ROM Auto-Select
 
 ## Installation
 
@@ -109,7 +109,8 @@ Arguments:
 
 Options:
   -d, --debug        Runs the ROM in debug mode
-      --hz <HZ>      Sets the instructions executed per second [default: 2000]
+      --cpf <CPF>    Sets the cycles per frame
+      --hz <HZ>      Sets the cycles per second
   -l, --log <LEVEL>  Enable logging [possible values: trace, debug, info, warn, error]
       --kind <KIND>  Sets the ROM kind [possible values: chip8, schip, cosmacvip, xochip]
   -h, --help         Print help information

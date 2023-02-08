@@ -1317,7 +1317,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
 
         // Display
         let display_block = Block::default()
-            .title(display_widget.title())
+            .title(display_widget.build_title())
             .borders(layout_borders.display);
         display_widget.render(display_block.inner(layout_areas.display), buf);
         display_block.render(layout_areas.display, buf);
