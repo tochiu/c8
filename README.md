@@ -54,6 +54,7 @@ C8 is a terminal user interface tooklit made to run and debug **CHIP-8**, **S-CH
 - [ ] Reload Rom (Preserve RPL Flags)
 - [ ] Pre-defined and Custom Color Palettes
 - [ ] Individual Configurable Quirks
+- [ ] Better ROM Auto-Select
 
 ## Installation
 
