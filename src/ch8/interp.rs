@@ -35,113 +35,31 @@ pub enum InterpreterOutput {
     UpdateAudioBuffer,
 }
 
-#[derive(Eq, PartialEq, Debug)]
-pub enum InterpreterHistoryFragmentExtra {
-    WillGenerateRandom {
-        prior_rng: Box<StdRng>,
-    },
-    WillSetPlane {
-        prior_selected_plane_bitflags: u8,
-    },
-    WillChangeDisplayMode {
-        prior_display_mode: DisplayMode,
-        prior_display_buffers: Box<[DisplayBuffer; 4]>,
-    },
-    WillDrawEntireDisplay {
-        prior_display_buffers: [Option<Box<DisplayBuffer>>; 4],
-    },
-    WillLoadFromMemory {
-        prior_index_access_flags: Vec<u8>,
-    },
-    WillStoreInMemory {
-        prior_index_memory: [u8; 16],
-        prior_index_access_flag_slice: [u8; 16],
-    },
-    WillStoreInFlags {
-        prior_flags: [u8; 16],
-    },
-    WillReturnFromSubroutine {
-        prior_return_address: u16,
-    },
-    WillSetPitch {
-        prior_pitch: u8,
-    },
-    WillLoadAudio {
-        prior_buffer: [u8; AUDIO_BUFFER_SIZE_BYTES],
-        prior_index_access_flag_slice: [u8; 16],
-    },
-}
-
-#[derive(PartialEq, Eq, Debug)]
-pub struct InterpreterHistoryFragment {
-    pub instruction: Option<Instruction>,
-    pub pc: u16,
-    pub pc_access_flags: u8,
-    pub index: u16,
-    pub registers: [u8; 16],
-    pub extra: Option<Box<InterpreterHistoryFragmentExtra>>,
-}
-
-impl InterpreterHistoryFragment {
-    pub fn log_diff(&self, other: &Self) {
-        if self.instruction != other.instruction {
-            log::debug!(
-                "Instruction difference: {:?} -> {:?}",
-                self.instruction,
-                other.instruction
-            );
-        }
-        if self.pc != other.pc {
-            log::debug!("PC difference: {:?} -> {:?}", self.pc, other.pc);
-        }
-        if self.pc_access_flags != other.pc_access_flags {
-            log::debug!(
-                "PC access flags difference: {:?} -> {:?}",
-                self.pc_access_flags,
-                other.pc_access_flags
-            );
-        }
-        if self.index != other.index {
-            log::debug!("Index difference: {:?} -> {:?}", self.index, other.index);
-        }
-        if self.registers != other.registers {
-            log::debug!(
-                "Registers difference: {:?} -> {:?}",
-                self.registers,
-                other.registers
-            );
-        }
-        if self.extra != other.extra {
-            log::debug!("Payload difference: {:?} -> {:?}", self.extra, other.extra);
-        }
-    }
-}
-
 pub struct Interpreter {
     pub memory: Vec<u8>,
     pub memory_last_address: u16,
-    pub memory_access_flags: Vec<u8>,
+    // pub memory_access_flags: Vec<u8>,
     pub pc: u16,
     pub index: u16,
     pub stack: Vec<u16>,
     pub flags: [u8; 16],
     pub registers: [u8; 16],
     pub rom: Rom,
-    pub rng: StdRng,
     pub display: Display,
     pub waiting: bool,
     pub audio: Audio,
     pub input: InterpreterInput,
     pub output: Option<InterpreterOutput>,
     instruction: Option<(Instruction, u16)>,
-    workspace: [u8; 128],
     prefetch: Vec<Option<(Instruction, u16)>>,
+    workspace: [u8; 128],
     error: String,
     valid: bool,
+    rng: StdRng,
 }
 
-impl From<Rom> for Interpreter {
-    fn from(rom: Rom) -> Self {
+impl Interpreter {
+    pub fn new(rom: Rom) -> Self {
         let memory = allocate_memory(&rom);
         let memory_last_address = (memory.len() - 1) as u16;
         let prefetch = memory
@@ -154,11 +72,6 @@ impl From<Rom> for Interpreter {
             })
             .collect();
         let mut interp = Interpreter {
-            memory_access_flags: if rom.config.debugging {
-                vec![0; memory.len()]
-            } else {
-                vec![]
-            },
             memory_last_address,
             memory,
             pc: PROGRAM_STARTING_ADDRESS,
@@ -183,12 +96,8 @@ impl From<Rom> for Interpreter {
         interp.fetch_decode();
         interp
     }
-}
 
-impl Interpreter {
-    pub fn instruction(&self) -> Option<Instruction> {
-        self.instruction.map(|(inst, _)| inst)
-    }
+
 
     // TODO: this needs to be removed since all chip8 specifications wait for the key up in the Get Key (FX0A) instruction
     pub fn pick_key<'a, 'b, T: TryInto<Key>>(
@@ -199,323 +108,15 @@ impl Interpreter {
         key_up
     }
 
-    pub fn undo(&mut self, prior_state: &InterpreterHistoryFragment) {
-        let Some(instruction) = prior_state.instruction.as_ref() else {
-            unreachable!("Cannot undo to a state without an instruction")
-        };
-
-        self.pc = prior_state.pc;
-        self.index = prior_state.index;
-        self.registers = prior_state.registers;
-        self.instruction = Some((*instruction, instruction.size()));
-        self.waiting = false;
-
-        log::debug!(
-            "Restoring memory access flags: {:?} -> {:?}",
-            self.memory_access_flags[self.pc as usize],
-            prior_state.pc_access_flags
-        );
-        self.memory_access_flags[self.pc as usize] = prior_state.pc_access_flags;
-
-        match instruction {
-            Instruction::CallSubroutine(_) => {
-                self.stack.pop();
-            }
-            Instruction::Draw(vx, vy, height) => {
-                self.exec_display_instruction(*vx, *vy, *height);
-                self.registers[VFLAG] = prior_state.registers[VFLAG];
-            }
-            _ => (),
-        }
-
-        let Some(extra) = prior_state.extra.as_deref() else {
-            return
-        };
-
-        match extra {
-            InterpreterHistoryFragmentExtra::WillGenerateRandom { prior_rng } => {
-                self.rng = prior_rng.as_ref().clone();
-            }
-
-            InterpreterHistoryFragmentExtra::WillDrawEntireDisplay {
-                prior_display_buffers,
-            } => {
-                for (plane, maybe_prior_plane) in self
-                    .display
-                    .planes
-                    .iter_mut()
-                    .zip(prior_display_buffers.into_iter())
-                {
-                    let Some(prior_plane) = maybe_prior_plane.as_deref() else {
-                        continue
-                    };
-
-                    *plane = *prior_plane;
-                }
-            }
-
-            InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                prior_index_access_flags,
-            } => {
-                self.memory_access_flags
-                    .import(&prior_index_access_flags, self.index);
-            }
-
-            InterpreterHistoryFragmentExtra::WillStoreInMemory {
-                prior_index_memory,
-                prior_index_access_flag_slice: index_access_flag_slice,
-            } => {
-                self.memory.import(prior_index_memory, self.index);
-                self.memory_access_flags
-                    .import(index_access_flag_slice, self.index);
-            }
-
-            InterpreterHistoryFragmentExtra::WillStoreInFlags { prior_flags } => {
-                self.flags = *prior_flags;
-            }
-
-            InterpreterHistoryFragmentExtra::WillReturnFromSubroutine {
-                prior_return_address,
-            } => {
-                self.stack.push(*prior_return_address);
-            }
-
-            InterpreterHistoryFragmentExtra::WillLoadAudio {
-                prior_buffer,
-                prior_index_access_flag_slice,
-            } => {
-                self.audio.buffer = *prior_buffer;
-                self.memory_access_flags
-                    .import(prior_index_access_flag_slice, self.index);
-            }
-
-            InterpreterHistoryFragmentExtra::WillSetPitch { prior_pitch } => {
-                self.audio.pitch = *prior_pitch;
-            }
-
-            InterpreterHistoryFragmentExtra::WillSetPlane {
-                prior_selected_plane_bitflags,
-            } => {
-                self.display.selected_plane_bitflags = *prior_selected_plane_bitflags;
-            }
-
-            InterpreterHistoryFragmentExtra::WillChangeDisplayMode {
-                prior_display_mode,
-                prior_display_buffers,
-            } => {
-                self.display.mode = *prior_display_mode;
-                self.display.planes = **prior_display_buffers;
-            }
-        }
+    pub fn instruction(&self) -> Option<Instruction> {
+        self.instruction.map(|(inst, _)| inst)
     }
 
-    pub fn to_history_fragment(&self) -> InterpreterHistoryFragment {
-        let instruction = self.instruction();
-        let extra = instruction.and_then(|instruction| match instruction {
-            Instruction::GenerateRandom(_, _) => Some(Box::new(
-                InterpreterHistoryFragmentExtra::WillGenerateRandom {
-                    prior_rng: Box::new(self.rng.clone()),
-                },
-            )),
-
-            Instruction::SetPlane(_) => {
-                Some(Box::new(InterpreterHistoryFragmentExtra::WillSetPlane {
-                    prior_selected_plane_bitflags: self.display.selected_plane_bitflags,
-                }))
-            }
-
-            Instruction::LowResolution | Instruction::HighResolution => Some(Box::new(
-                InterpreterHistoryFragmentExtra::WillChangeDisplayMode {
-                    prior_display_mode: self.display.mode,
-                    prior_display_buffers: Box::new(self.display.planes),
-                },
-            )),
-
-            Instruction::ClearScreen
-            | Instruction::ScrollUp(_)
-            | Instruction::ScrollDown(_)
-            | Instruction::ScrollLeft
-            | Instruction::ScrollRight => Some(Box::new(
-                InterpreterHistoryFragmentExtra::WillDrawEntireDisplay {
-                    prior_display_buffers: [0, 1, 2, 3].map(|i| {
-                        if self.display.selected_plane_bitflags >> i == 1 {
-                            Some(Box::new(self.display.planes[i]))
-                        } else {
-                            None
-                        }
-                    }),
-                },
-            )),
-
-            Instruction::Load(vx) => Some(Box::new({
-                let mut prior_index_access_flags = vec![0; vx as usize + 1];
-                self.memory_access_flags
-                    .export(self.index, &mut prior_index_access_flags);
-                InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                    prior_index_access_flags,
-                }
-            })),
-
-            Instruction::LoadRange(vstart, vend) => Some(Box::new({
-                let mut prior_index_access_flags = vec![0; vstart.abs_diff(vend) as usize + 1];
-                self.memory_access_flags
-                    .export(self.index, &mut prior_index_access_flags);
-                InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                    prior_index_access_flags,
-                }
-            })),
-
-            Instruction::Draw(_, _, n) => Some(Box::new({
-                let mut prior_index_access_flags = vec![0; self.get_sprite_draw_info(n).2];
-                self.memory_access_flags
-                    .export(self.index, &mut prior_index_access_flags);
-                InterpreterHistoryFragmentExtra::WillLoadFromMemory {
-                    prior_index_access_flags,
-                }
-            })),
-
-            Instruction::Store(_)
-            | Instruction::StoreRange(_, _)
-            | Instruction::StoreBinaryCodedDecimal(_) => Some(Box::new({
-                let mut index_memory = [0; 16];
-                let mut index_access_flag_slice = [0; 16];
-                self.memory.export(self.index, &mut index_memory);
-                self.memory_access_flags
-                    .export(self.index, &mut index_access_flag_slice);
-                InterpreterHistoryFragmentExtra::WillStoreInMemory {
-                    prior_index_memory: index_memory,
-                    prior_index_access_flag_slice: index_access_flag_slice,
-                }
-            })),
-
-            Instruction::StoreFlags(_) => Some(Box::new(
-                InterpreterHistoryFragmentExtra::WillStoreInFlags {
-                    prior_flags: self.flags,
-                },
-            )),
-
-            Instruction::SubroutineReturn => Some(Box::new(
-                InterpreterHistoryFragmentExtra::WillReturnFromSubroutine {
-                    prior_return_address: self.stack.last().cloned().unwrap_or_default(),
-                },
-            )),
-
-            Instruction::LoadAudio => Some(Box::new({
-                let mut index_access_flag_slice = [0; 16];
-                self.memory_access_flags
-                    .export(self.index, &mut index_access_flag_slice);
-                InterpreterHistoryFragmentExtra::WillLoadAudio {
-                    prior_buffer: self.audio.buffer,
-                    prior_index_access_flag_slice: index_access_flag_slice,
-                }
-            })),
-
-            Instruction::SetPitch(_) => {
-                Some(Box::new(InterpreterHistoryFragmentExtra::WillSetPitch {
-                    prior_pitch: self.audio.pitch,
-                }))
-            }
-
-            _ => None,
-        });
-
-        InterpreterHistoryFragment {
-            pc: self.pc,
-            pc_access_flags: self.memory_access_flags[self.pc as usize],
-            instruction,
-            index: self.index,
-            registers: self.registers,
-            extra,
-        }
-    }
-
-    pub fn update_memory_access_flags(&mut self, executed_fragment: &InterpreterHistoryFragment) {
-        self.memory_access_flags[executed_fragment.pc as usize] |= MEM_ACCESS_EXEC_FLAG;
-
-        let Some(instruction) = executed_fragment.instruction else {
-            return
-        };
-
-        match instruction {
-            Instruction::Load(vx) => {
-                let buf = &mut self.workspace[0..=vx as usize];
-                self.memory_access_flags
-                    .export(executed_fragment.index, buf);
-                buf.iter_mut()
-                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
-                self.memory_access_flags
-                    .import(buf, executed_fragment.index);
-            }
-
-            Instruction::LoadRange(mut vstart, mut vend) => {
-                if vstart > vend {
-                    std::mem::swap(&mut vstart, &mut vend);
-                }
-                let buf = &mut self.workspace[vstart as usize..=vend as usize];
-                self.memory_access_flags
-                    .export(executed_fragment.index, buf);
-                buf.iter_mut()
-                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
-                self.memory_access_flags
-                    .import(buf, executed_fragment.index);
-            }
-
-            Instruction::Draw(_, _, n) => {
-                let total_bytes = self.get_sprite_draw_info(n).2;
-                let buf = &mut self.workspace[..total_bytes];
-                self.memory_access_flags
-                    .export(executed_fragment.index, buf);
-                buf.iter_mut()
-                    .for_each(|flags| *flags |= MEM_ACCESS_DRAW_FLAG | MEM_ACCESS_READ_FLAG);
-                self.memory_access_flags
-                    .import(buf, executed_fragment.index);
-            }
-
-            Instruction::Store(vx) => {
-                let buf = &mut self.workspace[0..=vx as usize];
-                self.memory_access_flags
-                    .export(executed_fragment.index, buf);
-                buf.iter_mut()
-                    .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
-                self.memory_access_flags
-                    .import(buf, executed_fragment.index);
-            }
-
-            Instruction::StoreRange(mut vstart, mut vend) => {
-                if vstart > vend {
-                    std::mem::swap(&mut vstart, &mut vend);
-                }
-
-                let buf = &mut self.workspace[vstart as usize..=vend as usize];
-                self.memory_access_flags
-                    .export(executed_fragment.index, buf);
-                buf.iter_mut()
-                    .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
-                self.memory_access_flags
-                    .import(buf, executed_fragment.index);
-            }
-
-            Instruction::StoreBinaryCodedDecimal(_) => {
-                let buf = &mut self.workspace[..3];
-                self.memory_access_flags
-                    .export(executed_fragment.index, buf);
-                buf.iter_mut()
-                    .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
-                self.memory_access_flags
-                    .import(&buf, executed_fragment.index);
-            }
-
-            Instruction::LoadAudio => {
-                let buf = &mut self.workspace[..16];
-                self.memory_access_flags
-                    .export(executed_fragment.index, buf);
-                buf.iter_mut()
-                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
-                self.memory_access_flags
-                    .import(&buf, executed_fragment.index);
-            }
-
-            _ => (),
+    pub fn stop_result(&self) -> Result<bool, String> {
+        if self.valid {
+            Ok(false)
+        } else {
+            Err(self.error.clone())
         }
     }
 
@@ -548,14 +149,6 @@ impl Interpreter {
                 self.fetch_decode();
             }
             true
-        }
-    }
-
-    pub fn stop_result(&self) -> Result<bool, String> {
-        if self.valid {
-            Ok(false)
-        } else {
-            Err(self.error.clone())
         }
     }
 
@@ -980,6 +573,403 @@ impl Interpreter {
                 n as usize,
                 n as usize * self.display.selected_plane_bitflags.count_ones() as usize,
             )
+        }
+    }
+
+    pub fn undo(&mut self, prior_state: &InterpreterHistoryFragment, memory_access_flags: &mut [u8]) {
+        let Some(instruction) = prior_state.instruction.as_ref() else {
+            unreachable!("Cannot undo to a state without an instruction")
+        };
+
+        self.pc = prior_state.pc;
+        self.index = prior_state.index;
+        self.registers = prior_state.registers;
+        self.instruction = Some((*instruction, instruction.size()));
+        self.waiting = false;
+        
+        memory_access_flags[self.pc as usize] = prior_state.pc_access_flags;
+
+        match instruction {
+            Instruction::CallSubroutine(_) => {
+                self.stack.pop();
+            }
+            Instruction::Draw(vx, vy, height) => {
+                self.exec_display_instruction(*vx, *vy, *height);
+                self.registers[VFLAG] = prior_state.registers[VFLAG];
+            }
+            _ => (),
+        }
+
+        let Some(extra) = prior_state.extra.as_deref() else {
+            return
+        };
+
+        match extra {
+            InterpreterHistoryFragmentExtra::WillGenerateRandom { prior_rng } => {
+                self.rng = prior_rng.as_ref().clone();
+            }
+
+            InterpreterHistoryFragmentExtra::WillDrawEntireDisplay {
+                prior_display_buffers,
+            } => {
+                for (plane, maybe_prior_plane) in self
+                    .display
+                    .planes
+                    .iter_mut()
+                    .zip(prior_display_buffers.into_iter())
+                {
+                    let Some(prior_plane) = maybe_prior_plane.as_deref() else {
+                        continue
+                    };
+
+                    *plane = *prior_plane;
+                }
+            }
+
+            InterpreterHistoryFragmentExtra::WillLoadFromMemory {
+                prior_index_access_flags,
+            } => {
+                memory_access_flags
+                    .import(&prior_index_access_flags, self.index);
+            }
+
+            InterpreterHistoryFragmentExtra::WillStoreInMemory {
+                prior_index_memory,
+                prior_index_access_flag_slice: index_access_flag_slice,
+            } => {
+                self.memory.import(prior_index_memory, self.index);
+                memory_access_flags
+                    .import(index_access_flag_slice, self.index);
+            }
+
+            InterpreterHistoryFragmentExtra::WillStoreInFlags { prior_flags } => {
+                self.flags = *prior_flags;
+            }
+
+            InterpreterHistoryFragmentExtra::WillReturnFromSubroutine {
+                prior_return_address,
+            } => {
+                self.stack.push(*prior_return_address);
+            }
+
+            InterpreterHistoryFragmentExtra::WillLoadAudio {
+                prior_buffer,
+                prior_index_access_flag_slice,
+            } => {
+                self.audio.buffer = *prior_buffer;
+                memory_access_flags
+                    .import(prior_index_access_flag_slice, self.index);
+            }
+
+            InterpreterHistoryFragmentExtra::WillSetPitch { prior_pitch } => {
+                self.audio.pitch = *prior_pitch;
+            }
+
+            InterpreterHistoryFragmentExtra::WillSetPlane {
+                prior_selected_plane_bitflags,
+            } => {
+                self.display.selected_plane_bitflags = *prior_selected_plane_bitflags;
+            }
+
+            InterpreterHistoryFragmentExtra::WillChangeDisplayMode {
+                prior_display_mode,
+                prior_display_buffers,
+            } => {
+                self.display.mode = *prior_display_mode;
+                self.display.planes = **prior_display_buffers;
+            }
+        }
+    }
+
+    pub fn to_history_fragment(&self, memory_access_flags: &[u8]) -> InterpreterHistoryFragment {
+        let instruction = self.instruction();
+        let extra = instruction.and_then(|instruction| match instruction {
+            Instruction::GenerateRandom(_, _) => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillGenerateRandom {
+                    prior_rng: Box::new(self.rng.clone()),
+                },
+            )),
+
+            Instruction::SetPlane(_) => {
+                Some(Box::new(InterpreterHistoryFragmentExtra::WillSetPlane {
+                    prior_selected_plane_bitflags: self.display.selected_plane_bitflags,
+                }))
+            }
+
+            Instruction::LowResolution | Instruction::HighResolution => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillChangeDisplayMode {
+                    prior_display_mode: self.display.mode,
+                    prior_display_buffers: Box::new(self.display.planes),
+                },
+            )),
+
+            Instruction::ClearScreen
+            | Instruction::ScrollUp(_)
+            | Instruction::ScrollDown(_)
+            | Instruction::ScrollLeft
+            | Instruction::ScrollRight => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillDrawEntireDisplay {
+                    prior_display_buffers: [0, 1, 2, 3].map(|i| {
+                        if self.display.selected_plane_bitflags >> i == 1 {
+                            Some(Box::new(self.display.planes[i]))
+                        } else {
+                            None
+                        }
+                    }),
+                },
+            )),
+
+            Instruction::Load(vx) => Some(Box::new({
+                let mut prior_index_access_flags = vec![0; vx as usize + 1];
+                memory_access_flags
+                    .export(self.index, &mut prior_index_access_flags);
+                InterpreterHistoryFragmentExtra::WillLoadFromMemory {
+                    prior_index_access_flags,
+                }
+            })),
+
+            Instruction::LoadRange(vstart, vend) => Some(Box::new({
+                let mut prior_index_access_flags = vec![0; vstart.abs_diff(vend) as usize + 1];
+                memory_access_flags
+                    .export(self.index, &mut prior_index_access_flags);
+                InterpreterHistoryFragmentExtra::WillLoadFromMemory {
+                    prior_index_access_flags,
+                }
+            })),
+
+            Instruction::Draw(_, _, n) => Some(Box::new({
+                let mut prior_index_access_flags = vec![0; self.get_sprite_draw_info(n).2];
+                memory_access_flags
+                    .export(self.index, &mut prior_index_access_flags);
+                InterpreterHistoryFragmentExtra::WillLoadFromMemory {
+                    prior_index_access_flags,
+                }
+            })),
+
+            Instruction::Store(_)
+            | Instruction::StoreRange(_, _)
+            | Instruction::StoreBinaryCodedDecimal(_) => Some(Box::new({
+                let mut index_memory = [0; 16];
+                let mut index_access_flag_slice = [0; 16];
+                self.memory.export(self.index, &mut index_memory);
+                memory_access_flags
+                    .export(self.index, &mut index_access_flag_slice);
+                InterpreterHistoryFragmentExtra::WillStoreInMemory {
+                    prior_index_memory: index_memory,
+                    prior_index_access_flag_slice: index_access_flag_slice,
+                }
+            })),
+
+            Instruction::StoreFlags(_) => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillStoreInFlags {
+                    prior_flags: self.flags,
+                },
+            )),
+
+            Instruction::SubroutineReturn => Some(Box::new(
+                InterpreterHistoryFragmentExtra::WillReturnFromSubroutine {
+                    prior_return_address: self.stack.last().cloned().unwrap_or_default(),
+                },
+            )),
+
+            Instruction::LoadAudio => Some(Box::new({
+                let mut index_access_flag_slice = [0; 16];
+                memory_access_flags
+                    .export(self.index, &mut index_access_flag_slice);
+                InterpreterHistoryFragmentExtra::WillLoadAudio {
+                    prior_buffer: self.audio.buffer,
+                    prior_index_access_flag_slice: index_access_flag_slice,
+                }
+            })),
+
+            Instruction::SetPitch(_) => {
+                Some(Box::new(InterpreterHistoryFragmentExtra::WillSetPitch {
+                    prior_pitch: self.audio.pitch,
+                }))
+            }
+
+            _ => None,
+        });
+
+        InterpreterHistoryFragment {
+            pc: self.pc,
+            pc_access_flags: memory_access_flags[self.pc as usize],
+            instruction,
+            index: self.index,
+            registers: self.registers,
+            extra,
+        }
+    }
+
+    pub fn update_memory_access_flags(&mut self, executed_fragment: &InterpreterHistoryFragment, memory_access_flags: &mut [u8]) {
+        memory_access_flags[executed_fragment.pc as usize] |= MEM_ACCESS_EXEC_FLAG;
+
+        let Some(instruction) = executed_fragment.instruction else {
+            return
+        };
+
+        match instruction {
+            Instruction::Load(vx) => {
+                let buf = &mut self.workspace[0..=vx as usize];
+                memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
+                memory_access_flags
+                    .import(buf, executed_fragment.index);
+            }
+
+            Instruction::LoadRange(mut vstart, mut vend) => {
+                if vstart > vend {
+                    std::mem::swap(&mut vstart, &mut vend);
+                }
+                let buf = &mut self.workspace[vstart as usize..=vend as usize];
+                memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
+                memory_access_flags
+                    .import(buf, executed_fragment.index);
+            }
+
+            Instruction::Draw(_, _, n) => {
+                let total_bytes = self.get_sprite_draw_info(n).2;
+                let buf = &mut self.workspace[..total_bytes];
+                memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_DRAW_FLAG | MEM_ACCESS_READ_FLAG);
+                memory_access_flags
+                    .import(buf, executed_fragment.index);
+            }
+
+            Instruction::Store(vx) => {
+                let buf = &mut self.workspace[0..=vx as usize];
+                memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
+                memory_access_flags
+                    .import(buf, executed_fragment.index);
+            }
+
+            Instruction::StoreRange(mut vstart, mut vend) => {
+                if vstart > vend {
+                    std::mem::swap(&mut vstart, &mut vend);
+                }
+
+                let buf = &mut self.workspace[vstart as usize..=vend as usize];
+                memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
+                memory_access_flags
+                    .import(buf, executed_fragment.index);
+            }
+
+            Instruction::StoreBinaryCodedDecimal(_) => {
+                let buf = &mut self.workspace[..3];
+                memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_WRITE_FLAG);
+                memory_access_flags
+                    .import(&buf, executed_fragment.index);
+            }
+
+            Instruction::LoadAudio => {
+                let buf = &mut self.workspace[..16];
+                memory_access_flags
+                    .export(executed_fragment.index, buf);
+                buf.iter_mut()
+                    .for_each(|flags| *flags |= MEM_ACCESS_READ_FLAG);
+                memory_access_flags
+                    .import(&buf, executed_fragment.index);
+            }
+
+            _ => (),
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Debug)]
+pub enum InterpreterHistoryFragmentExtra {
+    WillGenerateRandom {
+        prior_rng: Box<StdRng>,
+    },
+    WillSetPlane {
+        prior_selected_plane_bitflags: u8,
+    },
+    WillChangeDisplayMode {
+        prior_display_mode: DisplayMode,
+        prior_display_buffers: Box<[DisplayBuffer; 4]>,
+    },
+    WillDrawEntireDisplay {
+        prior_display_buffers: [Option<Box<DisplayBuffer>>; 4],
+    },
+    WillLoadFromMemory {
+        prior_index_access_flags: Vec<u8>,
+    },
+    WillStoreInMemory {
+        prior_index_memory: [u8; 16],
+        prior_index_access_flag_slice: [u8; 16],
+    },
+    WillStoreInFlags {
+        prior_flags: [u8; 16],
+    },
+    WillReturnFromSubroutine {
+        prior_return_address: u16,
+    },
+    WillSetPitch {
+        prior_pitch: u8,
+    },
+    WillLoadAudio {
+        prior_buffer: [u8; AUDIO_BUFFER_SIZE_BYTES],
+        prior_index_access_flag_slice: [u8; 16],
+    },
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct InterpreterHistoryFragment {
+    pub instruction: Option<Instruction>,
+    pub pc: u16,
+    pub pc_access_flags: u8,
+    pub index: u16,
+    pub registers: [u8; 16],
+    pub extra: Option<Box<InterpreterHistoryFragmentExtra>>,
+}
+
+impl InterpreterHistoryFragment {
+    pub fn log_diff(&self, other: &Self) {
+        if self.instruction != other.instruction {
+            log::debug!(
+                "Instruction difference: {:?} -> {:?}",
+                self.instruction,
+                other.instruction
+            );
+        }
+        if self.pc != other.pc {
+            log::debug!("PC difference: {:?} -> {:?}", self.pc, other.pc);
+        }
+        if self.pc_access_flags != other.pc_access_flags {
+            log::debug!(
+                "PC access flags difference: {:?} -> {:?}",
+                self.pc_access_flags,
+                other.pc_access_flags
+            );
+        }
+        if self.index != other.index {
+            log::debug!("Index difference: {:?} -> {:?}", self.index, other.index);
+        }
+        if self.registers != other.registers {
+            log::debug!(
+                "Registers difference: {:?} -> {:?}",
+                self.registers,
+                other.registers
+            );
+        }
+        if self.extra != other.extra {
+            log::debug!("Payload difference: {:?} -> {:?}", self.extra, other.extra);
         }
     }
 }

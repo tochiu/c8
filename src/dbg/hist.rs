@@ -44,9 +44,9 @@ impl History {
         self.fragments.truncate(self.cursor);
     }
 
-    pub(super) fn undo(&mut self, vm: &mut VM, amt: usize) -> usize {
+    pub(super) fn undo(&mut self, vm: &mut VM, amt: usize, memory_access_flags: &mut [u8]) -> usize {
         if self.redo_amount() == 0 {
-            self.present_fragment = Some(vm.to_history_fragment());
+            self.present_fragment = Some(vm.to_history_fragment(memory_access_flags));
         }
 
         let mut amt_rewinded = 0;
@@ -55,19 +55,19 @@ impl History {
                 break;
             }
             self.cursor -= 1;
-            vm.undo(&self.fragments[self.cursor]);
+            vm.undo(&self.fragments[self.cursor], memory_access_flags);
             amt_rewinded += 1;
         }
         amt_rewinded
     }
 
-    pub(super) fn step(&mut self, vm: &mut VM) -> Result<bool, String> {
+    pub(super) fn step(&mut self, vm: &mut VM, memory_access_flags: &mut [u8]) -> Result<bool, String> {
         // time step is not state that is completely deterministic so must set it if possible
         if self.cursor < self.fragments.len() {
             vm.set_cycles_per_frame(self.fragments[self.cursor].cycles_per_frame);
         }
 
-        let state = vm.to_history_fragment(); // get state of vm
+        let state = vm.to_history_fragment(memory_access_flags); // get state of vm
 
         // if we have redo ahead of us but the cursor isnt consistent with our current state then we need to clear it
         let mut redo_amount = self.redo_amount();
@@ -86,7 +86,7 @@ impl History {
         // if vm is continuing then update memory access flags too
         if let Ok(true) = vm_result {
             if !vm.interpreter().waiting {
-                vm.update_memory_access_flags(&state.interpreter);
+                vm.update_memory_access_flags(&state.interpreter, memory_access_flags);
             }
         }
 

@@ -1,6 +1,4 @@
 use super::{
-    audio::AudioController,
-    rom::Rom,
     stats::C8Stats,
     vm::{VMEvent, VM, VM_FRAME_DURATION, VM_FRAME_RATE},
 };
@@ -62,36 +60,21 @@ impl Runner {
             .map_err(|_| "Failed to send instruction frequency to vm thread")
     }
 
-    pub fn spawn(
-        rom: Rom,
-        mut initial_target_execution_frequency: u32,
-        audio_controller: AudioController,
+    pub fn new(
+        vm: VM,
+        dbg: Option<Debugger>
     ) -> Self {
         let target_frame_duration_seconds: f64 = VM_FRAME_DURATION.as_secs_f64();
-
-        // TODO: change from execution frequency to cycles per second
-        initial_target_execution_frequency -= initial_target_execution_frequency % VM_FRAME_RATE;
-        initial_target_execution_frequency = initial_target_execution_frequency.max(VM_FRAME_RATE);
 
         let (vm_event_sender, vm_event_receiver) = channel::<VMEvent>();
         let (thread_continue_sender, thread_continue_receiver) = channel::<bool>();
         let (thread_frequency_sender, thread_frequency_receiver) = channel::<u32>();
 
-        let rom_config = rom.config.clone();
+        let mut cycles_per_frame = vm.cycles_per_frame();
+        let mut stats = C8Stats::new(vm.interpreter().rom.config.name.clone());
 
-        let mut cycles_per_frame = initial_target_execution_frequency / VM_FRAME_RATE;
-        let mut stats = C8Stats::new(rom_config.name);
-
-        let c8 = Arc::new(Mutex::new({
-            let vm = VM::new(rom, vm_event_receiver, audio_controller, cycles_per_frame);
-            let dbg = if rom_config.debugging {
-                Some(Debugger::new(&vm, initial_target_execution_frequency))
-            } else {
-                None
-            };
-
-            (vm, dbg)
-        }));
+        let debugging = dbg.is_some();
+        let c8 = Arc::new(Mutex::new((vm, dbg)));
 
         let thread_handle = {
             let c8 = Arc::clone(&c8);
@@ -131,9 +114,11 @@ impl Runner {
 
                         if burst_just_started {
                             burst_just_started = false;
-                            vm.clear_events();
+                            vm_event_receiver.try_iter().last();
                             vm.resume_audio();
                             frame_start = Instant::now();
+                        } else {
+                            vm.queue_events(vm_event_receiver.try_iter());
                         }
 
                         vm.update_audio();
@@ -200,7 +185,7 @@ impl Runner {
 
                     // we yield until either we can continue or we must exit
 
-                    if !(step_can_continue && !rom_config.debugging) && continuation.can_cont() {
+                    if !(step_can_continue && !debugging) && continuation.can_cont() {
                         if let Some(freq) = thread_frequency_receiver.try_iter().last() {
                             stats.update_frequency_stats(
                                 (cycles_per_frame as f64 / target_frame_duration_seconds).round()

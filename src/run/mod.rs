@@ -1,16 +1,11 @@
 pub mod color;
 pub mod preset;
 
-use crate::{
-    ch8::{
-        audio::AudioController,
-        input::Key,
-        rom::Rom,
-        run::{RunResult, Runner},
-        vm::VMEvent,
-    },
-    render::spawn_render_thread,
-};
+use crate::{ch8::{
+    input::Key,
+    run::{RunResult, Runner},
+    vm::VMEvent,
+}, render::RenderController};
 
 use crossterm::event::{
     poll, read, Event, KeyCode as CrosstermKey, KeyEventKind, KeyModifiers as CrosstermKeyModifiers,
@@ -21,20 +16,10 @@ use std::{
     collections::HashSet,
     ops::DerefMut,
     thread::{self, JoinHandle},
-    time::Duration,
+    time::Duration
 };
 
-pub fn spawn_run_threads(
-    rom: Rom,
-    initial_target_execution_frequency: u32,
-    audio_controller: AudioController,
-) -> (JoinHandle<RunResult>, JoinHandle<()>) {
-    // runner
-    let rom_config = rom.config.clone();
-    let mut runner = Runner::spawn(rom, initial_target_execution_frequency, audio_controller);
-
-    // render
-    let (render_sender, render_thread) = spawn_render_thread(runner.c8(), rom_config.clone());
+pub fn spawn_run_thread(mut runner: Runner, render: RenderController, debugging: bool, logging: bool) -> JoinHandle<RunResult> {
 
     // main thread
     let c8 = runner.c8();
@@ -45,7 +30,7 @@ pub fn spawn_run_threads(
         let mut last_keys = HashSet::new();
 
         // start runner
-        if !rom_config.debugging {
+        if !debugging {
             runner.resume().expect("Unable to resume runner");
         }
 
@@ -62,7 +47,7 @@ pub fn spawn_run_threads(
                 let event = read().expect("Unable to read terminal event");
                 let mut sink_vm_events = false;
 
-                if rom_config.debugging {
+                if debugging {
                     let mut _guard = c8.lock().expect("Unable to lock c8");
                     let (vm, Some(dbg)) = _guard.deref_mut() else {
                         unreachable!("Debug runs should contain a debugger");
@@ -70,9 +55,8 @@ pub fn spawn_run_threads(
 
                     sink_vm_events = sink_vm_events || dbg.is_active();
 
-                    // TODO: handle errors
                     if dbg.handle_input_event(event.clone(), &mut runner, vm) {
-                        render_sender.send(()).expect("Unable to send render event");
+                        render.trigger();
                     }
 
                     sink_vm_events = sink_vm_events || dbg.is_active();
@@ -80,7 +64,7 @@ pub fn spawn_run_threads(
 
                 match event {
                     Event::Resize(_, _) => {
-                        render_sender.send(()).expect("Unable to send render event");
+                        render.trigger();
                     }
                     Event::FocusGained => {
                         if !sink_vm_events {
@@ -157,11 +141,11 @@ pub fn spawn_run_threads(
             last_keys = keys;
 
             // TODO attach event listener to logger instead of polling to update
-            if rom_config.logging {
-                render_sender.send(()).expect("Unable to send render event");
+            if logging {
+                render.trigger();
             }
         }
     });
 
-    (main_thread, render_thread)
+    main_thread
 }

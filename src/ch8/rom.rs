@@ -10,9 +10,8 @@ use std::{ffi::OsStr, fmt::Display, fs::read, io, path::Path};
 #[derive(Clone)]
 pub struct RomConfig {
     pub name: String,
-    pub kind: RomKind,
-    pub logging: bool,
-    pub debugging: bool,
+    pub kind: RomKind
+    //pub quirks: RomQuirks,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -63,8 +62,6 @@ impl Rom {
     pub fn read<P: AsRef<Path>>(
         path: P,
         kind: Option<RomKind>,
-        logging: bool,
-        debugging: bool,
     ) -> io::Result<Rom> {
         let data = read(path.as_ref())?;
         let kind =
@@ -78,9 +75,7 @@ impl Rom {
                         let mut dasm = Disassembler::from(Rom {
                             config: RomConfig {
                                 name: String::new(),
-                                kind: RomKind::CHIP8,
-                                logging,
-                                debugging,
+                                kind: RomKind::CHIP8
                             },
                             data: data.clone(),
                         });
@@ -108,8 +103,6 @@ impl Rom {
                     .unwrap_or("Untitled")
                     .into(),
                 kind,
-                logging,
-                debugging,
             },
             data,
         };

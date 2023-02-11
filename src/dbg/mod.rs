@@ -13,7 +13,7 @@ use {
 use crate::{
     asm::Disassembler,
     ch8::{
-        disp::{DisplayMode, DisplayWidget},
+        disp::DisplayMode,
         input::KEY_ORDERING,
         instruct::Instruction,
         interp::Interpreter,
@@ -195,7 +195,7 @@ impl Debugger {
             disassembler: Disassembler::from(vm.interpreter().rom.clone()),
             disassembler_needs_update: false,
 
-            memory: Default::default(),
+            memory: Memory::from(vm.interpreter().memory.as_slice()), //Default::default(),
             memory_active: false,
             memory_visible: true,
             memory_widget_state: Default::default(),
@@ -276,7 +276,7 @@ impl Debugger {
     }
 
     fn step_once(&mut self, vm: &mut VM) -> bool {
-        let mut should_continue = match self.history.step(vm) {
+        let mut should_continue = match self.history.step(vm, &mut self.memory.access_flags) {
             Ok(cont) => {
                 if !cont {
                     self.shell.print("Program has finished executing.");
@@ -453,7 +453,7 @@ impl Debugger {
                         if seek_forwards {
                             self.redon(vm, seek_amt);
                         } else {
-                            self.history.undo(vm, seek_amt);
+                            self.history.undo(vm, seek_amt, &mut self.memory.access_flags);
                             self.memory_widget_state.get_mut().poke();
                         }
                     }
@@ -598,7 +598,7 @@ impl Debugger {
             }
 
             DebugCliCommand::Undo { amount } => {
-                let amt_rewinded = self.history.undo(vm, amount);
+                let amt_rewinded = self.history.undo(vm, amount, &mut self.memory.access_flags);
                 if amt_rewinded > 0 {
                     self.vm_exception = None;
                     self.vm_executing = true;
@@ -1301,19 +1301,7 @@ impl<'a> StatefulWidget for DebuggerWidget<'_> {
         state.logger_area = layout_areas.logger;
         state.logger_border = layout_borders.logger;
 
-        let execution_frequency = if self.dbg.history.redo_amount() == 0 {
-            self.dbg.runner_target_execution_frequency
-        } else {
-            self.vm.cycles_per_frame() * VM_FRAME_RATE
-        };
-
-        let display_widget = DisplayWidget {
-            display: &self.vm.interpreter().display,
-            rom_name: &self.vm.interpreter().rom.config.name,
-            rom_kind: self.vm.interpreter().rom.config.kind,
-            execution_frequency,
-            logging: self.logging,
-        };
+        let display_widget = self.vm.to_display_widget();
 
         // Display
         let display_block = Block::default()

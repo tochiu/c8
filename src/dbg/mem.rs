@@ -34,13 +34,15 @@ impl MemoryPointer {
 pub(super) struct Memory {
     pub verbose: bool,
     pub follow: Option<MemoryPointer>,
+    pub access_flags: Vec<u8>
 }
 
-impl Default for Memory {
-    fn default() -> Self {
+impl From<&[u8]> for Memory {
+    fn from(memory: &[u8]) -> Self {
         Memory {
             verbose: false,
             follow: Some(MemoryPointer::ProgramCounter),
+            access_flags: vec![0; memory.len()]
         }
     }
 }
@@ -186,7 +188,7 @@ impl<'a> MemoryWidget<'_> {
 
     fn addr_span(&self, addr: u16, addr_line_width: u16, addr_is_selected: bool) -> Spans {
         let tag = self.disassembler.tags[addr as usize];
-        let flags = self.interpreter.memory_access_flags[addr as usize];
+        let flags = self.memory.access_flags[addr as usize];
 
         let is_breakpoint = self.breakpoints.contains(&addr);
         let is_watchpoint = self.watchpoints.contains(&Watchpoint::Address(addr));

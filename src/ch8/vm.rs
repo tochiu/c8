@@ -1,13 +1,13 @@
 use super::{
     audio::{AudioController, AudioEvent},
-    disp::Display,
+    disp::{Display, DisplayWidget},
     input::{Key, Keyboard},
     instruct::Instruction,
     interp::*,
     rom::{Rom, RomKind},
 };
 
-use std::{sync::mpsc::Receiver, time::Duration};
+use std::time::Duration;
 
 pub const VM_FRAME_RATE: u32 = 60;
 pub const VM_FRAME_DURATION: Duration = Duration::from_nanos(1_000_000_000 / VM_FRAME_RATE as u64); // 60 FPS
@@ -36,7 +36,6 @@ pub struct VM {
     interpreter: Interpreter,
 
     // Event receiver and queue
-    event: Receiver<VMEvent>,
     event_queue: Vec<VMEvent>,
 
     // Virtualized IO
@@ -58,12 +57,11 @@ pub struct VM {
 impl VM {
     pub fn new(
         rom: Rom,
-        recv: Receiver<VMEvent>,
-        mut audio: AudioController,
         cycles_per_frame: u32,
+        mut audio: AudioController,
     ) -> Self {
         let vsync_enabled = rom.config.kind == RomKind::COSMACVIP;
-        let interpreter = Interpreter::from(rom);
+        let interpreter = Interpreter::new(rom);
 
         audio.apply_event(AudioEvent::SetBuffer(interpreter.audio.buffer));
         audio.apply_event(AudioEvent::SetPitch(interpreter.audio.pitch));
@@ -73,7 +71,6 @@ impl VM {
 
             interpreter,
 
-            event: recv,
             event_queue: Vec::new(),
 
             display: false,
@@ -112,7 +109,7 @@ impl VM {
         self.cycles_per_frame
     }
 
-    pub fn undo(&mut self, state: &VMHistoryFragment) {
+    pub fn undo(&mut self, state: &VMHistoryFragment, memory_access_flags: &mut [u8]) {
         self.cycles_per_frame = state.cycles_per_frame;
         self.keyboard = state.keyboard;
         self.vsync_timer = state.vsync_timer;
@@ -147,7 +144,7 @@ impl VM {
             _ => (),
         }
 
-        self.interpreter.undo(&state.interpreter);
+        self.interpreter.undo(&state.interpreter, memory_access_flags);
     }
 
     pub fn interpreter(&self) -> &Interpreter {
@@ -202,21 +199,15 @@ impl VM {
         }
     }
 
-    pub fn queue_events(&mut self) {
-        self.event_queue.extend(self.event.try_iter());
-    }
-
-    pub fn clear_events(&mut self) {
-        self.event.try_iter().last();
+    pub fn queue_events(&mut self, events: impl Iterator<Item = VMEvent>) {
+        self.event_queue.extend(events);
     }
 
     pub fn clear_event_queue(&mut self) {
-        self.queue_events();
         self.event_queue.clear();
     }
 
     pub fn drain_event_queue(&mut self) {
-        self.queue_events();
         for event in self.event_queue.drain(..) {
             log::debug!("Processing Event {:?}", event);
             match event {
@@ -327,11 +318,19 @@ impl VM {
         Ok(true)
     }
 
-    pub fn to_history_fragment(&self) -> VMHistoryFragment {
+    pub fn to_display_widget(&self) -> DisplayWidget {
+        DisplayWidget {
+            display: self.interpreter.display.clone(),
+            rom_config: self.interpreter.rom.config.clone(),
+            cycles_per_frame: self.cycles_per_frame,
+        }
+    }
+
+    pub fn to_history_fragment(&self, memory_access_flags: &[u8]) -> VMHistoryFragment {
         VMHistoryFragment {
             cycles_per_frame: self.cycles_per_frame,
             keyboard: self.keyboard,
-            interpreter: self.interpreter.to_history_fragment(),
+            interpreter: self.interpreter.to_history_fragment(memory_access_flags),
             vsync_timer: self.vsync_timer,
             vsync_timer_cycle_offset: self.vsync_timer_cycle_offset,
             sound_timer: self.sound_timer,
@@ -341,9 +340,9 @@ impl VM {
         }
     }
 
-    pub fn update_memory_access_flags(&mut self, executed_fragment: &InterpreterHistoryFragment) {
+    pub fn update_memory_access_flags(&mut self, executed_fragment: &InterpreterHistoryFragment, memory_access_flags: &mut [u8]) {
         self.interpreter
-            .update_memory_access_flags(executed_fragment);
+            .update_memory_access_flags(executed_fragment, memory_access_flags);
     }
 
     fn flush_timers(&mut self, sprint: VMSprint) {

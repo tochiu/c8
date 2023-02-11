@@ -1,4 +1,4 @@
-use super::{rom::RomKind, vm::VM_FRAME_RATE};
+use super::{rom::RomConfig, vm::VM_FRAME_RATE};
 
 use crate::run::preset::COLOR_PRESETS;
 
@@ -263,31 +263,29 @@ fn draw_plane(
     flag
 }
 
-pub struct DisplayWidget<'a, 'b> {
-    pub display: &'a Display,
-    pub logging: bool,
-    pub rom_name: &'b str,
-    pub rom_kind: RomKind,
-    pub execution_frequency: u32,
+pub struct DisplayWidget {
+    pub display: Display,
+    pub rom_config: RomConfig,
+    pub cycles_per_frame: u32,
 }
 
-impl<'a, 'b> DisplayWidget<'_, '_> {
+impl DisplayWidget {
     pub fn build_title(&self) -> Spans<'static> {
         Spans::from(vec![
             Span::raw(" "),
             Span::styled(
-                format!(" {} ", self.rom_kind),
+                format!(" {} ", self.rom_config.kind),
                 Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(" ")),
             Span::styled(
-                format!("{}", self.rom_name),
+                format!("{}", self.rom_config.name),
                 Style::default().add_modifier(Modifier::ITALIC),
             ),
             Span::raw(format!(
                 " — {}Cpf ({}Hz) ",
-                self.execution_frequency / VM_FRAME_RATE,
-                self.execution_frequency,
+                self.cycles_per_frame,
+                self.cycles_per_frame * VM_FRAME_RATE,
             )),
         ])
     }
@@ -305,7 +303,7 @@ impl<'a, 'b> DisplayWidget<'_, '_> {
     }
 }
 
-impl<'a, 'b> Widget for DisplayWidget<'_, '_> {
+impl Widget for DisplayWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let (display_width, display_height) = self.display.mode.dimensions();
 

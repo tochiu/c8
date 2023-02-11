@@ -1,9 +1,8 @@
 use crate::{
     ch8::{
-        disp::{Display, DisplayWidget},
-        rom::RomConfig,
+        disp::DisplayWidget,
         run::C8Lock,
-        vm::{VM, VM_FRAME_DURATION, VM_FRAME_RATE},
+        vm::{VM, VM_FRAME_DURATION},
     },
     dbg::{Debugger, DebuggerWidget, DebuggerWidgetState},
 };
@@ -52,7 +51,7 @@ pub fn panic_cleanup_terminal() -> Result<()> {
     )
 }
 
-pub fn spawn_render_thread(c8: C8Lock, config: RomConfig) -> (Sender<()>, JoinHandle<()>) {
+pub fn spawn_render_thread(c8: C8Lock, logging: bool) -> (RenderController, JoinHandle<()>) {
     let (render_sender, render_receiver) = channel::<()>();
     let render_thread_handle = thread::spawn(move || {
         // change terminal to an alternate screen so user doesnt lose terminal history on exit
@@ -68,7 +67,7 @@ pub fn spawn_render_thread(c8: C8Lock, config: RomConfig) -> (Sender<()>, JoinHa
         let mut renderer = Renderer {
             dbg_widget_state: Default::default(),
             dbg_visible: false,
-            config,
+            logging,
         };
 
         let mut should_redraw = false;
@@ -99,11 +98,19 @@ pub fn spawn_render_thread(c8: C8Lock, config: RomConfig) -> (Sender<()>, JoinHa
         }
     });
 
-    (render_sender, render_thread_handle)
+    (RenderController(render_sender), render_thread_handle)
+}
+
+pub struct RenderController(Sender<()>);
+
+impl RenderController {
+    pub fn trigger(&self) {
+        self.0.send(()).expect("Unable to send render event")
+    }
 }
 
 struct Renderer {
-    config: RomConfig,
+    logging: bool,
     dbg_visible: bool,
     dbg_widget_state: Cell<DebuggerWidgetState>,
 }
@@ -134,14 +141,13 @@ impl Renderer {
                     self.render_debugger(f, dbg, vm);
                 })?;
             } else {
-                let display = maybe_display.unwrap_or_else(|| vm.interpreter().display.clone());
-                let hz = vm.cycles_per_frame() * VM_FRAME_RATE;
                 let volume = vm.audio().volume();
                 let is_dbg_enabled = maybe_dbg.is_some();
+                let display_widget = vm.to_display_widget();
                 drop(_guard);
 
                 terminal.draw(|f| {
-                    self.render_virtual_machine(f, &display, hz, volume, is_dbg_enabled);
+                    self.render_virtual_machine(f, volume, is_dbg_enabled, display_widget);
                 })?;
             }
         }
@@ -154,7 +160,7 @@ impl Renderer {
         let dbg_widget = DebuggerWidget {
             dbg,
             vm,
-            logging: self.config.logging,
+            logging: self.logging,
         };
 
         let mut dbg_widget_state = self.dbg_widget_state.take();
@@ -175,19 +181,11 @@ impl Renderer {
     fn render_virtual_machine<B: Backend>(
         &self,
         f: &mut Frame<B>,
-        display: &Display,
-        execution_frequency: u32,
         volume: f32,
         is_dbg_enabled: bool,
+        display_widget: DisplayWidget
     ) {
         let area = f.size();
-        let display_widget = DisplayWidget {
-            rom_name: &self.config.name,
-            rom_kind: self.config.kind,
-            logging: self.config.logging,
-            execution_frequency,
-            display,
-        };
 
         let [area, bottom_area] = Layout::default()
             .direction(Direction::Vertical)
@@ -197,7 +195,7 @@ impl Renderer {
             ])
             .split(area)[..] else { unreachable!() };
 
-        let (display_width, display_height) = display.mode.window_dimensions();
+        let (display_width, display_height) = display_widget.display.mode.window_dimensions();
         let [display_column, logger_column, ..] = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -215,7 +213,7 @@ impl Renderer {
             ])
             .split(area)[..] else { unreachable!() };
 
-        if self.config.logging {
+        if self.logging {
             f.render_widget(
                 logger_widget(Borders::ALL),
                 if logger_column.area() >= logger_row.area() {
