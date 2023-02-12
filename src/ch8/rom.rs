@@ -22,6 +22,16 @@ pub enum RomKind {
     XOCHIP,
 }
 
+#[allow(dead_code)]
+pub struct RomQuirks {
+    bit_shift_modifies_vx_in_place: bool,
+    load_store_leaves_index_unchanged: bool,
+    jump_with_offset_uses_vx: bool,
+    and_or_xor_clears_flag_register: bool,
+    sprites_clip_at_screen_edges: bool,
+    wait_for_vertical_sync: bool,
+}
+
 impl RomKind {
     pub fn max_size(self) -> usize {
         if self == RomKind::XOCHIP {
