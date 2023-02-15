@@ -10,7 +10,7 @@ use anyhow::Result;
 use std::{
     ops::DerefMut,
     sync::{
-        mpsc::{channel, Receiver, RecvTimeoutError, Sender, TryRecvError},
+        mpsc::{channel, Receiver, Sender, TryRecvError},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
@@ -274,22 +274,24 @@ impl RunContinuation {
 
     // can yield
     fn can_cont(&mut self) -> bool {
+        self.cont = self.recv.try_iter().last().unwrap_or(self.cont);
+        if self.cont {
+            return true
+        }
+
         loop {
-            self.cont = self.recv.try_iter().last().unwrap_or(self.cont);
-            match self.recv.recv_timeout(Duration::from_millis(30)) {
-                Ok(can) => self.cont = can,
-                Err(RecvTimeoutError::Timeout) => {
-                    if self.cont {
-                        break;
+            match self.recv.recv() {
+                Ok(can) => {
+                    self.cont = can;
+                    if can {
+                        return true
                     }
-                }
-                Err(RecvTimeoutError::Disconnected) => {
+                },
+                Err(_) => {
                     self.cont = false;
-                    break;
+                    return false
                 }
             }
         }
-
-        self.cont
     }
 }
