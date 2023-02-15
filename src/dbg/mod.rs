@@ -184,7 +184,7 @@ impl Debugger {
         let mut dbg = Debugger {
             active: false,
 
-            history: History::new(vm.interpreter().rom.config.kind),
+            history: History::new(vm.interpreter().rom.config),
             history_active: false,
 
             breakpoints: Default::default(),

@@ -36,6 +36,7 @@ fn main() -> Result<()> {
             let mut disasm = Disassembler::from(Rom::read(
                 path,
                 kind.map(cli::KindOption::to_kind),
+                None
             )?);
             disasm.run();
             disasm.write_issue_traces(&mut stdout())?;
@@ -48,6 +49,7 @@ fn main() -> Result<()> {
             let mut disasm = Disassembler::from(Rom::read(
                 path,
                 kind.map(cli::KindOption::to_kind),
+                None
             )?);
             disasm.run();
             print!("{}", disasm);
@@ -60,7 +62,7 @@ fn main() -> Result<()> {
             log,
             kind,
         } => {
-            let rom = Rom::read(path, kind.map(cli::KindOption::to_kind))?;
+            let rom = Rom::read(path, kind.map(cli::KindOption::to_kind), None)?;
             let kind = rom.config.kind;
             let cpf = cpf.or(hz.map(|hz| hz / VM_FRAME_RATE)).unwrap_or(kind.default_cycles_per_frame());
             let logging = log.is_some();

@@ -265,6 +265,7 @@ fn draw_plane(
 
 pub struct DisplayWidget {
     pub display: Display,
+    pub rom_name: String,
     pub rom_config: RomConfig,
     pub cycles_per_frame: u32,
 }
@@ -279,7 +280,7 @@ impl DisplayWidget {
             ),
             Span::raw(format!(" ")),
             Span::styled(
-                format!("{}", self.rom_config.name),
+                format!("{}", self.rom_name),
                 Style::default().add_modifier(Modifier::ITALIC),
             ),
             Span::raw(format!(

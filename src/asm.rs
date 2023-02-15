@@ -2,7 +2,7 @@ use crate::ch8::{
     instruct::{Instruction, InstructionDecodeError, InstructionParameters},
     interp::{Interpreter, PROGRAM_STARTING_ADDRESS},
     mem::{allocate_memory, MemoryRef},
-    rom::{Rom, RomKind},
+    rom::{Rom, RomKind, RomConfig},
 };
 
 use std::{
@@ -250,7 +250,7 @@ impl Disassembler {
     pub fn run_from(&mut self, addr: u16, tag: InstructionTag, depth: u8) {
         log::info!(
             "Disassembling \"{}\" starting at {:#05X}",
-            &self.rom.config.name,
+            &self.rom.name,
             addr
         );
         let mut trace_buffer = Vec::new();
@@ -266,7 +266,7 @@ impl Disassembler {
         let elapsed = now.elapsed().as_micros();
         log::info!(
             "Disassembled \"{}\" in {} us",
-            &self.rom.config.name,
+            &self.rom.name,
             elapsed
         );
     }
@@ -478,7 +478,7 @@ impl Disassembler {
         if let Some(instruction) = instruction.as_ref() {
             write_inst_dasm(
                 instruction,
-                self.rom.config.kind,
+                self.rom.config,
                 &mut f.asm,
                 &mut f.asm_desc,
             )?;
@@ -550,7 +550,7 @@ impl Disassembler {
                         _ => {
                             asm.clear();
                             asm_desc.clear();
-                            write_inst_dasm(inst, self.rom.config.kind, &mut asm, &mut asm_desc)
+                            write_inst_dasm(inst, self.rom.config, &mut asm, &mut asm_desc)
                                 .expect("Writing instruction to string failed");
                             write!(f, " {}", &asm)?;
                             if asm_desc.len() > 0 {
@@ -705,7 +705,7 @@ pub fn write_byte_str(
 // TODO change this to quirks instead of rom kind
 pub fn write_inst_dasm(
     inst: &Instruction,
-    kind: RomKind,
+    config: RomConfig,
     f: &mut impl std::fmt::Write,
     c: &mut impl std::fmt::Write,
 ) -> std::fmt::Result {
@@ -716,7 +716,7 @@ pub fn write_inst_dasm(
         Instruction::JumpWithOffset(addr, x) => write!(
             f,
             "jp   v{:x} {:#05X}",
-            if kind == RomKind::SCHIP { *x } else { 0 },
+            if config.quirks.jump_with_offset_uses_vx { *x } else { 0 },
             addr
         ),
         Instruction::CallSubroutine(addr) => write!(f, "call {:#05X}", addr),
@@ -866,7 +866,7 @@ pub fn write_inst_dasm(
         }
         Instruction::Draw(vx, vy, height) => {
             write!(f, "drw  v{:x} v{:x} {}", vx, vy, height)?;
-            if *height == 0 && kind == RomKind::SCHIP {
+            if *height == 0 && config.kind >= RomKind::SCHIP {
                 write!(c, "draw 16x16 @ v{:x},v{:x}", vx, vy)
             } else {
                 write!(c, "draw 8x{} @ v{:x},v{:x}", height, vx, vy)

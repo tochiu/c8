@@ -71,7 +71,7 @@ impl Runner {
         let (thread_frequency_sender, thread_frequency_receiver) = channel::<u32>();
 
         let mut cycles_per_frame = vm.cycles_per_frame();
-        let mut stats = C8Stats::new(vm.interpreter().rom.config.name.clone());
+        let mut stats = C8Stats::new(vm.interpreter().rom.name.clone());
 
         let debugging = dbg.is_some();
         let c8 = Arc::new(Mutex::new((vm, dbg)));

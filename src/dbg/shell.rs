@@ -147,7 +147,7 @@ impl Shell {
         if let Some(inst) = interp.instruction() {
             write_inst_dasm(
                 &inst,
-                interp.rom.config.kind,
+                interp.rom.config,
                 &mut inst_asm,
                 &mut inst_comment,
             )

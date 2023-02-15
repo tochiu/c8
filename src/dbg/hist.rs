@@ -1,7 +1,7 @@
 use crate::{
     asm::{write_inst_dasm, ADDRESS_COMMENT_TOKEN, INSTRUCTION_MAX_LENGTH},
     ch8::{
-        rom::RomKind,
+        rom::RomConfig,
         vm::{VMHistoryFragment, VM},
     },
 };
@@ -22,14 +22,14 @@ const HISTORY_CAPACITY: usize = 1_000_000;
 pub(super) struct History {
     pub fragments: VecDeque<VMHistoryFragment>,
     pub present_fragment: Option<VMHistoryFragment>,
-    rom_kind: RomKind,
+    rom_config: RomConfig,
     cursor: usize,
 }
 
 impl History {
-    pub(super) fn new(rom_kind: RomKind) -> Self {
+    pub(super) fn new(rom_config: RomConfig) -> Self {
         Self {
-            rom_kind,
+            rom_config,
             fragments: VecDeque::with_capacity(HISTORY_CAPACITY),
             present_fragment: None,
             cursor: 0,
@@ -197,7 +197,7 @@ impl<'a> Widget for HistoryWidget<'_> {
                 asm_desc.push_str(ADDRESS_COMMENT_TOKEN);
                 asm_desc.push(' ');
                 if let Some(inst) = interp_state.instruction.as_ref() {
-                    write_inst_dasm(inst, self.history.rom_kind, &mut asm, &mut asm_desc).ok();
+                    write_inst_dasm(inst, self.history.rom_config, &mut asm, &mut asm_desc).ok();
                 } else {
                     asm.push_str("BAD INSTRUCTION");
                 }

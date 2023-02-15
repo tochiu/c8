@@ -4,7 +4,7 @@ use super::{
     input::{Key, Keyboard},
     instruct::Instruction,
     interp::*,
-    rom::{Rom, RomKind},
+    rom::Rom,
 };
 
 use std::time::Duration;
@@ -60,7 +60,7 @@ impl VM {
         cycles_per_frame: u32,
         mut audio: AudioController,
     ) -> Self {
-        let vsync_enabled = rom.config.kind == RomKind::COSMACVIP;
+        let vsync_enabled = rom.config.quirks.wait_for_vertical_sync;
         let interpreter = Interpreter::new(rom);
 
         audio.apply_event(AudioEvent::SetBuffer(interpreter.audio.buffer));
@@ -321,6 +321,7 @@ impl VM {
     pub fn to_display_widget(&self) -> DisplayWidget {
         DisplayWidget {
             display: self.interpreter.display.clone(),
+            rom_name: self.interpreter.rom.name.clone(),
             rom_config: self.interpreter.rom.config.clone(),
             cycles_per_frame: self.cycles_per_frame,
         }

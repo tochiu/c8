@@ -1,6 +1,6 @@
 use crate::asm::write_inst_dasm;
 
-use super::rom::RomKind;
+use super::rom::{RomConfig, RomKind};
 
 pub fn decode_op(bits: u32) -> u8 {
     ((bits & 0xF0000000) >> 4 * 7) as u8
@@ -56,7 +56,16 @@ impl std::fmt::Display for InstructionDecodeError {
             } => {
                 let mut message = String::new();
                 let mut comment = String::new();
-                write_inst_dasm(&instruction, *expected_rom_kind, &mut message, &mut comment).ok();
+                write_inst_dasm(
+                    &instruction,
+                    RomConfig {
+                        kind: *expected_rom_kind,
+                        quirks: expected_rom_kind.default_rom_quirks(),
+                    },
+                    &mut message,
+                    &mut comment,
+                )
+                .ok();
                 write!(
                     f,
                     "{:04X} a.k.a. \"{}\" ({}) is at least a {} instruction but ROM is {}",
@@ -204,10 +213,7 @@ impl Instruction {
         instruction.as_ref().map_or(2, Instruction::size)
     }
 
-    pub fn try_from_u32(
-        bits: u32,
-        kind: RomKind,
-    ) -> Result<Instruction, InstructionDecodeError> {
+    pub fn try_from_u32(bits: u32, kind: RomKind) -> Result<Instruction, InstructionDecodeError> {
         let op = decode_op(bits);
         let x = decode_x(bits);
         let y = decode_y(bits);

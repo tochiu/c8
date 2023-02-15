@@ -7,11 +7,10 @@ use crate::asm::Disassembler;
 
 use std::{ffi::OsStr, fmt::Display, fs::read, io, path::Path};
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct RomConfig {
-    pub name: String,
-    pub kind: RomKind
-    //pub quirks: RomQuirks,
+    pub kind: RomKind, 
+    pub quirks: RomQuirks,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -22,14 +21,14 @@ pub enum RomKind {
     XOCHIP,
 }
 
-#[allow(dead_code)]
+#[derive(Clone, Copy)]
 pub struct RomQuirks {
-    bit_shift_modifies_vx_in_place: bool,
-    load_store_leaves_index_unchanged: bool,
-    jump_with_offset_uses_vx: bool,
-    and_or_xor_clears_flag_register: bool,
-    sprites_clip_at_screen_edges: bool,
-    wait_for_vertical_sync: bool,
+    pub bit_shift_modifies_vx_in_place: bool,
+    pub load_store_leaves_index_unchanged: bool,
+    pub jump_with_offset_uses_vx: bool,
+    pub and_or_xor_clears_flag_register: bool,
+    pub sprites_clip_at_screen_edges: bool,
+    pub wait_for_vertical_sync: bool,
 }
 
 impl RomKind {
@@ -49,6 +48,43 @@ impl RomKind {
             Self::XOCHIP => 1000,
         }
     }
+
+    pub fn default_rom_quirks(self) -> RomQuirks {
+        match self {
+            Self::COSMACVIP => RomQuirks {
+                bit_shift_modifies_vx_in_place: false,
+                load_store_leaves_index_unchanged: false,
+                jump_with_offset_uses_vx: false,
+                and_or_xor_clears_flag_register: true,
+                sprites_clip_at_screen_edges: true,
+                wait_for_vertical_sync: true,
+            },
+            Self::CHIP8 => RomQuirks {
+                bit_shift_modifies_vx_in_place: true,
+                load_store_leaves_index_unchanged: true,
+                jump_with_offset_uses_vx: false,
+                and_or_xor_clears_flag_register: false,
+                sprites_clip_at_screen_edges: true,
+                wait_for_vertical_sync: false,
+            },
+            Self::SCHIP => RomQuirks {
+                bit_shift_modifies_vx_in_place: true,
+                load_store_leaves_index_unchanged: true,
+                jump_with_offset_uses_vx: true,
+                and_or_xor_clears_flag_register: false,
+                sprites_clip_at_screen_edges: true,
+                wait_for_vertical_sync: false,
+            },
+            Self::XOCHIP => RomQuirks {
+                bit_shift_modifies_vx_in_place: false,
+                load_store_leaves_index_unchanged: false,
+                jump_with_offset_uses_vx: false,
+                and_or_xor_clears_flag_register: false,
+                sprites_clip_at_screen_edges: false,
+                wait_for_vertical_sync: false,
+            },
+        }
+    }
 }
 
 impl Display for RomKind {
@@ -66,13 +102,11 @@ impl Display for RomKind {
 pub struct Rom {
     pub config: RomConfig,
     pub data: Vec<u8>,
+    pub name: String,
 }
 
 impl Rom {
-    pub fn read<P: AsRef<Path>>(
-        path: P,
-        kind: Option<RomKind>,
-    ) -> io::Result<Rom> {
+    pub fn read<P: AsRef<Path>>(path: P, kind: Option<RomKind>, quirks: Option<RomQuirks>) -> io::Result<Rom> {
         let data = read(path.as_ref())?;
         let kind =
             kind.unwrap_or_else(|| match path.as_ref().extension().and_then(OsStr::to_str) {
@@ -84,10 +118,11 @@ impl Rom {
                     } else {
                         let mut dasm = Disassembler::from(Rom {
                             config: RomConfig {
-                                name: String::new(),
-                                kind: RomKind::CHIP8
+                                kind: RomKind::CHIP8,
+                                quirks: RomKind::CHIP8.default_rom_quirks()
                             },
                             data: data.clone(),
+                            name: String::new(),
                         });
 
                         dasm.run();
@@ -95,6 +130,7 @@ impl Rom {
                         let suggested_rom_kind = dasm.suggested_rom_kind();
                         while suggested_rom_kind != dasm.rom.config.kind {
                             dasm.rom.config.kind = suggested_rom_kind;
+                            dasm.rom.config.quirks = quirks.unwrap_or(suggested_rom_kind.default_rom_quirks());
                             dasm.reset();
                             dasm.run();
                         }
@@ -105,14 +141,15 @@ impl Rom {
             });
 
         let rom = Rom {
+            name: path
+                .as_ref()
+                .file_stem()
+                .and_then(OsStr::to_str)
+                .unwrap_or("Untitled")
+                .into(),
             config: RomConfig {
-                name: path
-                    .as_ref()
-                    .file_stem()
-                    .and_then(OsStr::to_str)
-                    .unwrap_or("Untitled")
-                    .into(),
                 kind,
+                quirks: quirks.unwrap_or(kind.default_rom_quirks())
             },
             data,
         };

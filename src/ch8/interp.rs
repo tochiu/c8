@@ -191,14 +191,13 @@ impl Interpreter {
             Instruction::Jump(address) => self.pc = address & self.memory_last_address,
 
             Instruction::JumpWithOffset(address, vx) => {
-                let offset = if self.rom.config.kind == RomKind::SCHIP {
+                let offset = if self.rom.config.quirks.jump_with_offset_uses_vx {
                     self.registers[vx as usize] as u16
                 } else {
                     self.registers[0] as u16
                 };
 
                 self.pc = address.overflowing_add(offset).0 & self.memory_last_address;
-                //self.memory.address_add(address, offset);
             }
 
             Instruction::CallSubroutine(address) => {
@@ -273,21 +272,21 @@ impl Interpreter {
 
             Instruction::Or(vx, vy) => {
                 self.registers[vx as usize] |= self.registers[vy as usize];
-                if self.rom.config.kind == RomKind::COSMACVIP {
+                if self.rom.config.quirks.and_or_xor_clears_flag_register {
                     self.registers[VFLAG] = 0;
                 }
             }
 
             Instruction::And(vx, vy) => {
                 self.registers[vx as usize] &= self.registers[vy as usize];
-                if self.rom.config.kind == RomKind::COSMACVIP {
+                if self.rom.config.quirks.and_or_xor_clears_flag_register {
                     self.registers[VFLAG] = 0;
                 }
             }
 
             Instruction::Xor(vx, vy) => {
                 self.registers[vx as usize] ^= self.registers[vy as usize];
-                if self.rom.config.kind == RomKind::COSMACVIP {
+                if self.rom.config.quirks.and_or_xor_clears_flag_register {
                     self.registers[VFLAG] = 0;
                 }
             }
@@ -311,9 +310,10 @@ impl Interpreter {
             }
 
             Instruction::Shift(vx, vy, right) => {
-                let bits = match self.rom.config.kind {
-                    RomKind::COSMACVIP | RomKind::XOCHIP => self.registers[vy as usize],
-                    _ => self.registers[vx as usize],
+                let bits = if self.rom.config.quirks.bit_shift_modifies_vx_in_place {
+                    self.registers[vx as usize]
+                } else {
+                    self.registers[vy as usize]
                 };
 
                 if right {
@@ -380,7 +380,7 @@ impl Interpreter {
             Instruction::Load(vx) => {
                 self.memory
                     .export(self.index, &mut self.registers[..=vx as usize]);
-                if let RomKind::COSMACVIP | RomKind::XOCHIP = self.rom.config.kind {
+                if !self.rom.config.quirks.load_store_leaves_index_unchanged {
                     self.index =
                         self.index.overflowing_add(vx as u16 + 1).0 & self.memory_last_address;
                 }
@@ -408,7 +408,7 @@ impl Interpreter {
                 self.prefetch[prefetch_range0].fill(None);
                 self.prefetch[prefetch_range1].fill(None);
 
-                if let RomKind::COSMACVIP | RomKind::XOCHIP = self.rom.config.kind {
+                if !self.rom.config.quirks.load_store_leaves_index_unchanged {
                     self.index =
                         self.index.overflowing_add(vx as u16 + 1).0 & self.memory_last_address;
                 }
@@ -467,7 +467,7 @@ impl Interpreter {
             }
 
             Instruction::Draw(vx, vy, height) => {
-                if self.rom.config.kind == RomKind::COSMACVIP && !self.input.vertical_blank {
+                if self.rom.config.quirks.wait_for_vertical_sync && !self.input.vertical_blank {
                     self.waiting = true;
                 } else {
                     self.waiting = false;
@@ -555,7 +555,7 @@ impl Interpreter {
             self.registers[vy as usize] as u16,
             height,
             bytes_per_row,
-            self.rom.config.kind == RomKind::XOCHIP,
+            !self.rom.config.quirks.sprites_clip_at_screen_edges,
         ) as u8;
     }
 
