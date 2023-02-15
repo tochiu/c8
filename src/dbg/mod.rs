@@ -259,20 +259,15 @@ impl Debugger {
 
     fn redon(&mut self, vm: &mut VM, mut amt: usize) -> usize {
         amt = amt.min(self.history.redo_amount());
-        let mut amt_stepped = 0;
         vm.clear_event_queue();
         for step in 0..amt {
             if !self.step(vm, 1) {
-                break;
+                return step // TODO: if redo has issues it still returns 1 more than actually redone because it still did a step
             }
-            amt_stepped = step + 1;
-            if amt - amt_stepped > self.history.redo_amount() {
-                log::warn!("Redo history was cleared during operation because current state did not agree with redo history.");
-                break;
-            }
+            self.history.restore_external_state(vm);
         }
 
-        amt_stepped
+        amt
     }
 
     fn step_once(&mut self, vm: &mut VM) -> bool {

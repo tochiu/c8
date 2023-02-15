@@ -71,6 +71,10 @@ impl History {
 
         // if we have redo ahead of us but the cursor isnt consistent with our current state then we need to clear it
         let mut redo_amount = self.redo_amount();
+        if redo_amount == 0 {
+            self.present_fragment = None;
+        }
+
         if redo_amount > 0 && state != self.fragments[self.cursor] {
             log::info!(
                 "Clearing {} history checkpoints at or ahead of cursor",
@@ -78,7 +82,9 @@ impl History {
             );
             state.log_diff(&self.fragments[self.cursor]); // DEBUG
             self.fragments.truncate(self.cursor);
+            self.present_fragment = None;
             redo_amount = 0;
+            log::error!("Redo history was cleared during execution step operation because current state did not agree with redo history.");
         }
 
         let vm_result = vm.stepn(1);
@@ -95,25 +101,22 @@ impl History {
                 self.fragments.pop_front();
             }
             self.fragments.push_back(state);
+            
         }
 
         self.cursor = (self.cursor + 1).min(self.fragments.len());
 
+        vm_result
+    }
+
+    pub(super) fn restore_external_state(&self, vm: &mut VM) {
         // restore state of vm that is independent of the vm step (input state)
         if self.redo_amount() > 0 {
             // in past
-            self.fragments[self.cursor].restore(&mut *vm);
-        } else {
-            // in present
-            if let Some(present_fragment) = self.present_fragment.take() {
-                if redo_amount > 0 {
-                    // made it to present instead of losing redo history
-                    present_fragment.restore(&mut *vm);
-                }
-            }
+            self.fragments[self.cursor].restore(vm);
+        } else if let Some(present_fragment) = &self.present_fragment {
+            present_fragment.restore(vm);
         }
-
-        vm_result
     }
 
     pub(super) fn handle_key_event(
