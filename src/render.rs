@@ -183,7 +183,7 @@ impl Renderer {
         f: &mut Frame<B>,
         volume: f32,
         is_dbg_enabled: bool,
-        display_widget: DisplayWidget
+        display_widget: DisplayWidget,
     ) {
         let area = f.size();
 
