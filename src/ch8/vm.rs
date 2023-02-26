@@ -73,7 +73,7 @@ impl VM {
 
             event_queue: Vec::new(),
 
-            display: false,
+            display: true,
             keyboard: Keyboard::default(),
             audio,
 
@@ -87,6 +87,22 @@ impl VM {
             delay_timer: 0,
             delay_timer_cycle_offset: 0,
         }
+    }
+
+    pub fn reset(&mut self, preserve_rpl_flags: bool) {
+        self.interpreter.reset(preserve_rpl_flags);
+        self.event_queue.clear();
+        self.keyboard = Keyboard::default();
+        self.display = true;
+
+        self.vsync_timer = 0;
+        self.vsync_timer_cycle_offset = 0;
+
+        self.sound_timer = 0;
+        self.sound_timer_cycle_offset = 0;
+
+        self.delay_timer = 0;
+        self.delay_timer_cycle_offset = 0;
     }
 
     pub fn set_cycles_per_frame(&mut self, cycles_per_frame: u32) {

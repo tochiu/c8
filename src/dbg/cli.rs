@@ -239,6 +239,14 @@ impl Register {
 
 #[derive(Subcommand)]
 pub enum DebugCliCommand {
+    /// Reset the virtual machine but preserve RPL user flags
+    #[clap(visible_aliases = &["rel"])]
+    Reload,
+
+    /// Reset the virtual machine
+    #[clap(visible_aliases = &["res"])]
+    Reset,
+
     /// Continue running the program until the next breakpoint, watchpoint or error
     #[clap(visible_aliases = &["c", "cont"])]
     Continue,

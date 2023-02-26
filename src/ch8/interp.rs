@@ -38,7 +38,6 @@ pub enum InterpreterOutput {
 pub struct Interpreter {
     pub memory: Vec<u8>,
     pub memory_last_address: u16,
-    // pub memory_access_flags: Vec<u8>,
     pub pc: u16,
     pub index: u16,
     pub stack: Vec<u16>,
@@ -97,7 +96,15 @@ impl Interpreter {
         interp
     }
 
+    pub fn reset(&mut self, preserve_rpl_flags: bool) {
+        let flags = self.flags;
+        let rom = self.rom.clone();
 
+        *self = Interpreter::new(rom);
+        if preserve_rpl_flags {
+            self.flags = flags;
+        }
+    }
 
     // TODO: this needs to be removed since all chip8 specifications wait for the key up in the Get Key (FX0A) instruction
     pub fn pick_key<'a, 'b, T: TryInto<Key>>(

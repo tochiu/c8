@@ -218,6 +218,23 @@ impl Debugger {
         dbg
     }
 
+    pub fn reset(&mut self, vm: &mut VM, preserve_rpl_flags: bool) {
+        vm.reset(preserve_rpl_flags);
+
+        self.history = History::new(vm.interpreter().rom.config);
+
+        self.watch_state = WatchState::from(vm.interpreter());
+        self.event_queue = Default::default();
+        
+        self.disassembler = Disassembler::from(vm.interpreter().rom.clone());
+        self.memory = Memory::from(vm.interpreter().memory.as_slice());
+        self.memory_widget_state = Default::default();
+        self.vm_exception = None;
+        self.vm_executing = true;
+
+        self.disassembler.run();
+    }
+
     pub fn is_active(&self) -> bool {
         self.active
     }
@@ -532,6 +549,22 @@ impl Debugger {
 
     fn handle_command(&mut self, command: DebugCliCommand, runner: &mut Runner, vm: &mut VM) {
         match command {
+            DebugCliCommand::Reload => {
+                self.reset(vm, true);
+                self.shell.print(vec![
+                    Span::raw("Reloaded "), 
+                    Span::styled(vm.interpreter().rom.name.clone(), Style::default().add_modifier(Modifier::ITALIC))
+                ]); 
+            }
+
+            DebugCliCommand::Reset => {
+                self.reset(vm, false);
+                self.shell.print(vec![
+                    Span::raw("Reset "), 
+                    Span::styled(vm.interpreter().rom.name.clone(), Style::default().add_modifier(Modifier::ITALIC))
+                ]); 
+            }
+
             DebugCliCommand::Continue => {
                 if let Some(e) = self.vm_exception.as_ref() {
                     self.shell.error(e);
