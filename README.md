@@ -337,6 +337,8 @@ will execute the next 50 instructions.
 > [!NOTE]
 > If you use `step` or `continue` with a past program state (reachable using `undo`), all future program states are cleared and execution will advance. If instead you would like to replay those future states, use `redo` instead.
 
+If you are stuck on an instruction because it is polling for a key event, use the `key` command to simulate key events. Type `key --help` for more information.
+
 **Seek through execution history:**
 
 Use `undo` and `redo` to seek through the program execution history. Follow it with an integer `n` to rewind or fast-forward through the last `n` program states.
