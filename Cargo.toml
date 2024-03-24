@@ -1,7 +1,17 @@
 [package]
 name = "c8"
-version = "0.1.0"
+version = "1.0.0"
+authors = ["Tochi Ukegbu"]
+description = """
+🎮 CHIP-8 / S-CHIP / XO-CHIP tui toolkit featuring a virtual machine, debugger, and disassembler
+"""
+keywords = ["audio", "emulator", "debugger", "interpreter", "chip8", "virtual-machine", "dissassembler", "tui", "tui-rs"]
+repository = "https://github.com/tochiu/c8"
+readme = "README.md"
+license = "MIT"
+exclude = [".vscode/*", "img/*", "out/*", "tests/*"]
 edition = "2021"
+rust-version = "1.70.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -18,4 +28,4 @@ simple_logger = "4.0.0"
 anyhow = "1.0.68"
 clap = { version = "4.1.4", features = ["derive"] }
 shell-words = "1.1.0"
-rodio = { git = "https://github.com/RustAudio/rodio", rev = "refs/pull/442/head" }
+rodio = "0.17.3"

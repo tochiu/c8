@@ -71,11 +71,18 @@ C8 is a terminal user interface tooklit made to run, debug, and disassemble **CH
 
 C8 is tested mostly on Windows but should work on Mac and Linux. If on Linux, see [below](#installation-caveats) for required system packages before you continue.
 
-At this moment C8 can only be installed from source.
+At this moment C8 can only be installed from cargo or built from source.
+
+### Install With Cargo
+C8 is published on crates.io and can be installed with cargo. Rust 1.70.0 or greater is required.
+
+```
+cargo install c8
+```
 
 ### Build From Source
 
-C8 can be built from source with [cargo](https://crates.io/). Rust 1.65.0 or greater is required.
+C8 can be built from source with [cargo](https://crates.io/). Rust 1.70.0 or greater is required.
 
 ```
 git clone https://github.com/tochiu/c8.git
