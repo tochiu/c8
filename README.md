@@ -25,6 +25,7 @@
 - [About](#about)
 - [Features At A Glance](#features-at-a-glance)
 - [Installation](#installation)
+   * [Install With Cargo](#install-with-cargo)
    * [Build From Source](#build-from-source)
    * [Installation Caveats](#installation-caveats)
 - [Usage](#usage)
@@ -74,7 +75,7 @@ C8 is tested mostly on Windows but should work on Mac and Linux. If on Linux, se
 At this moment C8 can only be installed from cargo or built from source.
 
 ### Install With Cargo
-C8 is published on crates.io and can be installed with cargo. Rust 1.70.0 or greater is required.
+<a href="https://crates.io/crates/c8">C8 is published on crates.io</a> and can be installed with cargo. Rust 1.70.0 or greater is required.
 
 ```
 cargo install c8
