@@ -287,9 +287,9 @@ Last is a description of the instruction or data:
 In this case, the visual representation of the data region showcases the IBM graphic that is saved in the rom.
 
 > [!NOTE]
-> This dissassembler doubles as a memory viewer. The memory layout in the debugger is simply an up-to-date dissasembly of program memory.
+> This dissassembler doubles as a memory viewer. The memory panel in the debugger is simply an up-to-date dissasembly of program memory.
 
-`c8 check` tool built on top of the disassembler that will check a rom for bad execution branches. It accomplishes this by running the disassembler on the program and logging areas where proven (`X` label) or valid (`O` label) instructions can lead to executing an invalid instruction.
+`c8 check` is a tool built on top of the disassembler that checks a rom for bad execution branches. It accomplishes this by running the disassembler on the program and logging areas where proven (`X` label) or valid (`O` label) instructions can lead to executing an invalid instruction.
 
 ### Debugging
 
