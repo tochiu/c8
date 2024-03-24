@@ -7,7 +7,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 /// C8: CHIP-8 toolkit complete with a virtual machine, debugger, and disassembler.
-/// Supports the modern CHIP-8 specification with SCHIP and XO-CHIP support coming soon.
+/// Supports the modern CHIP-8 specification with SCHIP and XO-CHIP support.
 pub struct Cli {
     #[command(subcommand)]
     pub command: CliCommand,
