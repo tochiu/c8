@@ -5,7 +5,7 @@ authors = ["Tochi Ukegbu"]
 description = """
 🎮 CHIP-8 / S-CHIP / XO-CHIP tui toolkit featuring a virtual machine, debugger, and disassembler
 """
-keywords = ["audio", "emulator", "debugger", "interpreter", "chip8", "virtual-machine", "dissassembler", "tui", "tui-rs"]
+keywords = ["chip8", "emulator", "debugger", "interpreter", "dissassembler"]
 repository = "https://github.com/tochiu/c8"
 readme = "README.md"
 license = "MIT"
