@@ -20,6 +20,23 @@
 
 ---
 
+## Table of Contents
+
+- [About](#about)
+- [Features At A Glance](#features-at-a-glance)
+- [Installation](#installation)
+   * [Build From Source](#build-from-source)
+   * [Installation Caveats](#installation-caveats)
+- [Usage](#usage)
+   * [Running](#running)
+   * [Disassembling](#disassembling)
+   * [Debugging](#debugging)
+      + [Start the Debugger](#start-the-debugger)
+      + [Navigate the Debugger](#navigate-the-debugger)
+      + [Control Program Execution](#control-program-execution)
+      + [Breakpoints and Watchpoints](#breakpoints-and-watchpoints)
+- [Motivation](#motivation)
+
 ## About
 
 C8 is a terminal user interface tooklit made to run, debug, and disassemble **CHIP-8**, **S-CHIP**, and **XO-CHIP** games. At its core you can: 
@@ -360,7 +377,7 @@ will execute the program at a rate of 60 instructions per second.
 > [!IMPORTANT]
 > **C8 runs at a fixed frame-rate of 60hz.** If your target execution speed is expressed in cycles per frame, multiply it by 60 to get the equivalent instructions per second.
 
-### Breakpoints and Watchpoints
+#### Breakpoints and Watchpoints
 
 Sometimes it is useful to pause execution when a certain condition is met. This is where breakpoints and watchpoints come in. A *breakpoint* is set to trigger right before an instruction at a specified address is executed. A *watchpoint* is set to trigger right after a specified register or address is modified. 
 
