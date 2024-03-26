@@ -21,8 +21,8 @@ pub enum KindOption {
     #[clap(aliases = &["sc"])]
     SCHIP,
 
-    #[clap(aliases = &["vip"])]
-    COSMACVIP,
+    #[clap(aliases = &["og"])]
+    CLASSIC,
 
     #[clap(aliases = &["xo"])]
     XOCHIP,
@@ -33,7 +33,7 @@ impl KindOption {
         match self {
             KindOption::CHIP8 => RomKind::CHIP8,
             KindOption::SCHIP => RomKind::SCHIP,
-            KindOption::COSMACVIP => RomKind::COSMACVIP,
+            KindOption::CLASSIC => RomKind::CLASSIC,
             KindOption::XOCHIP => RomKind::XOCHIP,
         }
     }

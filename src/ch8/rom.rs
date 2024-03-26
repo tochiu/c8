@@ -15,7 +15,7 @@ pub struct RomConfig {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RomKind {
-    COSMACVIP,
+    CLASSIC,
     CHIP8,
     SCHIP,
     XOCHIP,
@@ -42,7 +42,7 @@ impl RomKind {
 
     pub fn default_cycles_per_frame(self) -> u32 {
         match self {
-            Self::COSMACVIP => 10,
+            Self::CLASSIC => 10,
             Self::CHIP8 => 10,
             Self::SCHIP => 30,
             Self::XOCHIP => 1000,
@@ -51,7 +51,7 @@ impl RomKind {
 
     pub fn default_rom_quirks(self) -> RomQuirks {
         match self {
-            Self::COSMACVIP => RomQuirks {
+            Self::CLASSIC => RomQuirks {
                 bit_shift_modifies_vx_in_place: false,
                 load_store_leaves_index_unchanged: false,
                 jump_with_offset_uses_vx: false,
@@ -91,7 +91,7 @@ impl Display for RomKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CHIP8 => write!(f, "CHIP8"),
-            Self::COSMACVIP => write!(f, "CHIP8 (COSMAC VIP)"),
+            Self::CLASSIC => write!(f, "CHIP8 (CLASSIC)"),
             Self::SCHIP => write!(f, "SCHIP"),
             Self::XOCHIP => write!(f, "X0-CHIP"),
         }
