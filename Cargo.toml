@@ -1,6 +1,6 @@
 [package]
 name = "c8"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["Tochi Ukegbu"]
 description = """
 🎮 CHIP-8 / S-CHIP / XO-CHIP tui toolkit featuring a virtual machine, debugger, and disassembler
