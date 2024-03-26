@@ -43,7 +43,7 @@
 C8 is a terminal user interface tooklit made to run, debug, and disassemble **CHIP-8**, **S-CHIP**, and **XO-CHIP** games. At its core you can: 
 * run a rom with `c8 run [ROM_PATH]`
     * add `--debug` to enable debug mode
-    * add `--kind` followed by `vip`, `chip8`, `schip`, or `xochip` to force other CHIP-8 variants if auto-select fails
+    * add `--kind` followed by `classic`, `chip8`, `schip`, or `xochip` to force other CHIP-8 variants if auto-select fails
     * add `--hz` followed by your target instructions per second if needed
 * disassemble a rom into a file with `c8 dasm [ROM_PATH] > [OUTPUT_FILE_PATH]`
 * check a rom for potential issues* with `c8 check [ROM_PATH]`
@@ -51,7 +51,7 @@ C8 is a terminal user interface tooklit made to run, debug, and disassemble **CH
 ## Features At A Glance
 | Feature                                            | C8
 |----------------------------------------------------|-
-| Full Chip-8 + VIP, SuperChip, and XO-Chip Support  | ✔
+| Full Chip-8 + Classic, S-CHIP, and XO-Chip Support | ✔
 | Full Sound Support                                 | ✔
 | Full 4-bit Color Support                           | ✔
 | `debug` Undo, Redo, and Step through Execution     | ✔
@@ -126,9 +126,12 @@ backspace, et cetera. This is due to a permission issue. To work around this:
 
 To run a CHIP-8 program, use the `c8 run` command followed by the path to the program. 
 - If you require the program runs at a specified frequency add the `--hz` flag followed by a target instructions per second (IPS) value
-- To specify a CHIP-8 variant, add a `--kind` flag followed by either `chip8`, `cosmacvip`, `schip`, or `xochip`
+- To specify a CHIP-8 variant, add a `--kind` flag followed by either `chip8`, `classic`, `schip`, or `xochip`
   - If `--kind` is not specified, c8 will make a best guess of the CHIP-8 variant
 - To load the program into the debugger, add the `--debug` flag
+
+> [!IMPORTANT]
+> The `classic` variant is not a full COSMAC VIP emulator but instead just the quirk settings from CHIP-8 on a VIP.
 
 For example:
 ```
@@ -362,7 +365,8 @@ will execute the next 50 instructions.
 > [!NOTE]
 > If you use `step` or `continue` with a past program state (reachable using `undo`), all future program states are cleared and execution will advance. If instead you would like to replay those future states, use `redo` instead.
 
-If you are stuck on an instruction because it is polling for a key event, use the `key` command to simulate key events. Type `key --help` for more information.
+> [!TIP]
+> If you are stuck on an instruction because it is polling for a key event, use the `key` command to simulate key events. Type `key --help` for more information.
 
 **Seek through execution history:**
 
